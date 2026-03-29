@@ -1,0 +1,206 @@
+import { useState, useEffect } from "react";
+import { Mic, Download, Loader2, CheckCircle2 } from "lucide-react";
+import { useSettingsStore } from "../../stores/settingsStore";
+import { useSubtitleStore } from "../../stores/subtitleStore";
+import {
+  listModels,
+  downloadModel,
+  transcribeAudio,
+} from "../../lib/tauri-commands";
+import type { WhisperModelInfo, TranscriptionProgress } from "../../types/subtitle";
+
+interface TranscriptionPanelProps {
+  audioPath: string | null;
+}
+
+export default function TranscriptionPanel({ audioPath }: TranscriptionPanelProps) {
+  const { whisperModel, setWhisperModel } = useSettingsStore();
+  const { setSubtitles } = useSubtitleStore();
+
+  const [models, setModels] = useState<WhisperModelInfo[]>([]);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [transcribing, setTranscribing] = useState(false);
+  const [progress, setProgress] = useState<TranscriptionProgress | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [language, setLanguage] = useState("auto");
+
+  useEffect(() => {
+    loadModels();
+  }, []);
+
+  const loadModels = async () => {
+    try {
+      const m = await listModels();
+      setModels(m);
+    } catch (e) {
+      console.error("Failed to list models:", e);
+    }
+  };
+
+  const selectedModel = models.find((m) => m.name === whisperModel);
+
+  const handleDownload = async () => {
+    setDownloading(true);
+    setDownloadProgress(0);
+    setError(null);
+    try {
+      await downloadModel(whisperModel, (p) => setDownloadProgress(p));
+      await loadModels();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  const handleTranscribe = async () => {
+    if (!audioPath) return;
+    setTranscribing(true);
+    setProgress(null);
+    setError(null);
+    try {
+      const subs = await transcribeAudio(
+        audioPath,
+        whisperModel,
+        language === "auto" ? null : language,
+        (p) => setProgress(p)
+      );
+      setSubtitles(subs);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setTranscribing(false);
+    }
+  };
+
+  return (
+    <div className="p-4 space-y-4">
+      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2">
+        <Mic size={16} />
+        Transcription
+      </h3>
+
+      {/* Model selector */}
+      <div className="space-y-2">
+        <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">
+          Whisper Model
+        </label>
+        <select
+          value={whisperModel}
+          onChange={(e) => setWhisperModel(e.target.value)}
+          className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1.5 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
+          disabled={transcribing}
+        >
+          {models.map((m) => (
+            <option key={m.name} value={m.name}>
+              {m.name} ({m.sizeMb} MB)
+              {m.downloaded ? " \u2713" : ""}
+            </option>
+          ))}
+        </select>
+
+        {selectedModel && !selectedModel.downloaded && (
+          <button
+            onClick={handleDownload}
+            disabled={downloading}
+            className="flex items-center gap-1.5 w-full justify-center rounded bg-gray-100 dark:bg-gray-700 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50 transition-colors"
+          >
+            {downloading ? (
+              <>
+                <Loader2 size={14} className="animate-spin" />
+                Downloading... {Math.round(downloadProgress * 100)}%
+              </>
+            ) : (
+              <>
+                <Download size={14} />
+                Download model ({selectedModel.sizeMb} MB)
+              </>
+            )}
+          </button>
+        )}
+      </div>
+
+      {/* Language */}
+      <div className="space-y-2">
+        <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">
+          Language
+        </label>
+        <select
+          value={language}
+          onChange={(e) => setLanguage(e.target.value)}
+          className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1.5 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
+          disabled={transcribing}
+        >
+          <option value="auto">Auto-detect</option>
+          <option value="en">English</option>
+          <option value="pl">Polish</option>
+          <option value="de">German</option>
+          <option value="fr">French</option>
+          <option value="es">Spanish</option>
+          <option value="it">Italian</option>
+          <option value="pt">Portuguese</option>
+          <option value="nl">Dutch</option>
+          <option value="ja">Japanese</option>
+          <option value="ko">Korean</option>
+          <option value="zh">Chinese</option>
+          <option value="ru">Russian</option>
+          <option value="uk">Ukrainian</option>
+        </select>
+      </div>
+
+      {/* Transcribe button */}
+      <button
+        onClick={handleTranscribe}
+        disabled={transcribing || !audioPath || (selectedModel && !selectedModel.downloaded)}
+        className="flex items-center gap-2 w-full justify-center rounded-lg bg-blue-500 hover:bg-blue-600 disabled:bg-blue-300 dark:disabled:bg-blue-800 px-4 py-2 text-sm font-medium text-white transition-colors"
+      >
+        {transcribing ? (
+          <>
+            <Loader2 size={16} className="animate-spin" />
+            Transcribing...
+          </>
+        ) : (
+          <>
+            <Mic size={16} />
+            Transcribe
+          </>
+        )}
+      </button>
+
+      {/* Progress */}
+      {progress && (
+        <div className="space-y-1">
+          <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+            {progress.stage === "done" ? (
+              <CheckCircle2 size={14} className="text-green-500" />
+            ) : (
+              <Loader2 size={14} className="animate-spin" />
+            )}
+            {progress.message}
+          </div>
+          <div className="h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+            <div
+              className="h-full bg-blue-500 transition-[width] duration-300"
+              style={{ width: `${progress.progress * 100}%` }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Status */}
+      {!audioPath && (
+        <p className="text-xs text-gray-400 dark:text-gray-500 text-center">
+          Open a media file to start transcription
+        </p>
+      )}
+
+      {/* Error */}
+      {error && (
+        <div className="rounded bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 px-3 py-2 text-xs text-red-600 dark:text-red-400">
+          {error}
+        </div>
+      )}
+    </div>
+  );
+}
