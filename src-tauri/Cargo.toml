@@ -16,7 +16,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
@@ -32,3 +32,4 @@ futures-util = "0.3"
 uuid = { version = "1", features = ["v4"] }
 thiserror = "2"
 regex = "1"
+whisper-rs = "0.13"
