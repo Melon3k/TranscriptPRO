@@ -58,6 +58,7 @@ pub fn parse_srt(content: &str) -> Result<Vec<Subtitle>, AppError> {
             end_time,
             text,
             words: Vec::new(),
+            speaker: None,
         });
     }
 
@@ -82,6 +83,9 @@ pub fn write_srt(subtitles: &[Subtitle]) -> String {
             format_timestamp(sub.start_time),
             format_timestamp(sub.end_time)
         ));
+        if let Some(ref speaker) = sub.speaker {
+            output.push_str(&format!("[{}] ", speaker));
+        }
         output.push_str(&sub.text);
         output.push('\n');
     }

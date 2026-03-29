@@ -63,11 +63,14 @@ export default function SubtitleRow({
       }`}
     >
       <div className="flex gap-2">
-        {/* Index */}
-        <div className="flex flex-col items-center justify-center w-8 shrink-0">
+        {/* Index + Speaker */}
+        <div className="flex flex-col items-center justify-center w-12 shrink-0 gap-0.5">
           <span className="text-xs font-mono text-gray-400 dark:text-gray-500">
             {subtitle.index}
           </span>
+          {subtitle.speaker && (
+            <SpeakerBadge speaker={subtitle.speaker} />
+          )}
         </div>
 
         {/* Timestamps */}
@@ -241,5 +244,27 @@ function ActionButton({
     >
       {icon}
     </button>
+  );
+}
+
+const SPEAKER_COLORS = [
+  "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
+  "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
+  "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300",
+  "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300",
+  "bg-pink-100 text-pink-700 dark:bg-pink-900/40 dark:text-pink-300",
+  "bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300",
+];
+
+function SpeakerBadge({ speaker }: { speaker: string }) {
+  const num = parseInt(speaker.replace(/\D/g, ""), 10) || 1;
+  const colorClass = SPEAKER_COLORS[(num - 1) % SPEAKER_COLORS.length];
+  return (
+    <span
+      className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap ${colorClass}`}
+      title={speaker}
+    >
+      S{num}
+    </span>
   );
 }

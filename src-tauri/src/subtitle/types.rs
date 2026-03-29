@@ -19,6 +19,8 @@ pub struct Subtitle {
     pub end_time: u64,     // milliseconds
     pub text: String,
     pub words: Vec<Word>,  // word-level timestamps (empty after translation)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub speaker: Option<String>, // e.g. "Speaker 1", "Speaker 2"
 }
 
 /// Full project state

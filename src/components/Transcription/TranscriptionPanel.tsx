@@ -24,6 +24,7 @@ export default function TranscriptionPanel({ audioPath }: TranscriptionPanelProp
   const [progress, setProgress] = useState<TranscriptionProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [language, setLanguage] = useState("auto");
+  const [detectSpeakers, setDetectSpeakers] = useState(false);
 
   useEffect(() => {
     loadModels();
@@ -64,6 +65,7 @@ export default function TranscriptionPanel({ audioPath }: TranscriptionPanelProp
         audioPath,
         whisperModel,
         language === "auto" ? null : language,
+        detectSpeakers,
         (p) => setProgress(p)
       );
       setSubtitles(subs);
@@ -148,6 +150,20 @@ export default function TranscriptionPanel({ audioPath }: TranscriptionPanelProp
           <option value="uk">Ukrainian</option>
         </select>
       </div>
+
+      {/* Speaker detection toggle */}
+      <label className="flex items-center gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={detectSpeakers}
+          onChange={(e) => setDetectSpeakers(e.target.checked)}
+          disabled={transcribing}
+          className="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-500 focus:ring-blue-400"
+        />
+        <span className="text-xs font-medium text-gray-600 dark:text-gray-400">
+          Detect speakers
+        </span>
+      </label>
 
       {/* Transcribe button */}
       <button

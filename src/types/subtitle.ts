@@ -11,6 +11,7 @@ export interface Subtitle {
   endTime: number;    // milliseconds
   text: string;
   words: Word[];      // word-level timestamps (empty after translation)
+  speaker?: string;   // e.g. "Speaker 1" (from diarization)
 }
 
 export interface Project {

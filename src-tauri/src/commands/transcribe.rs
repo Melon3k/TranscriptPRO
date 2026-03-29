@@ -120,6 +120,7 @@ pub async fn transcribe_audio(
     audio_path: String,
     model_name: String,
     language: Option<String>,
+    detect_speakers: Option<bool>,
     on_progress: Channel<TranscriptionProgress>,
 ) -> Result<Vec<crate::subtitle::types::Subtitle>, AppError> {
     let models_dir = app
@@ -143,11 +144,13 @@ pub async fn transcribe_audio(
 
     // Run CPU-heavy whisper work on a blocking thread
     let lang = language.clone();
+    let diarize = detect_speakers.unwrap_or(false);
     tokio::task::spawn_blocking(move || {
         crate::whisper::model::transcribe(
             &model_path,
             &audio,
             lang.as_deref(),
+            diarize,
             &on_progress,
         )
     })

@@ -9,6 +9,7 @@ pub fn transcribe(
     model_path: &Path,
     audio_path: &Path,
     language: Option<&str>,
+    enable_diarization: bool,
     on_progress: &Channel<TranscriptionProgress>,
 ) -> Result<Vec<Subtitle>, AppError> {
     // ── Load model ──────────────────────────────────────────────────────
@@ -156,6 +157,7 @@ pub fn transcribe(
             end_time: end_ms,
             text,
             words,
+            speaker: None,
         });
 
         // Update progress proportionally
@@ -165,6 +167,16 @@ pub fn transcribe(
             progress,
             message: format!("Segment {}/{}", i + 1, num_segments),
         });
+    }
+
+    // ── Speaker detection (optional) ──────────────────────────────────────
+    if enable_diarization {
+        let _ = on_progress.send(TranscriptionProgress {
+            stage: "transcribing".into(),
+            progress: 0.95,
+            message: "Detecting speakers…".into(),
+        });
+        detect_speakers(&mut subtitles, &audio_data);
     }
 
     let _ = on_progress.send(TranscriptionProgress {
@@ -227,4 +239,158 @@ fn read_wav_pcm_f32(path: &Path) -> Result<Vec<f32>, AppError> {
     Err(AppError::TranscriptionFailed(
         "WAV file missing data chunk".into(),
     ))
+}
+
+// ── Speaker detection ───────────────────────────────────────────────────
+
+const SAMPLE_RATE: usize = 16_000; // 16kHz WAV from FFmpeg
+
+/// Voice profile for a segment — used to compare speakers
+#[derive(Clone)]
+struct VoiceProfile {
+    rms_energy: f32,
+    zero_crossing_rate: f32,
+    spectral_centroid: f32,
+}
+
+/// Compute a voice profile for a slice of audio samples.
+fn compute_voice_profile(samples: &[f32]) -> VoiceProfile {
+    if samples.is_empty() {
+        return VoiceProfile {
+            rms_energy: 0.0,
+            zero_crossing_rate: 0.0,
+            spectral_centroid: 0.0,
+        };
+    }
+
+    // RMS energy
+    let rms_energy = (samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32).sqrt();
+
+    // Zero-crossing rate — correlates with pitch
+    let zero_crossings = samples
+        .windows(2)
+        .filter(|w| (w[0] >= 0.0) != (w[1] >= 0.0))
+        .count();
+    let zero_crossing_rate = zero_crossings as f32 / samples.len() as f32;
+
+    // Spectral centroid approximation via autocorrelation dominant period
+    let frame_len = samples.len().min(1600); // 100ms max frame
+    let frame = &samples[..frame_len];
+    let mut best_lag = 1usize;
+    let mut best_corr = 0.0f32;
+    let min_lag = 30; // ~533 Hz max
+    let max_lag = frame_len.min(500); // ~32 Hz min
+    for lag in min_lag..max_lag {
+        let mut corr = 0.0f32;
+        for j in 0..(frame_len - lag) {
+            corr += frame[j] * frame[j + lag];
+        }
+        if corr > best_corr {
+            best_corr = corr;
+            best_lag = lag;
+        }
+    }
+    let spectral_centroid = SAMPLE_RATE as f32 / best_lag as f32;
+
+    VoiceProfile {
+        rms_energy,
+        zero_crossing_rate,
+        spectral_centroid,
+    }
+}
+
+/// Compare two voice profiles. Returns a dissimilarity score (0 = identical).
+fn profile_distance(a: &VoiceProfile, b: &VoiceProfile) -> f32 {
+    // Normalize each feature and combine
+    let energy_diff = ((a.rms_energy - b.rms_energy) / (a.rms_energy + b.rms_energy + 1e-8)).abs();
+    let zcr_diff =
+        ((a.zero_crossing_rate - b.zero_crossing_rate) / (a.zero_crossing_rate + b.zero_crossing_rate + 1e-8)).abs();
+    let pitch_diff = ((a.spectral_centroid - b.spectral_centroid)
+        / (a.spectral_centroid + b.spectral_centroid + 1e-8))
+        .abs();
+
+    // Weighted combination
+    energy_diff * 0.2 + zcr_diff * 0.3 + pitch_diff * 0.5
+}
+
+/// Assign speaker labels to subtitles based on audio voice profile analysis.
+/// Uses gap detection + voice profile comparison to cluster speakers.
+pub fn detect_speakers(subtitles: &mut [Subtitle], audio_data: &[f32]) {
+    if subtitles.is_empty() {
+        return;
+    }
+
+    let total_samples = audio_data.len();
+
+    // Compute voice profile for each segment
+    let profiles: Vec<VoiceProfile> = subtitles
+        .iter()
+        .map(|sub| {
+            let start_sample =
+                ((sub.start_time as usize) * SAMPLE_RATE / 1000).min(total_samples);
+            let end_sample =
+                ((sub.end_time as usize) * SAMPLE_RATE / 1000).min(total_samples);
+            if start_sample >= end_sample || end_sample - start_sample < 160 {
+                // Segment too short for analysis
+                VoiceProfile {
+                    rms_energy: 0.0,
+                    zero_crossing_rate: 0.0,
+                    spectral_centroid: 0.0,
+                }
+            } else {
+                compute_voice_profile(&audio_data[start_sample..end_sample])
+            }
+        })
+        .collect();
+
+    // Cluster speakers using sequential comparison
+    // Start with speaker 1, switch when profile changes significantly
+    // or there's a long pause between segments
+    let change_threshold = 0.15; // profile distance threshold for speaker change
+    let pause_threshold_ms: u64 = 2000; // 2 second gap suggests speaker change
+
+    // Track known speaker profiles (average profile per speaker)
+    let mut speaker_profiles: Vec<VoiceProfile> = vec![profiles[0].clone()];
+    let mut assignments: Vec<usize> = vec![0]; // speaker index for each subtitle
+
+    for i in 1..subtitles.len() {
+        let gap = subtitles[i]
+            .start_time
+            .saturating_sub(subtitles[i - 1].end_time);
+        let dist = profile_distance(&profiles[i], &speaker_profiles[assignments[i - 1]]);
+
+        let has_pause = gap >= pause_threshold_ms;
+        let voice_changed = dist > change_threshold;
+
+        if has_pause || voice_changed {
+            // Check if this profile matches any known speaker
+            let mut best_speaker = None;
+            let mut best_dist = f32::MAX;
+            for (si, sp) in speaker_profiles.iter().enumerate() {
+                let d = profile_distance(&profiles[i], sp);
+                if d < best_dist {
+                    best_dist = d;
+                    best_speaker = Some(si);
+                }
+            }
+
+            if best_dist < change_threshold {
+                // Matches an existing speaker
+                assignments.push(best_speaker.unwrap());
+            } else {
+                // New speaker
+                let new_idx = speaker_profiles.len();
+                speaker_profiles.push(profiles[i].clone());
+                assignments.push(new_idx);
+            }
+        } else {
+            // Same speaker as previous
+            assignments.push(assignments[i - 1]);
+        }
+    }
+
+    // Assign labels
+    for (sub, &speaker_idx) in subtitles.iter_mut().zip(assignments.iter()) {
+        sub.speaker = Some(format!("Speaker {}", speaker_idx + 1));
+    }
 }

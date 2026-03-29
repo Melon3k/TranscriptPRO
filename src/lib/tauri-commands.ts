@@ -104,6 +104,7 @@ export async function transcribeAudio(
   audioPath: string,
   modelName: string,
   language: string | null,
+  detectSpeakers: boolean,
   onProgress: (progress: TranscriptionProgress) => void
 ): Promise<Subtitle[]> {
   const channel = new Channel<TranscriptionProgress>();
@@ -112,6 +113,7 @@ export async function transcribeAudio(
     audioPath,
     modelName,
     language,
+    detectSpeakers,
     onProgress: channel,
   });
 }
