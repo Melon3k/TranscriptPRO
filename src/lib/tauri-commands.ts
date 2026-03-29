@@ -63,6 +63,13 @@ export async function exportSrt(
   return invoke("export_srt", { path, subtitles });
 }
 
+export async function exportWordSrt(
+  path: string,
+  subtitles: Subtitle[]
+): Promise<void> {
+  return invoke("export_word_srt", { path, subtitles });
+}
+
 export async function exportTxt(
   path: string,
   subtitles: Subtitle[]

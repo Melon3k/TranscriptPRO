@@ -10,6 +10,16 @@
     "shell:allow-spawn",
     "shell:allow-kill",
     "shell:allow-stdin-write",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "ffmpeg",
+          "cmd": "ffmpeg",
+          "args": true
+        }
+      ]
+    },
     "dialog:allow-open",
     "dialog:allow-save",
     "fs:default",

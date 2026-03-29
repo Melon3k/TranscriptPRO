@@ -6,6 +6,7 @@ import { formatTimestamp, parseTimestamp } from "../../lib/time-format";
 interface SubtitleRowProps {
   subtitle: Subtitle;
   isActive: boolean;
+  activeWordIndex: number | null;
   onUpdate: (id: string, changes: Partial<Subtitle>) => void;
   onSplit: (id: string) => void;
   onMergeUp: (id: string) => void;
@@ -19,6 +20,7 @@ interface SubtitleRowProps {
 export default function SubtitleRow({
   subtitle,
   isActive,
+  activeWordIndex,
   onUpdate,
   onSplit,
   onMergeUp,
@@ -28,6 +30,7 @@ export default function SubtitleRow({
   isFirst,
   isLast,
 }: SubtitleRowProps) {
+  const [editing, setEditing] = useState(false);
   const [editingText, setEditingText] = useState(subtitle.text);
   const textRef = useRef<HTMLTextAreaElement>(null);
 
@@ -39,6 +42,7 @@ export default function SubtitleRow({
     if (editingText !== subtitle.text) {
       onUpdate(subtitle.id, { text: editingText });
     }
+    setEditing(false);
   };
 
   const handleTimeChange = (field: "startTime" | "endTime", value: string) => {
@@ -48,70 +52,116 @@ export default function SubtitleRow({
     }
   };
 
+  const hasWords = subtitle.words && subtitle.words.length > 0;
+
   return (
     <div
-      className={`group flex gap-2 rounded-lg border px-3 py-2 transition-colors ${
+      className={`group rounded-lg border px-3 py-2 transition-colors ${
         isActive
           ? "border-blue-400 dark:border-blue-500 bg-blue-50 dark:bg-blue-900/20"
           : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"
       }`}
     >
-      {/* Index */}
-      <div className="flex flex-col items-center justify-center w-8 shrink-0">
-        <span className="text-xs font-mono text-gray-400 dark:text-gray-500">
-          {subtitle.index}
-        </span>
-      </div>
+      <div className="flex gap-2">
+        {/* Index */}
+        <div className="flex flex-col items-center justify-center w-8 shrink-0">
+          <span className="text-xs font-mono text-gray-400 dark:text-gray-500">
+            {subtitle.index}
+          </span>
+        </div>
 
-      {/* Timestamps */}
-      <div className="flex flex-col gap-1 shrink-0">
-        <TimestampInput
-          value={formatTimestamp(subtitle.startTime)}
-          onChange={(v) => handleTimeChange("startTime", v)}
-          onClick={() => onSeek(subtitle.startTime)}
-        />
-        <TimestampInput
-          value={formatTimestamp(subtitle.endTime)}
-          onChange={(v) => handleTimeChange("endTime", v)}
-          onClick={() => onSeek(subtitle.endTime)}
-        />
-      </div>
+        {/* Timestamps */}
+        <div className="flex flex-col gap-1 shrink-0">
+          <TimestampInput
+            value={formatTimestamp(subtitle.startTime)}
+            onChange={(v) => handleTimeChange("startTime", v)}
+            onClick={() => onSeek(subtitle.startTime)}
+          />
+          <TimestampInput
+            value={formatTimestamp(subtitle.endTime)}
+            onChange={(v) => handleTimeChange("endTime", v)}
+            onClick={() => onSeek(subtitle.endTime)}
+          />
+        </div>
 
-      {/* Text */}
-      <textarea
-        ref={textRef}
-        className="flex-1 resize-none rounded border-0 bg-transparent px-2 py-1 text-sm leading-relaxed text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400 dark:focus:ring-blue-500 min-h-[3rem]"
-        value={editingText}
-        onChange={(e) => setEditingText(e.target.value)}
-        onBlur={handleTextBlur}
-        rows={2}
-      />
+        {/* Text / Words */}
+        <div className="flex-1 min-w-0">
+          {editing ? (
+            <textarea
+              ref={textRef}
+              className="w-full resize-none rounded border border-blue-300 dark:border-blue-600 bg-white dark:bg-gray-800 px-2 py-1 text-sm leading-relaxed text-gray-800 dark:text-gray-200 focus:outline-none min-h-[3rem]"
+              value={editingText}
+              onChange={(e) => setEditingText(e.target.value)}
+              onBlur={handleTextBlur}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  setEditingText(subtitle.text);
+                  setEditing(false);
+                }
+              }}
+              rows={2}
+              autoFocus
+            />
+          ) : (
+            <div
+              className="px-2 py-1 cursor-text min-h-[2rem]"
+              onDoubleClick={() => setEditing(true)}
+              title="Double-click to edit text"
+            >
+              {/* Sentence text */}
+              <p className="text-sm leading-relaxed text-gray-800 dark:text-gray-200">
+                {subtitle.text}
+              </p>
 
-      {/* Actions */}
-      <div className="flex flex-col gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-        <ActionButton
-          icon={<Scissors size={13} />}
-          title="Split"
-          onClick={() => onSplit(subtitle.id)}
-        />
-        <ActionButton
-          icon={<ChevronUp size={13} />}
-          title="Merge up"
-          onClick={() => onMergeUp(subtitle.id)}
-          disabled={isFirst}
-        />
-        <ActionButton
-          icon={<ChevronDown size={13} />}
-          title="Merge down"
-          onClick={() => onMergeDown(subtitle.id)}
-          disabled={isLast}
-        />
-        <ActionButton
-          icon={<Trash2 size={13} />}
-          title="Delete"
-          onClick={() => onDelete(subtitle.id)}
-          danger
-        />
+              {/* Clickable words */}
+              {hasWords && (
+                <div className="flex flex-wrap gap-x-1 gap-y-0.5 mt-1.5">
+                  {subtitle.words.map((word, wi) => (
+                    <button
+                      key={wi}
+                      onClick={() => onSeek(word.startTime)}
+                      className={`text-xs px-1 py-0.5 rounded transition-colors ${
+                        activeWordIndex === wi
+                          ? "bg-blue-200 dark:bg-blue-700 text-blue-800 dark:text-blue-100 font-medium"
+                          : "text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-200"
+                      }`}
+                      title={`${formatTimestamp(word.startTime)} \u2192 ${formatTimestamp(word.endTime)}`}
+                    >
+                      {word.text}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div className="flex flex-col gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+          <ActionButton
+            icon={<Scissors size={13} />}
+            title="Split"
+            onClick={() => onSplit(subtitle.id)}
+          />
+          <ActionButton
+            icon={<ChevronUp size={13} />}
+            title="Merge up"
+            onClick={() => onMergeUp(subtitle.id)}
+            disabled={isFirst}
+          />
+          <ActionButton
+            icon={<ChevronDown size={13} />}
+            title="Merge down"
+            onClick={() => onMergeDown(subtitle.id)}
+            disabled={isLast}
+          />
+          <ActionButton
+            icon={<Trash2 size={13} />}
+            title="Delete"
+            onClick={() => onDelete(subtitle.id)}
+            danger
+          />
+        </div>
       </div>
     </div>
   );

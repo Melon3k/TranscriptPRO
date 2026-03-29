@@ -1,5 +1,5 @@
 use crate::subtitle::{
-    srt::{parse_srt, write_srt, write_txt},
+    srt::{parse_srt, write_srt, write_word_srt, write_txt},
     types::{AppError, Subtitle},
 };
 
@@ -13,6 +13,13 @@ pub async fn import_srt(path: String) -> Result<Vec<Subtitle>, AppError> {
 #[tauri::command]
 pub async fn export_srt(path: String, subtitles: Vec<Subtitle>) -> Result<(), AppError> {
     let content = write_srt(&subtitles);
+    std::fs::write(&path, content)
+        .map_err(|e| AppError::FileError(e.to_string()))
+}
+
+#[tauri::command]
+pub async fn export_word_srt(path: String, subtitles: Vec<Subtitle>) -> Result<(), AppError> {
+    let content = write_word_srt(&subtitles);
     std::fs::write(&path, content)
         .map_err(|e| AppError::FileError(e.to_string()))
 }

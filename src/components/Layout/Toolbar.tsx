@@ -3,6 +3,7 @@ import {
   FileAudio,
   Download,
   FileText,
+  AlignLeft,
   Undo2,
   Redo2,
   Settings,
@@ -18,6 +19,7 @@ import {
   saveTxtFileDialog,
   importSrt,
   exportSrt,
+  exportWordSrt,
   exportTxt,
   extractAudio,
 } from "../../lib/tauri-commands";
@@ -26,9 +28,10 @@ import { usePlayerStore } from "../../stores/playerStore";
 interface ToolbarProps {
   onOpenSettings: () => void;
   onStartTranscription: (audioPath: string) => void;
+  onError: (message: string) => void;
 }
 
-export default function Toolbar({ onOpenSettings, onStartTranscription }: ToolbarProps) {
+export default function Toolbar({ onOpenSettings, onStartTranscription, onError }: ToolbarProps) {
   const { subtitles, setSubtitles, undo, redo, canUndo, canRedo } = useSubtitleStore();
   const { darkMode, toggleDarkMode } = useSettingsStore();
   const { setFilePath } = usePlayerStore();
@@ -42,7 +45,7 @@ export default function Toolbar({ onOpenSettings, onStartTranscription }: Toolba
       const audioPath = await extractAudio(path);
       onStartTranscription(audioPath);
     } catch (e) {
-      console.error("Audio extraction failed:", e);
+      onError(`Audio extraction failed: ${e}. Make sure FFmpeg is installed.`);
     }
   };
 
@@ -68,6 +71,17 @@ export default function Toolbar({ onOpenSettings, onStartTranscription }: Toolba
     }
   };
 
+  const handleExportWordSrt = async () => {
+    if (subtitles.length === 0) return;
+    const path = await saveSrtFileDialog("subtitles-words.srt");
+    if (!path) return;
+    try {
+      await exportWordSrt(path, subtitles);
+    } catch (e) {
+      console.error("Word SRT export failed:", e);
+    }
+  };
+
   const handleExportTxt = async () => {
     if (subtitles.length === 0) return;
     const path = await saveTxtFileDialog();
@@ -89,6 +103,12 @@ export default function Toolbar({ onOpenSettings, onStartTranscription }: Toolba
         icon={<Download size={16} />}
         label="Export SRT"
         onClick={handleExportSrt}
+        disabled={subtitles.length === 0}
+      />
+      <ToolbarButton
+        icon={<AlignLeft size={16} />}
+        label="Word SRT"
+        onClick={handleExportWordSrt}
         disabled={subtitles.length === 0}
       />
       <ToolbarButton

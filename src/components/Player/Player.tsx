@@ -72,7 +72,7 @@ export default function Player() {
 
   return (
     <div className="border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
-      {/* Hidden video/audio element */}
+      {/* Video/audio element */}
       {mediaSrc && (
         <video
           ref={mediaRef}
@@ -80,7 +80,7 @@ export default function Player() {
           onTimeUpdate={handleTimeUpdate}
           onLoadedMetadata={handleLoadedMetadata}
           onEnded={() => setIsPlaying(false)}
-          className="hidden"
+          className="w-full max-h-[300px] bg-black object-contain"
           preload="metadata"
         />
       )}

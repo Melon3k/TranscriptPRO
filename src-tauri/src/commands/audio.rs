@@ -12,8 +12,7 @@ pub async fn extract_audio(app: AppHandle, input_path: String) -> Result<String,
 
     let output = app
         .shell()
-        .sidecar("ffmpeg")
-        .map_err(|e| AppError::AudioExtractionFailed(e.to_string()))?
+        .command("ffmpeg")
         .args([
             "-i",
             &input_path,
@@ -28,7 +27,11 @@ pub async fn extract_audio(app: AppHandle, input_path: String) -> Result<String,
         ])
         .output()
         .await
-        .map_err(|e| AppError::AudioExtractionFailed(e.to_string()))?;
+        .map_err(|e: tauri_plugin_shell::Error| {
+            AppError::AudioExtractionFailed(format!(
+                "FFmpeg not found. Install it via 'brew install ffmpeg' or add it to PATH. ({})", e
+            ))
+        })?;
 
     if !output.status.success() {
         return Err(AppError::AudioExtractionFailed(

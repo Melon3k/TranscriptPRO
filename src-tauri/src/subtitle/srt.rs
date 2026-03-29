@@ -89,6 +89,47 @@ pub fn write_srt(subtitles: &[Subtitle]) -> String {
     output
 }
 
+/// Write subtitles as word-level SRT (each word = separate subtitle entry)
+pub fn write_word_srt(subtitles: &[Subtitle]) -> String {
+    let mut output = String::new();
+    let mut index = 1;
+
+    for sub in subtitles {
+        if sub.words.is_empty() {
+            // No word data — write entire segment as one entry
+            if index > 1 {
+                output.push('\n');
+            }
+            output.push_str(&format!("{}\n", index));
+            output.push_str(&format!(
+                "{} --> {}\n",
+                format_timestamp(sub.start_time),
+                format_timestamp(sub.end_time)
+            ));
+            output.push_str(&sub.text);
+            output.push('\n');
+            index += 1;
+        } else {
+            for word in &sub.words {
+                if index > 1 {
+                    output.push('\n');
+                }
+                output.push_str(&format!("{}\n", index));
+                output.push_str(&format!(
+                    "{} --> {}\n",
+                    format_timestamp(word.start_time),
+                    format_timestamp(word.end_time)
+                ));
+                output.push_str(&word.text);
+                output.push('\n');
+                index += 1;
+            }
+        }
+    }
+
+    output
+}
+
 /// Write subtitles as plain text (no timestamps, one segment per line)
 pub fn write_txt(subtitles: &[Subtitle]) -> String {
     subtitles

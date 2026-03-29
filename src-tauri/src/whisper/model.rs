@@ -48,7 +48,7 @@ pub fn transcribe(
     params.set_print_realtime(false);
     params.set_print_timestamps(false);
     params.set_token_timestamps(true);
-    params.set_max_len(1); // force segment splitting per sentence
+    // Do NOT set max_len — let Whisper decide sentence boundaries naturally
 
     // ── Run transcription ───────────────────────────────────────────────
     let _ = on_progress.send(TranscriptionProgress {
@@ -98,27 +98,54 @@ pub fn transcribe(
         let start_ms = (start_ts as u64) * 10;
         let end_ms = (end_ts as u64) * 10;
 
-        // Extract word-level timestamps
+        // Extract word-level timestamps by merging BPE sub-tokens into words.
+        // Whisper BPE convention: tokens starting with a space begin a new word,
+        // tokens without a leading space are continuations of the previous word.
         let num_tokens = state.full_n_tokens(i).map_err(|e| {
             AppError::TranscriptionFailed(format!("Failed to get token count: {}", e))
         })?;
 
-        let mut words = Vec::new();
+        let mut raw_tokens: Vec<(String, u64, u64)> = Vec::new();
         for t in 0..num_tokens {
             let token_text = state.full_get_token_text(i, t).unwrap_or_default();
             let token_data = state.full_get_token_data(i, t);
 
-            let token_text = token_text.trim().to_string();
-            if token_text.is_empty() || token_text.starts_with('[') {
+            // Skip empty, special tokens like [_BEG_], [_SOT_], etc.
+            if token_text.is_empty()
+                || token_text.starts_with('[')
+                || token_text.starts_with("<|")
+            {
                 continue;
             }
 
             if let Ok(data) = token_data {
+                raw_tokens.push((
+                    token_text,
+                    (data.t0 as u64) * 10,
+                    (data.t1 as u64) * 10,
+                ));
+            }
+        }
+
+        // Merge sub-tokens into full words
+        let mut words: Vec<Word> = Vec::new();
+        for (token_text, t0, t1) in &raw_tokens {
+            let starts_new_word = token_text.starts_with(' ') || words.is_empty();
+            let clean = token_text.trim().to_string();
+            if clean.is_empty() {
+                continue;
+            }
+
+            if starts_new_word {
                 words.push(Word {
-                    text: token_text,
-                    start_time: (data.t0 as u64) * 10,
-                    end_time: (data.t1 as u64) * 10,
+                    text: clean,
+                    start_time: *t0,
+                    end_time: *t1,
                 });
+            } else if let Some(last) = words.last_mut() {
+                // Continuation of previous word — append text, extend end time
+                last.text.push_str(&clean);
+                last.end_time = *t1;
             }
         }
 

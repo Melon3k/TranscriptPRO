@@ -18,9 +18,19 @@ export default function SubtitleEditor() {
   const activeRef = useRef<HTMLDivElement>(null);
 
   // Find active subtitle based on current playback time
-  const activeId = subtitles.find(
+  const activeSub = subtitles.find(
     (s) => currentTimeMs >= s.startTime && currentTimeMs < s.endTime
-  )?.id;
+  );
+  const activeId = activeSub?.id;
+
+  // Find active word within active subtitle
+  let activeWordIndex: number | null = null;
+  if (activeSub && activeSub.words.length > 0) {
+    const wi = activeSub.words.findIndex(
+      (w) => currentTimeMs >= w.startTime && currentTimeMs < w.endTime
+    );
+    if (wi !== -1) activeWordIndex = wi;
+  }
 
   // Auto-scroll to active subtitle
   useEffect(() => {
@@ -55,6 +65,7 @@ export default function SubtitleEditor() {
           <SubtitleRow
             subtitle={sub}
             isActive={sub.id === activeId}
+            activeWordIndex={sub.id === activeId ? activeWordIndex : null}
             onUpdate={updateSubtitle}
             onSplit={splitSegment}
             onMergeUp={mergeUp}

@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 /// Word-level timestamp data from Whisper transcription
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Word {
     pub text: String,
     pub start_time: u64, // milliseconds
@@ -10,6 +11,7 @@ pub struct Word {
 
 /// A single subtitle segment
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Subtitle {
     pub id: String,        // UUID
     pub index: usize,      // 1-based sequential number
@@ -21,6 +23,7 @@ pub struct Subtitle {
 
 /// Full project state
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Project {
     pub file_path: String,
     pub subtitles: Vec<Subtitle>,
@@ -38,6 +41,7 @@ pub struct TranscriptionProgress {
 
 /// Information about an available Whisper model
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WhisperModelInfo {
     pub name: String,          // e.g. "tiny", "small", "large-v3"
     pub size_mb: u64,          // approximate size in MB

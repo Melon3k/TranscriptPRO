@@ -15,6 +15,7 @@ pub fn run() {
             // File I/O
             commands::file_io::import_srt,
             commands::file_io::export_srt,
+            commands::file_io::export_word_srt,
             commands::file_io::export_txt,
             // Audio extraction
             commands::audio::extract_audio,

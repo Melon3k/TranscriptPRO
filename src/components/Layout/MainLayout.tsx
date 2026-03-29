@@ -5,7 +5,7 @@ import SubtitleEditor from "../Editor/SubtitleEditor";
 import TranscriptionPanel from "../Transcription/TranscriptionPanel";
 import TranslationPanel from "../Translation/TranslationPanel";
 import SettingsModal from "../Settings/SettingsModal";
-import { Mic, Languages } from "lucide-react";
+import { Mic, Languages, X } from "lucide-react";
 
 type SidePanel = "transcription" | "translation";
 
@@ -13,6 +13,7 @@ export default function MainLayout() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [audioPath, setAudioPath] = useState<string | null>(null);
   const [activePanel, setActivePanel] = useState<SidePanel>("transcription");
+  const [error, setError] = useState<string | null>(null);
 
   return (
     <div className="flex h-screen flex-col bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
@@ -22,8 +23,20 @@ export default function MainLayout() {
         onStartTranscription={(path) => {
           setAudioPath(path);
           setActivePanel("transcription");
+          setError(null);
         }}
+        onError={(msg) => setError(msg)}
       />
+
+      {/* Error banner */}
+      {error && (
+        <div className="flex items-center gap-2 bg-red-50 dark:bg-red-900/30 border-b border-red-200 dark:border-red-800 px-4 py-2 text-xs text-red-700 dark:text-red-300">
+          <span className="flex-1">{error}</span>
+          <button onClick={() => setError(null)} className="text-red-400 hover:text-red-600">
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
       {/* Main content area */}
       <div className="flex flex-1 overflow-hidden">
