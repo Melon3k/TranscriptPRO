@@ -8,6 +8,10 @@ interface SubtitleState {
   past: Subtitle[][];
   future: Subtitle[][];
 
+  // Comparison mode (original vs translated)
+  originalSubtitles: Subtitle[] | null;
+  comparisonMode: boolean;
+
   // Actions
   setSubtitles: (subtitles: Subtitle[]) => void;
   updateSubtitle: (id: string, changes: Partial<Subtitle>) => void;
@@ -19,6 +23,11 @@ interface SubtitleState {
   redo: () => void;
   canUndo: () => boolean;
   canRedo: () => boolean;
+
+  // Comparison actions
+  setOriginalSubtitles: (subs: Subtitle[]) => void;
+  clearOriginalSubtitles: () => void;
+  setComparisonMode: (on: boolean) => void;
 }
 
 const HISTORY_LIMIT = 50;
@@ -35,6 +44,8 @@ export const useSubtitleStore = create<SubtitleState>((set, get) => ({
   subtitles: [],
   past: [],
   future: [],
+  originalSubtitles: null,
+  comparisonMode: false,
 
   setSubtitles: (subtitles) => {
     set({
@@ -110,4 +121,10 @@ export const useSubtitleStore = create<SubtitleState>((set, get) => ({
 
   canUndo: () => get().past.length > 0,
   canRedo: () => get().future.length > 0,
+
+  // Comparison
+  setOriginalSubtitles: (subs) => set({ originalSubtitles: subs }),
+  clearOriginalSubtitles: () =>
+    set({ originalSubtitles: null, comparisonMode: false }),
+  setComparisonMode: (on) => set({ comparisonMode: on }),
 }));

@@ -1,7 +1,7 @@
 use crate::subtitle::types::{AppError, Subtitle};
 use crate::translation;
 
-/// Translate subtitle texts using DeepL or Google Translate.
+/// Translate subtitle texts using Gemini or Claude AI.
 /// Preserves timestamps, clears word-level data (invalid after translation).
 #[tauri::command]
 pub async fn translate_subtitles(
@@ -25,15 +25,15 @@ pub async fn translate_subtitles(
     let src = source_lang.as_deref();
 
     let translated_texts = match provider.as_str() {
-        "deepl" => {
-            translation::deepl::translate(&texts, &target_lang, src, &api_key).await?
+        "gemini" => {
+            translation::gemini::translate(&texts, &target_lang, src, &api_key).await?
         }
-        "google" => {
-            translation::google::translate(&texts, &target_lang, src, &api_key).await?
+        "claude" => {
+            translation::claude::translate(&texts, &target_lang, src, &api_key).await?
         }
         other => {
             return Err(AppError::TranslationApiError(format!(
-                "Unknown translation provider: '{}'. Supported: deepl, google",
+                "Unknown translation provider: '{}'. Supported: gemini, claude",
                 other
             )));
         }

@@ -5,14 +5,14 @@ import { TranslationProvider } from "../types/subtitle";
 interface SettingsState {
   whisperModel: string;
   translationProvider: TranslationProvider;
-  deeplApiKey: string;
-  googleApiKey: string;
+  geminiApiKey: string;
+  claudeApiKey: string;
   darkMode: boolean;
 
   setWhisperModel: (model: string) => void;
   setTranslationProvider: (provider: TranslationProvider) => void;
-  setDeeplApiKey: (key: string) => void;
-  setGoogleApiKey: (key: string) => void;
+  setGeminiApiKey: (key: string) => void;
+  setClaudeApiKey: (key: string) => void;
   toggleDarkMode: () => void;
 }
 
@@ -20,16 +20,16 @@ export const useSettingsStore = create<SettingsState>()(
   persist(
     (set) => ({
       whisperModel: "small",
-      translationProvider: "deepl",
-      deeplApiKey: "",
-      googleApiKey: "",
+      translationProvider: "gemini",
+      geminiApiKey: "",
+      claudeApiKey: "",
       darkMode: false,
 
       setWhisperModel: (model) => set({ whisperModel: model }),
       setTranslationProvider: (provider) =>
         set({ translationProvider: provider }),
-      setDeeplApiKey: (key) => set({ deeplApiKey: key }),
-      setGoogleApiKey: (key) => set({ googleApiKey: key }),
+      setGeminiApiKey: (key) => set({ geminiApiKey: key }),
+      setClaudeApiKey: (key) => set({ claudeApiKey: key }),
       toggleDarkMode: () => set((s) => ({ darkMode: !s.darkMode })),
     }),
     {

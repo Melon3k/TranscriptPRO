@@ -9,10 +9,10 @@ interface SettingsModalProps {
 
 export default function SettingsModal({ open, onClose }: SettingsModalProps) {
   const {
-    deeplApiKey,
-    setDeeplApiKey,
-    googleApiKey,
-    setGoogleApiKey,
+    geminiApiKey,
+    setGeminiApiKey,
+    claudeApiKey,
+    setClaudeApiKey,
   } = useSettingsStore();
 
   if (!open) return null;
@@ -36,20 +36,20 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
 
         {/* Body */}
         <div className="px-5 py-4 space-y-5">
-          {/* DeepL API Key */}
+          {/* Gemini API Key */}
           <ApiKeyField
-            label="DeepL API Key"
-            value={deeplApiKey}
-            onChange={setDeeplApiKey}
-            placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:fx"
+            label="Gemini API Key"
+            value={geminiApiKey}
+            onChange={setGeminiApiKey}
+            placeholder="AIzaSy..."
           />
 
-          {/* Google API Key */}
+          {/* Claude API Key */}
           <ApiKeyField
-            label="Google Translate API Key"
-            value={googleApiKey}
-            onChange={setGoogleApiKey}
-            placeholder="AIzaSy..."
+            label="Claude API Key"
+            value={claudeApiKey}
+            onChange={setClaudeApiKey}
+            placeholder="sk-ant-api03-..."
           />
         </div>
 

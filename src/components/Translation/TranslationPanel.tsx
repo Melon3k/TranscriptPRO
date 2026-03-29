@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Languages, Loader2 } from "lucide-react";
+import { Languages, Loader2, Columns2, X } from "lucide-react";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useSubtitleStore } from "../../stores/subtitleStore";
 import { translateSubtitles } from "../../lib/tauri-commands";
@@ -8,33 +8,48 @@ export default function TranslationPanel() {
   const {
     translationProvider,
     setTranslationProvider,
-    deeplApiKey,
-    googleApiKey,
+    geminiApiKey,
+    claudeApiKey,
   } = useSettingsStore();
-  const { subtitles, setSubtitles } = useSubtitleStore();
+  const {
+    subtitles,
+    setSubtitles,
+    originalSubtitles,
+    setOriginalSubtitles,
+    clearOriginalSubtitles,
+    comparisonMode,
+    setComparisonMode,
+  } = useSubtitleStore();
 
   const [targetLang, setTargetLang] = useState("EN");
   const [sourceLang, setSourceLang] = useState("");
   const [translating, setTranslating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [translated, setTranslated] = useState(false);
 
-  const apiKey = translationProvider === "deepl" ? deeplApiKey : googleApiKey;
+  const apiKey = translationProvider === "gemini" ? geminiApiKey : claudeApiKey;
 
   const handleTranslate = async () => {
     if (subtitles.length === 0 || !apiKey) return;
     setTranslating(true);
     setError(null);
     try {
-      const translated = await translateSubtitles(
+      // Snapshot originals before translation
+      setOriginalSubtitles([...subtitles]);
+
+      const result = await translateSubtitles(
         subtitles,
         targetLang,
         translationProvider,
         apiKey,
         sourceLang || undefined
       );
-      setSubtitles(translated);
+      setSubtitles(result);
+      setTranslated(true);
     } catch (e) {
       setError(String(e));
+      // Clear snapshot on failure
+      clearOriginalSubtitles();
     } finally {
       setTranslating(false);
     }
@@ -54,12 +69,12 @@ export default function TranslationPanel() {
         </label>
         <select
           value={translationProvider}
-          onChange={(e) => setTranslationProvider(e.target.value as "deepl" | "google")}
+          onChange={(e) => setTranslationProvider(e.target.value as "gemini" | "claude")}
           className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1.5 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
           disabled={translating}
         >
-          <option value="deepl">DeepL</option>
-          <option value="google">Google Translate</option>
+          <option value="gemini">Gemini</option>
+          <option value="claude">Claude</option>
         </select>
       </div>
 
@@ -137,10 +152,48 @@ export default function TranslationPanel() {
         )}
       </button>
 
+      {/* Comparison toggle */}
+      {translated && originalSubtitles && (
+        <div className="space-y-2">
+          <button
+            onClick={() => setComparisonMode(!comparisonMode)}
+            className={`flex items-center gap-2 w-full justify-center rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+              comparisonMode
+                ? "bg-amber-500 hover:bg-amber-600 text-white"
+                : "bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600"
+            }`}
+          >
+            {comparisonMode ? (
+              <>
+                <X size={16} />
+                Hide comparison
+              </>
+            ) : (
+              <>
+                <Columns2 size={16} />
+                Compare with original
+              </>
+            )}
+          </button>
+
+          {!comparisonMode && (
+            <button
+              onClick={() => {
+                clearOriginalSubtitles();
+                setTranslated(false);
+              }}
+              className="w-full text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+            >
+              Dismiss original
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Warnings */}
       {!apiKey && (
         <p className="text-xs text-amber-500 dark:text-amber-400 text-center">
-          Set your {translationProvider === "deepl" ? "DeepL" : "Google"} API key in Settings
+          Set your {translationProvider === "gemini" ? "Gemini" : "Claude"} API key in Settings
         </p>
       )}
 

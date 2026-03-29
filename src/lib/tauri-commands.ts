@@ -123,7 +123,7 @@ export async function transcribeAudio(
 export async function translateSubtitles(
   subtitles: Subtitle[],
   targetLang: string,
-  provider: "deepl" | "google",
+  provider: "gemini" | "claude",
   apiKey: string,
   sourceLang?: string
 ): Promise<Subtitle[]> {

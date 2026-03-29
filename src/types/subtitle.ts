@@ -35,7 +35,7 @@ export interface WhisperModelInfo {
   bundled: boolean;
 }
 
-export type TranslationProvider = "deepl" | "google";
+export type TranslationProvider = "gemini" | "claude";
 
 export interface TranslationConfig {
   provider: TranslationProvider;
