@@ -13,6 +13,8 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
     setGeminiApiKey,
     claudeApiKey,
     setClaudeApiKey,
+    geminiModel,
+    setGeminiModel,
   } = useSettingsStore();
 
   if (!open) return null;
@@ -43,6 +45,23 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
             onChange={setGeminiApiKey}
             placeholder="AIzaSy..."
           />
+
+          {/* Gemini Model */}
+          <div className="space-y-1.5">
+            <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">
+              Gemini Model
+            </label>
+            <select
+              value={geminiModel}
+              onChange={(e) => setGeminiModel(e.target.value)}
+              className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1.5 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
+            >
+              <option value="gemini-2.0-flash-lite">gemini-2.0-flash-lite (Free tier)</option>
+              <option value="gemini-1.5-flash">gemini-1.5-flash (Free tier)</option>
+              <option value="gemini-2.0-flash">gemini-2.0-flash (Paid)</option>
+              <option value="gemini-1.5-pro">gemini-1.5-pro (Paid)</option>
+            </select>
+          </div>
 
           {/* Claude API Key */}
           <ApiKeyField

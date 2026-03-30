@@ -10,6 +10,7 @@ export default function TranslationPanel() {
     setTranslationProvider,
     geminiApiKey,
     claudeApiKey,
+    geminiModel,
   } = useSettingsStore();
   const {
     subtitles,
@@ -42,7 +43,8 @@ export default function TranslationPanel() {
         targetLang,
         translationProvider,
         apiKey,
-        sourceLang || undefined
+        sourceLang || undefined,
+        translationProvider === "gemini" ? geminiModel : undefined
       );
       setSubtitles(result);
       setTranslated(true);

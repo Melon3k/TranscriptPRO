@@ -10,6 +10,7 @@ pub async fn translate_subtitles(
     provider: String,
     api_key: String,
     source_lang: Option<String>,
+    model: Option<String>,
 ) -> Result<Vec<Subtitle>, AppError> {
     if subtitles.is_empty() {
         return Ok(Vec::new());
@@ -24,9 +25,11 @@ pub async fn translate_subtitles(
     let texts: Vec<String> = subtitles.iter().map(|s| s.text.clone()).collect();
     let src = source_lang.as_deref();
 
+    let gemini_model = model.as_deref().unwrap_or("");
+
     let translated_texts = match provider.as_str() {
         "gemini" => {
-            translation::gemini::translate(&texts, &target_lang, src, &api_key).await?
+            translation::gemini::translate(&texts, &target_lang, src, &api_key, gemini_model).await?
         }
         "claude" => {
             translation::claude::translate(&texts, &target_lang, src, &api_key).await?

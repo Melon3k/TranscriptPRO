@@ -125,7 +125,8 @@ export async function translateSubtitles(
   targetLang: string,
   provider: "gemini" | "claude",
   apiKey: string,
-  sourceLang?: string
+  sourceLang?: string,
+  model?: string
 ): Promise<Subtitle[]> {
   return invoke<Subtitle[]>("translate_subtitles", {
     subtitles,
@@ -133,5 +134,6 @@ export async function translateSubtitles(
     provider,
     apiKey,
     sourceLang: sourceLang ?? null,
+    model: model ?? null,
   });
 }

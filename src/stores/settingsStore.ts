@@ -7,12 +7,14 @@ interface SettingsState {
   translationProvider: TranslationProvider;
   geminiApiKey: string;
   claudeApiKey: string;
+  geminiModel: string;
   darkMode: boolean;
 
   setWhisperModel: (model: string) => void;
   setTranslationProvider: (provider: TranslationProvider) => void;
   setGeminiApiKey: (key: string) => void;
   setClaudeApiKey: (key: string) => void;
+  setGeminiModel: (model: string) => void;
   toggleDarkMode: () => void;
 }
 
@@ -23,6 +25,7 @@ export const useSettingsStore = create<SettingsState>()(
       translationProvider: "gemini",
       geminiApiKey: "",
       claudeApiKey: "",
+      geminiModel: "gemini-2.0-flash-lite",
       darkMode: false,
 
       setWhisperModel: (model) => set({ whisperModel: model }),
@@ -30,6 +33,7 @@ export const useSettingsStore = create<SettingsState>()(
         set({ translationProvider: provider }),
       setGeminiApiKey: (key) => set({ geminiApiKey: key }),
       setClaudeApiKey: (key) => set({ claudeApiKey: key }),
+      setGeminiModel: (model) => set({ geminiModel: model }),
       toggleDarkMode: () => set((s) => ({ darkMode: !s.darkMode })),
     }),
     {
