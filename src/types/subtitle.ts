@@ -35,7 +35,7 @@ export interface WhisperModelInfo {
   bundled: boolean;
 }
 
-export type TranslationProvider = "gemini" | "claude";
+export type TranslationProvider = "gemini" | "claude" | "libretranslate";
 
 export interface TranslationConfig {
   provider: TranslationProvider;

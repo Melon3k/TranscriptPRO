@@ -11,6 +11,8 @@ export default function TranslationPanel() {
     geminiApiKey,
     claudeApiKey,
     geminiModel,
+    libreTranslateUrl,
+    libreTranslateApiKey,
   } = useSettingsStore();
   const {
     subtitles,
@@ -28,10 +30,17 @@ export default function TranslationPanel() {
   const [error, setError] = useState<string | null>(null);
   const [translated, setTranslated] = useState(false);
 
-  const apiKey = translationProvider === "gemini" ? geminiApiKey : claudeApiKey;
+  const apiKey =
+    translationProvider === "gemini"
+      ? geminiApiKey
+      : translationProvider === "claude"
+      ? claudeApiKey
+      : libreTranslateApiKey; // LibreTranslate: empty key is OK
 
   const handleTranslate = async () => {
-    if (subtitles.length === 0 || !apiKey) return;
+    if (subtitles.length === 0) return;
+    // LibreTranslate doesn't require an API key
+    if (!apiKey && translationProvider !== "libretranslate") return;
     setTranslating(true);
     setError(null);
     try {
@@ -44,7 +53,8 @@ export default function TranslationPanel() {
         translationProvider,
         apiKey,
         sourceLang || undefined,
-        translationProvider === "gemini" ? geminiModel : undefined
+        translationProvider === "gemini" ? geminiModel : undefined,
+        translationProvider === "libretranslate" ? libreTranslateUrl : undefined
       );
       setSubtitles(result);
       setTranslated(true);
@@ -71,10 +81,11 @@ export default function TranslationPanel() {
         </label>
         <select
           value={translationProvider}
-          onChange={(e) => setTranslationProvider(e.target.value as "gemini" | "claude")}
+          onChange={(e) => setTranslationProvider(e.target.value as "gemini" | "claude" | "libretranslate")}
           className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1.5 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
           disabled={translating}
         >
+          <option value="libretranslate">LibreTranslate (Free)</option>
           <option value="gemini">Gemini</option>
           <option value="claude">Claude</option>
         </select>
@@ -138,7 +149,11 @@ export default function TranslationPanel() {
       {/* Translate button */}
       <button
         onClick={handleTranslate}
-        disabled={translating || subtitles.length === 0 || !apiKey}
+        disabled={
+          translating ||
+          subtitles.length === 0 ||
+          (!apiKey && translationProvider !== "libretranslate")
+        }
         className="flex items-center gap-2 w-full justify-center rounded-lg bg-purple-500 hover:bg-purple-600 disabled:bg-purple-300 dark:disabled:bg-purple-800 px-4 py-2 text-sm font-medium text-white transition-colors"
       >
         {translating ? (
@@ -193,9 +208,14 @@ export default function TranslationPanel() {
       )}
 
       {/* Warnings */}
-      {!apiKey && (
+      {!apiKey && translationProvider !== "libretranslate" && (
         <p className="text-xs text-amber-500 dark:text-amber-400 text-center">
           Set your {translationProvider === "gemini" ? "Gemini" : "Claude"} API key in Settings
+        </p>
+      )}
+      {translationProvider === "libretranslate" && (
+        <p className="text-xs text-green-600 dark:text-green-400 text-center">
+          Free — no API key required
         </p>
       )}
 

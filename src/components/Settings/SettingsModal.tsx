@@ -15,6 +15,10 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
     setClaudeApiKey,
     geminiModel,
     setGeminiModel,
+    libreTranslateUrl,
+    setLibreTranslateUrl,
+    libreTranslateApiKey,
+    setLibreTranslateApiKey,
   } = useSettingsStore();
 
   if (!open) return null;
@@ -70,6 +74,31 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
             onChange={setClaudeApiKey}
             placeholder="sk-ant-api03-..."
           />
+
+          {/* LibreTranslate */}
+          <div className="border-t border-gray-200 dark:border-gray-700 pt-4 space-y-3">
+            <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+              LibreTranslate (Free)
+            </p>
+            <div className="space-y-1.5">
+              <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">
+                Server URL
+              </label>
+              <input
+                type="text"
+                value={libreTranslateUrl}
+                onChange={(e) => setLibreTranslateUrl(e.target.value)}
+                placeholder="https://libretranslate.com"
+                className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-1.5 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
+              />
+            </div>
+            <ApiKeyField
+              label="API Key (optional)"
+              value={libreTranslateApiKey}
+              onChange={setLibreTranslateApiKey}
+              placeholder="Leave empty for public server"
+            />
+          </div>
         </div>
 
         {/* Footer */}

@@ -123,10 +123,11 @@ export async function transcribeAudio(
 export async function translateSubtitles(
   subtitles: Subtitle[],
   targetLang: string,
-  provider: "gemini" | "claude",
+  provider: "gemini" | "claude" | "libretranslate",
   apiKey: string,
   sourceLang?: string,
-  model?: string
+  model?: string,
+  serverUrl?: string
 ): Promise<Subtitle[]> {
   return invoke<Subtitle[]>("translate_subtitles", {
     subtitles,
@@ -135,5 +136,6 @@ export async function translateSubtitles(
     apiKey,
     sourceLang: sourceLang ?? null,
     model: model ?? null,
+    serverUrl: serverUrl ?? null,
   });
 }

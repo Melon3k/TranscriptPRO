@@ -11,12 +11,14 @@ pub async fn translate_subtitles(
     api_key: String,
     source_lang: Option<String>,
     model: Option<String>,
+    server_url: Option<String>,
 ) -> Result<Vec<Subtitle>, AppError> {
     if subtitles.is_empty() {
         return Ok(Vec::new());
     }
 
-    if api_key.trim().is_empty() {
+    // LibreTranslate does not require an API key
+    if api_key.trim().is_empty() && provider != "libretranslate" {
         return Err(AppError::TranslationApiError(
             "API key is required for translation".into(),
         ));
@@ -26,6 +28,7 @@ pub async fn translate_subtitles(
     let src = source_lang.as_deref();
 
     let gemini_model = model.as_deref().unwrap_or("");
+    let libre_url = server_url.as_deref().unwrap_or("https://libretranslate.com");
 
     let translated_texts = match provider.as_str() {
         "gemini" => {
@@ -34,9 +37,12 @@ pub async fn translate_subtitles(
         "claude" => {
             translation::claude::translate(&texts, &target_lang, src, &api_key).await?
         }
+        "libretranslate" => {
+            translation::libretranslate::translate(&texts, &target_lang, src, &api_key, libre_url).await?
+        }
         other => {
             return Err(AppError::TranslationApiError(format!(
-                "Unknown translation provider: '{}'. Supported: gemini, claude",
+                "Unknown translation provider: '{}'. Supported: gemini, claude, libretranslate",
                 other
             )));
         }

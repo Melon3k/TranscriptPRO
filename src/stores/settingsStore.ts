@@ -8,6 +8,8 @@ interface SettingsState {
   geminiApiKey: string;
   claudeApiKey: string;
   geminiModel: string;
+  libreTranslateUrl: string;
+  libreTranslateApiKey: string;
   darkMode: boolean;
 
   setWhisperModel: (model: string) => void;
@@ -15,6 +17,8 @@ interface SettingsState {
   setGeminiApiKey: (key: string) => void;
   setClaudeApiKey: (key: string) => void;
   setGeminiModel: (model: string) => void;
+  setLibreTranslateUrl: (url: string) => void;
+  setLibreTranslateApiKey: (key: string) => void;
   toggleDarkMode: () => void;
 }
 
@@ -26,6 +30,8 @@ export const useSettingsStore = create<SettingsState>()(
       geminiApiKey: "",
       claudeApiKey: "",
       geminiModel: "gemini-2.0-flash-lite",
+      libreTranslateUrl: "https://libretranslate.com",
+      libreTranslateApiKey: "",
       darkMode: false,
 
       setWhisperModel: (model) => set({ whisperModel: model }),
@@ -34,6 +40,8 @@ export const useSettingsStore = create<SettingsState>()(
       setGeminiApiKey: (key) => set({ geminiApiKey: key }),
       setClaudeApiKey: (key) => set({ claudeApiKey: key }),
       setGeminiModel: (model) => set({ geminiModel: model }),
+      setLibreTranslateUrl: (url) => set({ libreTranslateUrl: url }),
+      setLibreTranslateApiKey: (key) => set({ libreTranslateApiKey: key }),
       toggleDarkMode: () => set((s) => ({ darkMode: !s.darkMode })),
     }),
     {
