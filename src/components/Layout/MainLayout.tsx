@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { usePremiereConnection } from "../../hooks/usePremiereConnection";
 import Toolbar from "./Toolbar";
 import Player from "../Player/Player";
 import SubtitleEditor from "../Editor/SubtitleEditor";
@@ -10,6 +11,7 @@ import { Mic, Languages, X } from "lucide-react";
 type SidePanel = "transcription" | "translation";
 
 export default function MainLayout() {
+  usePremiereConnection();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [audioPath, setAudioPath] = useState<string | null>(null);
   const [activePanel, setActivePanel] = useState<SidePanel>("transcription");

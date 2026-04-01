@@ -13,11 +13,9 @@
     {
       "identifier": "shell:allow-execute",
       "allow": [
-        {
-          "name": "ffmpeg",
-          "cmd": "ffmpeg",
-          "args": true
-        }
+        { "name": "ffmpeg",    "cmd": "ffmpeg",    "args": true },
+        { "name": "osascript", "cmd": "osascript", "args": true },
+        { "name": "open",      "cmd": "open",      "args": true }
       ]
     },
     "dialog:allow-open",

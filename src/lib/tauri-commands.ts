@@ -118,6 +118,28 @@ export async function transcribeAudio(
   });
 }
 
+// ── Premiere Pro integration ─────────────────────────────────────────────────
+
+export async function sendToPremiere(subtitles: Subtitle[]): Promise<string> {
+  return invoke<string>("send_to_premiere", { subtitles });
+}
+
+export async function revealInFinder(path: string): Promise<void> {
+  return invoke("reveal_in_finder", { path });
+}
+
+export async function startWsServer(): Promise<void> {
+  return invoke("start_ws_server");
+}
+
+export async function pushSubtitlesToPremiere(subtitles: Subtitle[]): Promise<void> {
+  return invoke("push_subtitles_to_premiere", { subtitles });
+}
+
+export async function getWsServerStatus(): Promise<boolean> {
+  return invoke<boolean>("get_ws_server_status");
+}
+
 // ── Translation ──────────────────────────────────────────────────────────────
 
 export async function translateSubtitles(
