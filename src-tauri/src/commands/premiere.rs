@@ -17,45 +17,34 @@ pub async fn send_to_premiere(
 
     let srt_str = srt_path.to_string_lossy().to_string();
 
-    // Try common Premiere Pro application names on macOS
-    let app_names = ["Adobe Premiere Pro 2025", "Adobe Premiere Pro 2024", "Adobe Premiere Pro"];
-    let mut last_err = String::new();
+    // Try common Premiere Pro application names on macOS using `open -a`
+    let app_names = [
+        "Adobe Premiere Pro 2026",
+        "Adobe Premiere Pro 2025",
+        "Adobe Premiere Pro 2024",
+        "Adobe Premiere Pro",
+    ];
 
     for app_name in &app_names {
-        // AppleScript: tell Premiere to import the SRT into the active project
-        let script = format!(
-            "tell application \"{app_name}\" to importFiles (active project) fileList {{\"{srt_str}\"}}"
-        );
-
         let result = app
             .shell()
-            .command("osascript")
-            .args(["-e", &script])
+            .command("open")
+            .args(["-a", app_name, &srt_str])
             .output()
             .await
             .map_err(|e: tauri_plugin_shell::Error| {
-                AppError::Other(format!("osascript not available: {}", e))
+                AppError::Other(format!("open command not available: {}", e))
             })?;
 
         if result.status.success() {
             return Ok(srt_str);
         }
-
-        last_err = String::from_utf8_lossy(&result.stderr).to_string();
-
-        // If the error is "application not found", try the next name
-        if !last_err.contains("Application can't be found")
-            && !last_err.contains("doesn't understand")
-        {
-            break;
-        }
     }
 
     // Return path so frontend can show fallback UI
     Err(AppError::Other(format!(
-        "Could not import into Premiere Pro automatically. \
-         SRT saved at: {}\nError: {}",
-        srt_str, last_err
+        "Could not open SRT in Premiere Pro. SRT saved at: {}",
+        srt_str
     )))
 }
 
