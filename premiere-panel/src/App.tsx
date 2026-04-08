@@ -5,37 +5,46 @@ import { WsClient, Subtitle } from "./ws-client";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 declare const require: (module: string) => any;
 
-// 1 second = 254,016,000,000 ticks in Premiere Pro
-const TICKS_PER_MS = 254_016_000;
+function subtitlesToSrt(subtitles: Subtitle[]): string {
+  return subtitles
+    .map((sub, i) => {
+      const fmt = (ms: number) => {
+        const h = Math.floor(ms / 3600000);
+        const m = Math.floor((ms % 3600000) / 60000);
+        const s = Math.floor((ms % 60000) / 1000);
+        const ml = ms % 1000;
+        return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")},${String(ml).padStart(3, "0")}`;
+      };
+      return `${i + 1}\n${fmt(sub.startTime)} --> ${fmt(sub.endTime)}\n${sub.text}\n`;
+    })
+    .join("\n");
+}
 
 async function applySubtitlesToPremiere(subtitles: Subtitle[]) {
   try {
-    const ppro = require("premierepro/app");
-    const sequence = await ppro.getActiveSequence();
-    if (!sequence) return { ok: false, error: "No active sequence" };
+    const ppro = require("premierepro");
+    const storage = require("uxp").storage;
+    const lfs = storage.localFileSystem;
 
-    const tracks = await sequence.getCaptionTracks();
-    let track = tracks.length > 0 ? tracks[0] : null;
+    const project = await ppro.Project.getActiveProject();
+    if (!project) return { ok: false, error: "No active project" };
 
-    if (!track) {
-      track = await sequence.createCaptionTrack("SubRip (.srt)");
-    }
+    // Write SRT to temp folder
+    const tempFolder = await lfs.getTemporaryFolder();
+    const srtFile = await tempFolder.createFile("transcriptpro_sync.srt", { overwrite: true });
+    const srtContent = subtitlesToSrt(subtitles);
+    await srtFile.write(srtContent);
 
-    // Remove existing captions
-    const existing = await track.getCaptions();
-    for (const cap of existing) {
-      await track.removeCaption(cap);
-    }
+    const srtPath = srtFile.nativePath;
+    console.log("[TranscriptPRO] SRT written to:", srtPath);
 
-    // Add new captions
-    for (const sub of subtitles) {
-      const startTicks = Math.round(sub.startTime * TICKS_PER_MS);
-      const endTicks = Math.round(sub.endTime * TICKS_PER_MS);
-      await track.addCaption(sub.text, startTicks, endTicks);
-    }
+    // Import SRT into Premiere project
+    await project.importFiles([srtPath]);
+    console.log("[TranscriptPRO] importFiles succeeded");
 
     return { ok: true, error: null };
   } catch (e) {
+    console.error("[TranscriptPRO] error:", e);
     return { ok: false, error: String(e) };
   }
 }
@@ -51,9 +60,13 @@ export default function App() {
       async (msg) => {
         if (msg.type === "SET_SUBTITLES") {
           setSubtitleCount(msg.payload.length);
-          setStatus("Applying to timeline...");
+          setStatus("Importing to project...");
           const result = await applySubtitlesToPremiere(msg.payload);
-          setStatus(result.ok ? `Applied ${msg.payload.length} subtitles` : `Error: ${result.error}`);
+          setStatus(
+            result.ok
+              ? `Imported ${msg.payload.length} subtitles`
+              : `Error: ${result.error}`
+          );
         }
       },
       (isConnected) => {
@@ -67,7 +80,6 @@ export default function App() {
   }, []);
 
   const handleSendBack = () => {
-    // Future: read captions from Premiere and push back via WS
     setStatus("Send back not yet implemented");
   };
 
@@ -75,7 +87,9 @@ export default function App() {
     <div style={styles.container}>
       <div style={styles.header}>
         <span style={styles.title}>TranscriptPRO</span>
-        <span style={{ ...styles.dot, background: connected ? "#4ade80" : "#facc15" }} />
+        <span
+          style={{ ...styles.dot, background: connected ? "#4ade80" : "#facc15" }}
+        />
       </div>
 
       <div style={styles.statusBox}>
