@@ -1,17 +1,25 @@
 import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
+import { resolve } from "path";
 
 export default defineConfig({
-  plugins: [react()],
   build: {
-    outDir: "dist",
-    // UXP requires a single HTML entrypoint — inline assets
+    outDir: ".",
+    emptyOutDir: false,
+    lib: {
+      entry: resolve(__dirname, "src/main.tsx"),
+      formats: ["iife"],
+      name: "TranscriptPRO",
+      fileName: () => "index.js",
+    },
     rollupOptions: {
+      // Bundle everything into a single IIFE
       output: {
         inlineDynamicImports: true,
-        entryFileNames: "index.js",
-        assetFileNames: "index.[ext]",
       },
     },
+    target: "es2020",
+  },
+  define: {
+    "process.env.NODE_ENV": '"production"',
   },
 });
