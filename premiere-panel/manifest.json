@@ -1,16 +1,13 @@
 {
-  "manifestVersion": 7,
+  "manifestVersion": 5,
   "id": "com.transcriptpro.premiere-panel",
   "name": "TranscriptPRO",
   "version": "1.0.0",
   "main": "index.html",
   "host": [
     {
-      "app": "PPRO",
-      "minVersion": "25.0",
-      "data": {
-        "apiVersion": 2
-      }
+      "app": "premierepro",
+      "minVersion": "25.0"
     }
   ],
   "entrypoints": [
@@ -25,10 +22,7 @@
   ],
   "requiredPermissions": {
     "network": {
-      "domains": ["ws://localhost:7890"],
-      "webSocket": {
-        "domains": ["ws://localhost:7890"]
-      }
+      "domains": ["ws://localhost"]
     }
   }
 }
