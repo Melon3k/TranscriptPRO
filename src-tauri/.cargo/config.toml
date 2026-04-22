@@ -1,0 +1,3 @@
+[build]
+# Build artifacts go to local disk to avoid macOS ._* metadata file issues on external drives
+target-dir = "/Users/kacper/Library/Caches/TranscriptPRO-target"

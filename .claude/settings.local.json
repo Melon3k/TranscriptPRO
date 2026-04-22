@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(grep -E \"\\\\.\\(json|md|toml|yaml|yml|lock\\)$|Makefile\")"
     ]
   }
 }
