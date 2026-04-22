@@ -19,6 +19,12 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
     setLibreTranslateUrl,
     libreTranslateApiKey,
     setLibreTranslateApiKey,
+    autoSaveOnTranscription,
+    setAutoSaveOnTranscription,
+    autoSaveOnTranslation,
+    setAutoSaveOnTranslation,
+    autoSaveOnImport,
+    setAutoSaveOnImport,
   } = useSettingsStore();
 
   if (!open) return null;
@@ -98,6 +104,28 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
               onChange={setLibreTranslateApiKey}
               placeholder="Leave empty for public server"
             />
+          </div>
+
+          {/* Version history */}
+          <div className="border-t border-gray-200 dark:border-gray-700 pt-4 space-y-2.5">
+            <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+              Historia wersji
+            </p>
+            {([
+              ["Auto-zapisuj po transkrypcji", autoSaveOnTranscription, setAutoSaveOnTranscription],
+              ["Auto-zapisuj po tłumaczeniu", autoSaveOnTranslation, setAutoSaveOnTranslation],
+              ["Auto-zapisuj po imporcie SRT", autoSaveOnImport, setAutoSaveOnImport],
+            ] as [string, boolean, (v: boolean) => void][]).map(([label, value, setter]) => (
+              <label key={label} className="flex items-center gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={value}
+                  onChange={(e) => setter(e.target.checked)}
+                  className="h-4 w-4 rounded border-gray-300 text-blue-500 focus:ring-blue-400"
+                />
+                <span className="text-sm text-gray-700 dark:text-gray-300">{label}</span>
+              </label>
+            ))}
           </div>
         </div>
 

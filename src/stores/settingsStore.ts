@@ -11,6 +11,9 @@ interface SettingsState {
   libreTranslateUrl: string;
   libreTranslateApiKey: string;
   darkMode: boolean;
+  autoSaveOnTranscription: boolean;
+  autoSaveOnTranslation: boolean;
+  autoSaveOnImport: boolean;
 
   setWhisperModel: (model: string) => void;
   setTranslationProvider: (provider: TranslationProvider) => void;
@@ -20,6 +23,9 @@ interface SettingsState {
   setLibreTranslateUrl: (url: string) => void;
   setLibreTranslateApiKey: (key: string) => void;
   toggleDarkMode: () => void;
+  setAutoSaveOnTranscription: (v: boolean) => void;
+  setAutoSaveOnTranslation: (v: boolean) => void;
+  setAutoSaveOnImport: (v: boolean) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -33,6 +39,9 @@ export const useSettingsStore = create<SettingsState>()(
       libreTranslateUrl: "https://libretranslate.com",
       libreTranslateApiKey: "",
       darkMode: false,
+      autoSaveOnTranscription: true,
+      autoSaveOnTranslation: true,
+      autoSaveOnImport: true,
 
       setWhisperModel: (model) => set({ whisperModel: model }),
       setTranslationProvider: (provider) =>
@@ -43,6 +52,9 @@ export const useSettingsStore = create<SettingsState>()(
       setLibreTranslateUrl: (url) => set({ libreTranslateUrl: url }),
       setLibreTranslateApiKey: (key) => set({ libreTranslateApiKey: key }),
       toggleDarkMode: () => set((s) => ({ darkMode: !s.darkMode })),
+      setAutoSaveOnTranscription: (v) => set({ autoSaveOnTranscription: v }),
+      setAutoSaveOnTranslation: (v) => set({ autoSaveOnTranslation: v }),
+      setAutoSaveOnImport: (v) => set({ autoSaveOnImport: v }),
     }),
     {
       name: "transcriptpro-settings",

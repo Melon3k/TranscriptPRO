@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Languages, Loader2, Columns2, X } from "lucide-react";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useSubtitleStore } from "../../stores/subtitleStore";
+import { useVersionStore } from "../../stores/versionStore";
 import { translateSubtitles } from "../../lib/tauri-commands";
 
 export default function TranslationPanel() {
@@ -13,7 +14,9 @@ export default function TranslationPanel() {
     geminiModel,
     libreTranslateUrl,
     libreTranslateApiKey,
+    autoSaveOnTranslation,
   } = useSettingsStore();
+  const { addVersion } = useVersionStore();
   const {
     subtitles,
     setSubtitles,
@@ -57,6 +60,14 @@ export default function TranslationPanel() {
         translationProvider === "libretranslate" ? libreTranslateUrl : undefined
       );
       setSubtitles(result);
+      if (autoSaveOnTranslation) {
+        addVersion(result, "translation", {
+          provider: translationProvider,
+          targetLang,
+          sourceLang: sourceLang || undefined,
+          model: translationProvider === "gemini" ? geminiModel : undefined,
+        });
+      }
       setTranslated(true);
     } catch (e) {
       setError(String(e));

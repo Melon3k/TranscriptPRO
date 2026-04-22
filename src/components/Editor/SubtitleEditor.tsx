@@ -1,9 +1,10 @@
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState, useCallback } from "react";
 import { useSubtitleStore } from "../../stores/subtitleStore";
 import { usePlayerStore } from "../../stores/playerStore";
 import SubtitleRow from "./SubtitleRow";
+import type { WordDragPayload } from "./SubtitleRow";
 import ComparisonRow from "./ComparisonRow";
-import { ListX } from "lucide-react";
+import { ListX, X } from "lucide-react";
 
 export default function SubtitleEditor() {
   const {
@@ -13,12 +14,25 @@ export default function SubtitleEditor() {
     mergeUp,
     mergeDown,
     deleteSegment,
+    moveWords,
     originalSubtitles,
     comparisonMode,
   } = useSubtitleStore();
   const { currentTimeMs, setCurrentTimeMs } = usePlayerStore();
   const listRef = useRef<HTMLDivElement>(null);
   const activeRef = useRef<HTMLDivElement>(null);
+
+  // word selection: Map<subtitleId, Set<wordIndex>>
+  const [selectedWords, setSelectedWords] = useState<Map<string, Set<number>>>(
+    new Map()
+  );
+
+  const totalSelected = Array.from(selectedWords.values()).reduce(
+    (sum, s) => sum + s.size,
+    0
+  );
+  // source subtitle IDs (those with selected words)
+  const sourceSubIds = new Set(selectedWords.keys());
 
   // Find active subtitle based on current playback time
   const activeSub = subtitles.find(
@@ -49,6 +63,51 @@ export default function SubtitleEditor() {
     }
   }, [activeId]);
 
+  const handleWordToggleSelect = useCallback(
+    (subtitleId: string, wordIdx: number) => {
+      setSelectedWords((prev) => {
+        const next = new Map(prev);
+        const existing = new Set(next.get(subtitleId) ?? []);
+        if (existing.has(wordIdx)) {
+          existing.delete(wordIdx);
+          if (existing.size === 0) next.delete(subtitleId);
+          else next.set(subtitleId, existing);
+        } else {
+          existing.add(wordIdx);
+          next.set(subtitleId, existing);
+        }
+        return next;
+      });
+    },
+    []
+  );
+
+  const clearSelection = useCallback(() => setSelectedWords(new Map()), []);
+
+  const handleMoveWordsHere = useCallback(
+    (targetSubId: string, insertAt?: number) => {
+      for (const [sourceSubId, wordIndices] of selectedWords.entries()) {
+        if (sourceSubId !== targetSubId) {
+          moveWords(sourceSubId, Array.from(wordIndices), targetSubId, insertAt);
+        }
+      }
+      clearSelection();
+    },
+    [selectedWords, moveWords, clearSelection]
+  );
+
+  const handleWordDrop = useCallback(
+    (targetSubId: string, payload: WordDragPayload, insertAt?: number) => {
+      moveWords(payload.sourceSubId, payload.wordIndices, targetSubId, insertAt);
+      setSelectedWords((prev) => {
+        const next = new Map(prev);
+        next.delete(payload.sourceSubId);
+        return next;
+      });
+    },
+    [moveWords]
+  );
+
   if (subtitles.length === 0) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center text-gray-400 dark:text-gray-500 gap-3">
@@ -61,63 +120,84 @@ export default function SubtitleEditor() {
     );
   }
 
+  const selectionBanner = totalSelected > 0 && (
+    <div className="flex items-center gap-2 px-3 py-1.5 bg-violet-50 dark:bg-violet-900/20 border-b border-violet-200 dark:border-violet-700 text-xs text-violet-700 dark:text-violet-300">
+      <span className="flex-1">
+        <strong>{totalSelected}</strong> {totalSelected === 1 ? "słowo zaznaczone" : "słowa zaznaczone"} — kliknij blok docelowy aby przenieść
+      </span>
+      <button
+        onClick={clearSelection}
+        className="text-violet-400 hover:text-violet-600 dark:hover:text-violet-200"
+        title="Anuluj zaznaczenie"
+      >
+        <X size={13} />
+      </button>
+    </div>
+  );
+
+  const renderRow = (sub: typeof subtitles[0], i: number) => {
+    const isActive = sub.id === activeId;
+    // A row is a drop target when words are selected AND this subtitle doesn't own them
+    const isDropTarget = totalSelected > 0 && !sourceSubIds.has(sub.id);
+    return (
+      <div key={sub.id} ref={isActive ? activeRef : undefined}>
+        <SubtitleRow
+          subtitle={sub}
+          isActive={isActive}
+          activeWordIndex={isActive ? activeWordIndex : null}
+          selectedWordIndices={selectedWords.get(sub.id)}
+          isDropTarget={isDropTarget}
+          onUpdate={updateSubtitle}
+          onSplit={splitSegment}
+          onMergeUp={mergeUp}
+          onMergeDown={mergeDown}
+          onDelete={deleteSegment}
+          onSeek={setCurrentTimeMs}
+          onWordToggleSelect={handleWordToggleSelect}
+          onMoveWordsHere={handleMoveWordsHere}
+          onWordDrop={handleWordDrop}
+          isFirst={i === 0}
+          isLast={i === subtitles.length - 1}
+        />
+      </div>
+    );
+  };
+
   // Comparison mode: side-by-side original vs translated
   if (comparisonMode && originalSubtitles) {
     return (
-      <div ref={listRef} className="flex-1 overflow-y-auto px-3 py-2 space-y-1.5">
-        {subtitles.map((sub, i) => {
-          const original = originalSubtitles[i];
-          const isActive = sub.id === activeId;
-          return (
-            <div key={sub.id} ref={isActive ? activeRef : undefined}>
-              {original ? (
-                <ComparisonRow
-                  original={original}
-                  translated={sub}
-                  isActive={isActive}
-                />
-              ) : (
-                <SubtitleRow
-                  subtitle={sub}
-                  isActive={isActive}
-                  activeWordIndex={isActive ? activeWordIndex : null}
-                  onUpdate={updateSubtitle}
-                  onSplit={splitSegment}
-                  onMergeUp={mergeUp}
-                  onMergeDown={mergeDown}
-                  onDelete={deleteSegment}
-                  onSeek={setCurrentTimeMs}
-                  isFirst={i === 0}
-                  isLast={i === subtitles.length - 1}
-                />
-              )}
-            </div>
-          );
-        })}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {selectionBanner}
+        <div ref={listRef} className="flex-1 overflow-y-auto px-3 py-2 space-y-1.5">
+          {subtitles.map((sub, i) => {
+            const original = originalSubtitles[i];
+            const isActive = sub.id === activeId;
+            return (
+              <div key={sub.id} ref={isActive ? activeRef : undefined}>
+                {original ? (
+                  <ComparisonRow
+                    original={original}
+                    translated={sub}
+                    isActive={isActive}
+                  />
+                ) : (
+                  renderRow(sub, i)
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
     );
   }
 
   // Normal mode
   return (
-    <div ref={listRef} className="flex-1 overflow-y-auto px-3 py-2 space-y-1.5">
-      {subtitles.map((sub, i) => (
-        <div key={sub.id} ref={sub.id === activeId ? activeRef : undefined}>
-          <SubtitleRow
-            subtitle={sub}
-            isActive={sub.id === activeId}
-            activeWordIndex={sub.id === activeId ? activeWordIndex : null}
-            onUpdate={updateSubtitle}
-            onSplit={splitSegment}
-            onMergeUp={mergeUp}
-            onMergeDown={mergeDown}
-            onDelete={deleteSegment}
-            onSeek={setCurrentTimeMs}
-            isFirst={i === 0}
-            isLast={i === subtitles.length - 1}
-          />
-        </div>
-      ))}
+    <div className="flex-1 flex flex-col overflow-hidden">
+      {selectionBanner}
+      <div ref={listRef} className="flex-1 overflow-y-auto px-3 py-2 space-y-1.5">
+        {subtitles.map((sub, i) => renderRow(sub, i))}
+      </div>
     </div>
   );
 }

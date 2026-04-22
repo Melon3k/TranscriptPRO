@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Mic, Download, Loader2, CheckCircle2 } from "lucide-react";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useSubtitleStore } from "../../stores/subtitleStore";
+import { useVersionStore } from "../../stores/versionStore";
 import {
   listModels,
   downloadModel,
@@ -14,8 +15,9 @@ interface TranscriptionPanelProps {
 }
 
 export default function TranscriptionPanel({ audioPath }: TranscriptionPanelProps) {
-  const { whisperModel, setWhisperModel } = useSettingsStore();
+  const { whisperModel, setWhisperModel, autoSaveOnTranscription } = useSettingsStore();
   const { setSubtitles } = useSubtitleStore();
+  const { addVersion } = useVersionStore();
 
   const [models, setModels] = useState<WhisperModelInfo[]>([]);
   const [downloading, setDownloading] = useState(false);
@@ -69,6 +71,12 @@ export default function TranscriptionPanel({ audioPath }: TranscriptionPanelProp
         (p) => setProgress(p)
       );
       setSubtitles(subs);
+      if (autoSaveOnTranscription) {
+        addVersion(subs, "transcription", {
+          whisperModel,
+          language: language === "auto" ? undefined : language,
+        });
+      }
     } catch (e) {
       setError(String(e));
     } finally {

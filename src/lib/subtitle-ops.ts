@@ -175,7 +175,7 @@ function findNearestWordBoundary(text: string, pos: number): number {
   return -1;
 }
 
-function wordsToText(words: Word[]): string {
+export function wordsToText(words: Word[]): string {
   return words
     .map((w) => w.text)
     .join(" ")
