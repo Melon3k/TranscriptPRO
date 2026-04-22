@@ -5,6 +5,7 @@ import {
   TranscriptionProgress,
   WhisperModelInfo,
 } from "../types/subtitle";
+import { SubtitleVersion } from "../types/version";
 
 // ── File dialogs ─────────────────────────────────────────────────────────────
 
@@ -77,6 +78,23 @@ export async function exportTxt(
   return invoke("export_txt", { path, subtitles });
 }
 
+export async function saveVersionHistory(
+  projectKey: string,
+  versions: SubtitleVersion[]
+): Promise<void> {
+  return invoke("save_version_history", {
+    projectKey,
+    versionsJson: JSON.stringify(versions),
+  });
+}
+
+export async function loadVersionHistory(
+  projectKey: string
+): Promise<SubtitleVersion[] | null> {
+  const raw = await invoke<string | null>("load_version_history", { projectKey });
+  return raw ? (JSON.parse(raw) as SubtitleVersion[]) : null;
+}
+
 // ── Audio extraction ─────────────────────────────────────────────────────────
 
 export async function extractAudio(inputPath: string): Promise<string> {
@@ -116,28 +134,6 @@ export async function transcribeAudio(
     detectSpeakers,
     onProgress: channel,
   });
-}
-
-// ── Premiere Pro integration ─────────────────────────────────────────────────
-
-export async function sendToPremiere(subtitles: Subtitle[]): Promise<string> {
-  return invoke<string>("send_to_premiere", { subtitles });
-}
-
-export async function revealInFinder(path: string): Promise<void> {
-  return invoke("reveal_in_finder", { path });
-}
-
-export async function startWsServer(): Promise<void> {
-  return invoke("start_ws_server");
-}
-
-export async function pushSubtitlesToPremiere(subtitles: Subtitle[]): Promise<void> {
-  return invoke("push_subtitles_to_premiere", { subtitles });
-}
-
-export async function getWsServerStatus(): Promise<boolean> {
-  return invoke<boolean>("get_ws_server_status");
 }
 
 // ── Translation ──────────────────────────────────────────────────────────────

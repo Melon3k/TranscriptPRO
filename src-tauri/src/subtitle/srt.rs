@@ -65,7 +65,7 @@ pub fn parse_srt(content: &str) -> Result<Vec<Subtitle>, AppError> {
     Ok(subtitles)
 }
 
-/// Write subtitles as a Premiere Pro-compatible SRT string.
+/// Write subtitles as an SRT string.
 /// - Comma as millisecond separator (not period)
 /// - UTF-8 encoding (no BOM)
 /// - Sequential numbering from 1

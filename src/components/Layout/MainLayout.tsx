@@ -1,21 +1,49 @@
-import { useState } from "react";
-import { usePremiereConnection } from "../../hooks/usePremiereConnection";
+import { useState, useEffect } from "react";
+import { useSubtitleStore } from "../../stores/subtitleStore";
 import Toolbar from "./Toolbar";
 import Player from "../Player/Player";
 import SubtitleEditor from "../Editor/SubtitleEditor";
 import TranscriptionPanel from "../Transcription/TranscriptionPanel";
 import TranslationPanel from "../Translation/TranslationPanel";
+import HistoryPanel from "../History/HistoryPanel";
 import SettingsModal from "../Settings/SettingsModal";
-import { Mic, Languages, X } from "lucide-react";
+import { Mic, Languages, History, X } from "lucide-react";
 
-type SidePanel = "transcription" | "translation";
+type SidePanel = "transcription" | "translation" | "history";
 
 export default function MainLayout() {
-  usePremiereConnection();
+  const { undo, redo, canUndo, canRedo } = useSubtitleStore();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [audioPath, setAudioPath] = useState<string | null>(null);
   const [activePanel, setActivePanel] = useState<SidePanel>("transcription");
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      const isEditing =
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable;
+      if (isEditing) return;
+
+      if (e.metaKey && !e.shiftKey && (e.key === "z" || e.key === "Z")) {
+        if (!canUndo()) return;
+        e.preventDefault();
+        undo();
+      } else if (
+        e.metaKey &&
+        e.shiftKey &&
+        (e.key === "z" || e.key === "Z" || e.key === "y" || e.key === "Y")
+      ) {
+        if (!canRedo()) return;
+        e.preventDefault();
+        redo();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [undo, redo, canUndo, canRedo]);
 
   return (
     <div className="flex h-screen flex-col bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
@@ -64,6 +92,12 @@ export default function MainLayout() {
               active={activePanel === "translation"}
               onClick={() => setActivePanel("translation")}
             />
+            <PanelTab
+              icon={<History size={14} />}
+              label="Historia"
+              active={activePanel === "history"}
+              onClick={() => setActivePanel("history")}
+            />
           </div>
 
           {/* Panel content */}
@@ -72,6 +106,7 @@ export default function MainLayout() {
               <TranscriptionPanel audioPath={audioPath} />
             )}
             {activePanel === "translation" && <TranslationPanel />}
+            {activePanel === "history" && <HistoryPanel />}
           </div>
         </div>
       </div>
