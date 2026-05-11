@@ -14,6 +14,7 @@ interface SettingsState {
   autoSaveOnTranscription: boolean;
   autoSaveOnTranslation: boolean;
   autoSaveOnImport: boolean;
+  autoCheckUpdates: boolean;
 
   setWhisperModel: (model: string) => void;
   setTranslationProvider: (provider: TranslationProvider) => void;
@@ -26,6 +27,7 @@ interface SettingsState {
   setAutoSaveOnTranscription: (v: boolean) => void;
   setAutoSaveOnTranslation: (v: boolean) => void;
   setAutoSaveOnImport: (v: boolean) => void;
+  setAutoCheckUpdates: (v: boolean) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -42,6 +44,7 @@ export const useSettingsStore = create<SettingsState>()(
       autoSaveOnTranscription: true,
       autoSaveOnTranslation: true,
       autoSaveOnImport: true,
+      autoCheckUpdates: true,
 
       setWhisperModel: (model) => set({ whisperModel: model }),
       setTranslationProvider: (provider) =>
@@ -55,6 +58,7 @@ export const useSettingsStore = create<SettingsState>()(
       setAutoSaveOnTranscription: (v) => set({ autoSaveOnTranscription: v }),
       setAutoSaveOnTranslation: (v) => set({ autoSaveOnTranslation: v }),
       setAutoSaveOnImport: (v) => set({ autoSaveOnImport: v }),
+      setAutoCheckUpdates: (v) => set({ autoCheckUpdates: v }),
     }),
     {
       name: "transcriptpro-settings",

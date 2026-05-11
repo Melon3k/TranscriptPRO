@@ -1,6 +1,9 @@
-import { X, Eye, EyeOff } from "lucide-react";
-import { useState } from "react";
+import { X, Eye, EyeOff, RefreshCw } from "lucide-react";
+import { useEffect, useState } from "react";
+import { getVersion } from "@tauri-apps/api/app";
 import { useSettingsStore } from "../../stores/settingsStore";
+import { useUpdateStore } from "../../stores/updateStore";
+import { checkForUpdates } from "../../lib/updater";
 
 interface SettingsModalProps {
   open: boolean;
@@ -25,7 +28,19 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
     setAutoSaveOnTranslation,
     autoSaveOnImport,
     setAutoSaveOnImport,
+    autoCheckUpdates,
+    setAutoCheckUpdates,
   } = useSettingsStore();
+
+  const updateStatus = useUpdateStore((s) => s.status);
+  const [appVersion, setAppVersion] = useState<string>("");
+
+  useEffect(() => {
+    if (!open) return;
+    getVersion()
+      .then(setAppVersion)
+      .catch(() => setAppVersion(""));
+  }, [open]);
 
   if (!open) return null;
 
@@ -126,6 +141,55 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
                 <span className="text-sm text-gray-700 dark:text-gray-300">{label}</span>
               </label>
             ))}
+          </div>
+
+          {/* Aktualizacje */}
+          <div className="border-t border-gray-200 dark:border-gray-700 pt-4 space-y-2.5">
+            <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+              Aktualizacje
+            </p>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-700 dark:text-gray-300">
+                Wersja aplikacji
+              </span>
+              <span className="text-sm font-mono text-gray-500 dark:text-gray-400">
+                {appVersion ? `v${appVersion}` : "—"}
+              </span>
+            </div>
+            <label className="flex items-center gap-2.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={autoCheckUpdates}
+                onChange={(e) => setAutoCheckUpdates(e.target.checked)}
+                className="h-4 w-4 rounded border-gray-300 text-blue-500 focus:ring-blue-400"
+              />
+              <span className="text-sm text-gray-700 dark:text-gray-300">
+                Automatycznie sprawdzaj aktualizacje
+              </span>
+            </label>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => void checkForUpdates()}
+                disabled={updateStatus === "checking" || updateStatus === "downloading"}
+                className="inline-flex items-center gap-1.5 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                <RefreshCw
+                  size={12}
+                  className={updateStatus === "checking" ? "animate-spin" : ""}
+                />
+                Sprawdź teraz
+              </button>
+              {updateStatus === "up-to-date" && (
+                <span className="text-xs text-green-600 dark:text-green-400">
+                  Masz najnowszą wersję
+                </span>
+              )}
+              {updateStatus === "checking" && (
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                  Sprawdzanie…
+                </span>
+              )}
+            </div>
           </div>
         </div>
 

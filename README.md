@@ -51,6 +51,28 @@ Aplikacja zbudowana na Tauri 2.0 (Rust backend + React frontend) — natywne okn
   - Windows: pobierz z [ffmpeg.org](https://ffmpeg.org/download.html) i dodaj do PATH
 - Dla developmentu: Node.js 18+, Rust toolchain, [Tauri prerequisites](https://tauri.app/start/prerequisites/)
 
+## Instalacja (użytkownicy końcowi)
+
+Pobierz najnowszy instalator z [Releases](https://github.com/Melon3k/TranscriptPRO/releases/latest):
+
+- **macOS** — `TranscriptPRO_x.y.z_universal.dmg` (działa na Intel i Apple Silicon)
+- **Windows** — `TranscriptPRO_x.y.z_x64-setup.exe`
+
+### Pierwsze uruchomienie — ostrzeżenia OS
+
+Aplikacja nie jest jeszcze podpisana komercyjnym certyfikatem, więc system pokaże ostrzeżenie. To normalne — kliknij:
+
+- **macOS**: w Finderze prawym przyciskiem na app → **Otwórz** → **Otwórz** w dialogu. Alternatywnie w terminalu: `xattr -d com.apple.quarantine /Applications/TranscriptPRO.app`
+- **Windows**: w SmartScreen → **Więcej informacji** → **Uruchom mimo to**
+
+Po pierwszej akceptacji system zapamięta wybór.
+
+### Aktualizacje
+
+Aplikacja sprawdza aktualizacje automatycznie (raz na 6 h oraz przy każdym starcie). Gdy nowa wersja jest dostępna, w prawym dolnym rogu pojawi się powiadomienie z przyciskiem **Zainstaluj teraz** — pobieranie, weryfikacja podpisu (Ed25519) i restart dzieją się jednym kliknięciem.
+
+Auto-check można wyłączyć w **Settings → Aktualizacje**. Manualne sprawdzenie tym samym przyciskiem.
+
 ## Instalacja (development)
 
 ```bash
@@ -113,7 +135,26 @@ Rust (whisper-rs, reqwest, tokio)
 - Modele Whispera większe niż `small` wymagają sporo RAM (large-v3 — ok. 5 GB)
 - Diarization to prosty algorytm (RMS + zero-crossing + spectral centroid), nie equivalent profesjonalnym narzędziom typu pyannote
 - Translation przez Gemini/Claude wymaga klucza API i połączenia z internetem
-- Aplikacja nie jest jeszcze podpisana cyfrowo — macOS może wymagać `xattr -d com.apple.quarantine` na pierwsze uruchomienie
+- Aplikacja nie jest jeszcze podpisana komercyjnym certyfikatem OS (macOS Developer ID, Windows Authenticode) — pierwsze uruchomienie wymaga zaakceptowania ostrzeżenia, patrz sekcja **Pierwsze uruchomienie — ostrzeżenia OS** wyżej. Sam mechanizm aktualizacji jest podpisany kluczem Ed25519 (Tauri updater) niezależnie od OS.
+
+## Wydawanie nowych wersji (maintainer)
+
+1. Wygeneruj jednorazowo parę kluczy podpisu updater'a (lokalnie, na bezpiecznej maszynie):
+   ```
+   npm run tauri signer generate -- -w ~/.tauri/transcriptpro.key
+   ```
+   - **Public key** → wklej do `src-tauri/tauri.conf.json` → `plugins.updater.pubkey` (zamień `REPLACE_WITH_TAURI_SIGNING_PUBLIC_KEY`)
+   - **Private key + hasło** → w GitHub repo Settings → Secrets and variables → Actions:
+     - `TAURI_SIGNING_PRIVATE_KEY` — pełna zawartość pliku `.key`
+     - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` — hasło wybrane przy generowaniu
+   - Plik prywatny zachowaj w password managerze. **Utrata = nie ma jak wypuścić aktualizacji dla istniejących instalacji** (użytkownicy będą musieli reinstalować ręcznie).
+2. Zbumpuj wersję w trzech miejscach (muszą być spójne):
+   - `package.json` → `version`
+   - `src-tauri/tauri.conf.json` → `version`
+   - `src-tauri/Cargo.toml` → `version`
+3. `git tag vX.Y.Z && git push origin vX.Y.Z`
+4. GitHub Actions zbuduje macOS + Windows, podpisze, wrzuci **draft** release z plikami `.dmg`, `.exe`, `.sig` i `latest.json`. Otwórz Release, dopisz changelog, kliknij **Publish release**.
+5. Zainstalowane aplikacje pobiorą `latest.json` z `releases/latest/download/` i pokażą toast aktualizacji.
 
 ## Licencja
 
