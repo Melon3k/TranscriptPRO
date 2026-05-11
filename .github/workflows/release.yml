@@ -24,6 +24,11 @@ jobs:
 
     runs-on: ${{ matrix.platform }}
 
+    env:
+      # Override the local-dev target-dir from src-tauri/.cargo/config.toml
+      # (which points at a user-specific path that doesn't exist on the runner).
+      CARGO_TARGET_DIR: ${{ github.workspace }}/src-tauri/target
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
