@@ -136,6 +136,10 @@ export async function transcribeAudio(
   });
 }
 
+export async function cancelTranscription(): Promise<void> {
+  return invoke("cancel_transcription");
+}
+
 // ── Translation ──────────────────────────────────────────────────────────────
 
 export async function translateSubtitles(

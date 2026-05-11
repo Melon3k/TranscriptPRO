@@ -33,3 +33,4 @@ uuid = { version = "1", features = ["v4"] }
 thiserror = "2"
 regex = "1"
 whisper-rs = "0.13"
+whisper-rs-sys = "0.11"

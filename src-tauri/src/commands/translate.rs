@@ -1,10 +1,13 @@
+use crate::logger;
 use crate::subtitle::types::{AppError, Subtitle};
 use crate::translation;
+use tauri::AppHandle;
 
 /// Translate subtitle texts using Gemini or Claude AI.
 /// Preserves timestamps, clears word-level data (invalid after translation).
 #[tauri::command]
 pub async fn translate_subtitles(
+    app: AppHandle,
     subtitles: Vec<Subtitle>,
     target_lang: String,
     provider: String,
@@ -29,6 +32,19 @@ pub async fn translate_subtitles(
 
     let gemini_model = model.as_deref().unwrap_or("");
     let libre_url = server_url.as_deref().unwrap_or("https://libretranslate.com");
+
+    logger::info(
+        &app,
+        "translate",
+        format!(
+            "Translating {} segments via {} ({} → {})",
+            texts.len(),
+            provider,
+            source_lang.as_deref().unwrap_or("auto"),
+            target_lang,
+        ),
+    );
+    let started = std::time::Instant::now();
 
     let translated_texts = match provider.as_str() {
         "gemini" => {
@@ -65,6 +81,16 @@ pub async fn translate_subtitles(
             ..sub
         })
         .collect();
+
+    logger::info(
+        &app,
+        "translate",
+        format!(
+            "Translation completed — {} segments in {:.2}s",
+            result.len(),
+            started.elapsed().as_secs_f32()
+        ),
+    );
 
     Ok(result)
 }

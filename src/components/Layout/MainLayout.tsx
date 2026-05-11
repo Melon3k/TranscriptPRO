@@ -1,11 +1,14 @@
 import { useState, useEffect } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { useSubtitleStore } from "../../stores/subtitleStore";
+import { useLogStore, type LogEntry } from "../../stores/logStore";
 import Toolbar from "./Toolbar";
 import Player from "../Player/Player";
 import SubtitleEditor from "../Editor/SubtitleEditor";
 import TranscriptionPanel from "../Transcription/TranscriptionPanel";
 import TranslationPanel from "../Translation/TranslationPanel";
 import HistoryPanel from "../History/HistoryPanel";
+import LogPanel from "../LogPanel/LogPanel";
 import SettingsModal from "../Settings/SettingsModal";
 import { Mic, Languages, History, X } from "lucide-react";
 
@@ -13,10 +16,20 @@ type SidePanel = "transcription" | "translation" | "history";
 
 export default function MainLayout() {
   const { undo, redo, canUndo, canRedo } = useSubtitleStore();
+  const appendLog = useLogStore((s) => s.append);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [audioPath, setAudioPath] = useState<string | null>(null);
   const [activePanel, setActivePanel] = useState<SidePanel>("transcription");
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const unlistenPromise = listen<LogEntry>("app-log", (event) => {
+      appendLog(event.payload);
+    });
+    return () => {
+      unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, [appendLog]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -110,6 +123,9 @@ export default function MainLayout() {
           </div>
         </div>
       </div>
+
+      {/* Log panel (bottom drawer) */}
+      <LogPanel />
 
       {/* Settings modal */}
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />

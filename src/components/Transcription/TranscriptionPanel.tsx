@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Mic, Download, Loader2, CheckCircle2 } from "lucide-react";
+import { Mic, Download, Loader2, CheckCircle2, X } from "lucide-react";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useSubtitleStore } from "../../stores/subtitleStore";
 import { useVersionStore } from "../../stores/versionStore";
@@ -7,6 +7,7 @@ import {
   listModels,
   downloadModel,
   transcribeAudio,
+  cancelTranscription,
 } from "../../lib/tauri-commands";
 import type { WhisperModelInfo, TranscriptionProgress } from "../../types/subtitle";
 
@@ -78,9 +79,22 @@ export default function TranscriptionPanel({ audioPath }: TranscriptionPanelProp
         });
       }
     } catch (e) {
-      setError(String(e));
+      const msg = String(e);
+      if (msg.toLowerCase().includes("cancel")) {
+        setProgress({ stage: "cancelled", progress: 0, message: "Cancelled" });
+      } else {
+        setError(msg);
+      }
     } finally {
       setTranscribing(false);
+    }
+  };
+
+  const handleCancel = async () => {
+    try {
+      await cancelTranscription();
+    } catch (e) {
+      console.error("Cancel failed:", e);
     }
   };
 
@@ -173,24 +187,25 @@ export default function TranscriptionPanel({ audioPath }: TranscriptionPanelProp
         </span>
       </label>
 
-      {/* Transcribe button */}
-      <button
-        onClick={handleTranscribe}
-        disabled={transcribing || !audioPath || (selectedModel && !selectedModel.downloaded)}
-        className="flex items-center gap-2 w-full justify-center rounded-lg bg-blue-500 hover:bg-blue-600 disabled:bg-blue-300 dark:disabled:bg-blue-800 px-4 py-2 text-sm font-medium text-white transition-colors"
-      >
-        {transcribing ? (
-          <>
-            <Loader2 size={16} className="animate-spin" />
-            Transcribing...
-          </>
-        ) : (
-          <>
-            <Mic size={16} />
-            Transcribe
-          </>
-        )}
-      </button>
+      {/* Transcribe / Cancel button */}
+      {transcribing ? (
+        <button
+          onClick={handleCancel}
+          className="flex items-center gap-2 w-full justify-center rounded-lg bg-red-500 hover:bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors"
+        >
+          <X size={16} />
+          Cancel
+        </button>
+      ) : (
+        <button
+          onClick={handleTranscribe}
+          disabled={!audioPath || (selectedModel && !selectedModel.downloaded)}
+          className="flex items-center gap-2 w-full justify-center rounded-lg bg-blue-500 hover:bg-blue-600 disabled:bg-blue-300 dark:disabled:bg-blue-800 px-4 py-2 text-sm font-medium text-white transition-colors"
+        >
+          <Mic size={16} />
+          Transcribe
+        </button>
+      )}
 
       {/* Progress */}
       {progress && (

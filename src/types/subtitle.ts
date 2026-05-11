@@ -22,7 +22,7 @@ export interface Project {
 }
 
 export interface TranscriptionProgress {
-  stage: "extracting_audio" | "loading_model" | "transcribing" | "done";
+  stage: "extracting_audio" | "loading_model" | "loading_audio" | "transcribing" | "done" | "cancelled";
   progress: number; // 0.0 to 1.0
   message: string;
 }

@@ -9,10 +9,12 @@ import {
   Settings,
   Sun,
   Moon,
+  Terminal,
 } from "lucide-react";
 import { useSubtitleStore } from "../../stores/subtitleStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useVersionStore } from "../../stores/versionStore";
+import { useLogStore } from "../../stores/logStore";
 import {
   openMediaFileDialog,
   openSrtFileDialog,
@@ -37,6 +39,8 @@ export default function Toolbar({ onOpenSettings, onStartTranscription, onError 
   const { darkMode, toggleDarkMode, autoSaveOnImport } = useSettingsStore();
   const { setFilePath } = usePlayerStore();
   const { setProjectKey, addVersion } = useVersionStore();
+  const togglePanel = useLogStore((s) => s.togglePanel);
+  const logsOpen = useLogStore((s) => s.open);
 
   const handleOpenMedia = async () => {
     const path = await openMediaFileDialog();
@@ -144,6 +148,11 @@ export default function Toolbar({ onOpenSettings, onStartTranscription, onError 
       <div className="flex-1" />
 
       {/* Right side */}
+      <ToolbarButton
+        icon={<Terminal size={16} />}
+        label={logsOpen ? "Hide logs" : "Show logs"}
+        onClick={togglePanel}
+      />
       <ToolbarButton
         icon={darkMode ? <Sun size={16} /> : <Moon size={16} />}
         label={darkMode ? "Light mode" : "Dark mode"}

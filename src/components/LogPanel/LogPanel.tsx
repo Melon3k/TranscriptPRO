@@ -1,0 +1,89 @@
+import { useEffect, useRef } from "react";
+import { Trash2, X } from "lucide-react";
+import { useLogStore, type LogLevel } from "../../stores/logStore";
+
+const LEVEL_STYLES: Record<LogLevel, string> = {
+  info: "text-gray-300",
+  warn: "text-amber-400",
+  error: "text-red-400",
+  debug: "text-blue-300",
+};
+
+function formatTime(ts: number) {
+  const d = new Date(ts);
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${d
+    .getMilliseconds()
+    .toString()
+    .padStart(3, "0")}`;
+}
+
+export default function LogPanel() {
+  const { entries, open, setOpen, clear } = useLogStore();
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [entries, open]);
+
+  if (!open) return null;
+
+  return (
+    <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-900 text-gray-100 flex flex-col h-56 shrink-0">
+      <div className="flex items-center gap-2 border-b border-gray-700 px-3 py-1.5 text-xs">
+        <span className="font-semibold uppercase tracking-wide text-gray-400">
+          Logs
+        </span>
+        <span className="text-gray-500">{entries.length}</span>
+        <div className="flex-1" />
+        <button
+          onClick={clear}
+          title="Clear logs"
+          className="flex items-center gap-1 rounded px-2 py-1 text-gray-400 hover:bg-gray-800 hover:text-gray-200"
+        >
+          <Trash2 size={12} />
+          Clear
+        </button>
+        <button
+          onClick={() => setOpen(false)}
+          title="Close logs"
+          className="flex items-center rounded p-1 text-gray-400 hover:bg-gray-800 hover:text-gray-200"
+        >
+          <X size={14} />
+        </button>
+      </div>
+      <div
+        ref={scrollRef}
+        className="flex-1 overflow-y-auto font-mono text-[11px] leading-relaxed px-3 py-2"
+      >
+        {entries.length === 0 ? (
+          <div className="text-gray-500 italic">No log entries yet.</div>
+        ) : (
+          entries.map((entry, i) => (
+            <div key={i} className="flex gap-2 whitespace-pre-wrap break-words">
+              <span className="text-gray-500 shrink-0">
+                {formatTime(entry.timestamp)}
+              </span>
+              <span
+                className={`uppercase shrink-0 w-10 ${
+                  LEVEL_STYLES[entry.level] ?? "text-gray-300"
+                }`}
+              >
+                {entry.level}
+              </span>
+              <span className="text-purple-300 shrink-0 w-20 truncate">
+                {entry.source}
+              </span>
+              <span className={LEVEL_STYLES[entry.level] ?? "text-gray-200"}>
+                {entry.message}
+              </span>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}

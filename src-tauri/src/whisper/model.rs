@@ -1,29 +1,83 @@
+use crate::logger;
 use crate::subtitle::types::{AppError, Subtitle, TranscriptionProgress, Word};
+use std::ffi::c_void;
+use std::os::raw::c_int;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Instant;
 use tauri::ipc::Channel;
+use tauri::AppHandle;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+
+/// FFI trampoline invoked by whisper.cpp from `state.full()`.
+/// `user_data` is a `*const Channel<TranscriptionProgress>` owned by the caller and kept alive
+/// for the duration of the call. We use the raw unsafe API instead of
+/// `set_progress_callback_safe` because in whisper-rs 0.13 the safe wrapper stores a stale
+/// stack pointer as user_data and crashes on the first callback (SIGSEGV).
+unsafe extern "C" fn progress_trampoline(
+    _ctx: *mut whisper_rs_sys::whisper_context,
+    _state: *mut whisper_rs_sys::whisper_state,
+    progress: c_int,
+    user_data: *mut c_void,
+) {
+    if user_data.is_null() {
+        return;
+    }
+    let channel = &*(user_data as *const Channel<TranscriptionProgress>);
+    let frac = (progress as f32 / 100.0).clamp(0.0, 1.0);
+    let mapped = 0.10 + 0.75 * frac;
+    let _ = channel.send(TranscriptionProgress {
+        stage: "transcribing".into(),
+        progress: mapped,
+        message: format!("Transcribing audio… {}%", progress),
+    });
+}
 
 /// Run Whisper transcription on a 16kHz mono WAV file.
 /// Returns subtitle segments with word-level timestamps.
 pub fn transcribe(
+    app: &AppHandle,
     model_path: &Path,
     audio_path: &Path,
     language: Option<&str>,
     enable_diarization: bool,
     on_progress: &Channel<TranscriptionProgress>,
+    cancel: Arc<AtomicBool>,
 ) -> Result<Vec<Subtitle>, AppError> {
+    let started = Instant::now();
+
     // ── Load model ──────────────────────────────────────────────────────
+    let model_size_mb = std::fs::metadata(model_path).map(|m| m.len() / 1_048_576).unwrap_or(0);
+    logger::info(
+        app,
+        "whisper",
+        format!(
+            "Loading model {} ({} MB)",
+            model_path.file_name().and_then(|s| s.to_str()).unwrap_or("?"),
+            model_size_mb
+        ),
+    );
     let _ = on_progress.send(TranscriptionProgress {
         stage: "loading_model".into(),
         progress: 0.0,
         message: "Loading Whisper model…".into(),
     });
 
+    let load_started = Instant::now();
     let ctx = WhisperContext::new_with_params(
         model_path.to_str().unwrap_or_default(),
         WhisperContextParameters::default(),
     )
-    .map_err(|e| AppError::TranscriptionFailed(format!("Failed to load model: {}", e)))?;
+    .map_err(|e| {
+        logger::error(app, "whisper", format!("Model load failed: {}", e));
+        AppError::TranscriptionFailed(format!("Failed to load model: {}", e))
+    })?;
+    logger::info(
+        app,
+        "whisper",
+        format!("Model loaded in {:.2}s", load_started.elapsed().as_secs_f32()),
+    );
 
     // ── Read WAV audio ──────────────────────────────────────────────────
     let _ = on_progress.send(TranscriptionProgress {
@@ -33,14 +87,27 @@ pub fn transcribe(
     });
 
     let audio_data = read_wav_pcm_f32(audio_path)?;
+    let duration_s = audio_data.len() as f32 / SAMPLE_RATE as f32;
+    logger::info(
+        app,
+        "whisper",
+        format!(
+            "Audio loaded: {:.1}s ({} samples @ {}Hz)",
+            duration_s,
+            audio_data.len(),
+            SAMPLE_RATE
+        ),
+    );
 
     // ── Configure transcription ─────────────────────────────────────────
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
 
     if let Some(lang) = language {
         params.set_language(Some(lang));
+        logger::info(app, "whisper", format!("Language: {} (forced)", lang));
     } else {
         params.set_language(Some("auto"));
+        logger::info(app, "whisper", "Language: auto-detect");
     }
 
     params.set_translate(false);
@@ -51,7 +118,22 @@ pub fn transcribe(
     params.set_token_timestamps(true);
     // Do NOT set max_len — let Whisper decide sentence boundaries naturally
 
+    // Stream whisper's internal progress (0-100) into the channel via the raw FFI callback.
+    // Mapped to 0.10–0.85 so we leave room for segment extraction (0.85–0.95)
+    // and optional speaker detection (0.95–1.0).
+    let cb_channel: Box<Channel<TranscriptionProgress>> = Box::new(on_progress.clone());
+    let cb_ptr = &*cb_channel as *const Channel<TranscriptionProgress> as *mut c_void;
+    unsafe {
+        params.set_progress_callback(Some(progress_trampoline));
+        params.set_progress_callback_user_data(cb_ptr);
+    }
+
+    // Cooperative cancellation: whisper.cpp polls this callback during decode.
+    let cancel_for_abort = cancel.clone();
+    params.set_abort_callback_safe(move || cancel_for_abort.load(Ordering::Relaxed));
+
     // ── Run transcription ───────────────────────────────────────────────
+    logger::info(app, "whisper", "Starting whisper.cpp inference");
     let _ = on_progress.send(TranscriptionProgress {
         stage: "transcribing".into(),
         progress: 0.1,
@@ -62,20 +144,51 @@ pub fn transcribe(
         .create_state()
         .map_err(|e| AppError::TranscriptionFailed(format!("Failed to create state: {}", e)))?;
 
+    let infer_started = Instant::now();
     state
         .full(params, &audio_data)
-        .map_err(|e| AppError::TranscriptionFailed(format!("Transcription failed: {}", e)))?;
+        .map_err(|e| {
+            logger::error(app, "whisper", format!("Inference failed: {}", e));
+            AppError::TranscriptionFailed(format!("Transcription failed: {}", e))
+        })?;
+    logger::info(
+        app,
+        "whisper",
+        format!(
+            "Inference finished in {:.2}s ({:.2}x realtime)",
+            infer_started.elapsed().as_secs_f32(),
+            duration_s / infer_started.elapsed().as_secs_f32().max(0.001)
+        ),
+    );
+
+    // Keep the callback channel alive until after `state.full()` returns.
+    drop(cb_channel);
+
+    if cancel.load(Ordering::Relaxed) {
+        logger::info(app, "whisper", "Transcription cancelled by user");
+        let _ = on_progress.send(TranscriptionProgress {
+            stage: "cancelled".into(),
+            progress: 0.0,
+            message: "Cancelled".into(),
+        });
+        return Err(AppError::Other("Transcription cancelled".into()));
+    }
 
     // ── Extract segments ────────────────────────────────────────────────
     let _ = on_progress.send(TranscriptionProgress {
         stage: "transcribing".into(),
-        progress: 0.9,
+        progress: 0.85,
         message: "Extracting segments…".into(),
     });
 
     let num_segments = state.full_n_segments().map_err(|e| {
         AppError::TranscriptionFailed(format!("Failed to get segment count: {}", e))
     })?;
+    logger::info(
+        app,
+        "whisper",
+        format!("Extracting {} segments", num_segments),
+    );
 
     let mut subtitles = Vec::new();
 
@@ -150,6 +263,25 @@ pub fn transcribe(
             }
         }
 
+        let preview: String = text.chars().take(80).collect();
+        let preview = if text.chars().count() > 80 {
+            format!("{}…", preview)
+        } else {
+            preview
+        };
+        logger::info(
+            app,
+            "whisper",
+            format!(
+                "[{}/{}] {:.2}s–{:.2}s: {}",
+                i + 1,
+                num_segments,
+                start_ms as f32 / 1000.0,
+                end_ms as f32 / 1000.0,
+                preview
+            ),
+        );
+
         subtitles.push(Subtitle {
             id: uuid::Uuid::new_v4().to_string(),
             index: subtitles.len() + 1,
@@ -160,8 +292,8 @@ pub fn transcribe(
             speaker: None,
         });
 
-        // Update progress proportionally
-        let progress = 0.1 + 0.8 * ((i + 1) as f32 / num_segments as f32);
+        // Update progress proportionally over the extraction band (0.85 → 0.95).
+        let progress = 0.85 + 0.10 * ((i + 1) as f32 / num_segments as f32);
         let _ = on_progress.send(TranscriptionProgress {
             stage: "transcribing".into(),
             progress,
@@ -171,13 +303,41 @@ pub fn transcribe(
 
     // ── Speaker detection (optional) ──────────────────────────────────────
     if enable_diarization {
+        logger::info(app, "whisper", "Running speaker diarization");
         let _ = on_progress.send(TranscriptionProgress {
             stage: "transcribing".into(),
             progress: 0.95,
             message: "Detecting speakers…".into(),
         });
+        let diar_started = Instant::now();
         detect_speakers(&mut subtitles, &audio_data);
+        let speaker_count = subtitles
+            .iter()
+            .filter_map(|s| s.speaker.as_ref())
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+        logger::info(
+            app,
+            "whisper",
+            format!(
+                "Diarization done in {:.2}s — {} speaker(s)",
+                diar_started.elapsed().as_secs_f32(),
+                speaker_count
+            ),
+        );
     }
+
+    let total_words: usize = subtitles.iter().map(|s| s.words.len()).sum();
+    logger::info(
+        app,
+        "whisper",
+        format!(
+            "Transcription complete — {} segments, {} words in {:.2}s total",
+            subtitles.len(),
+            total_words,
+            started.elapsed().as_secs_f32()
+        ),
+    );
 
     let _ = on_progress.send(TranscriptionProgress {
         stage: "done".into(),

@@ -1,3 +1,4 @@
+use crate::logger;
 use crate::subtitle::{
     srt::{parse_srt, write_srt, write_word_srt, write_txt},
     types::{AppError, Subtitle},
@@ -5,31 +6,64 @@ use crate::subtitle::{
 use tauri::{AppHandle, Manager};
 
 #[tauri::command]
-pub async fn import_srt(path: String) -> Result<Vec<Subtitle>, AppError> {
+pub async fn import_srt(app: AppHandle, path: String) -> Result<Vec<Subtitle>, AppError> {
     let content = std::fs::read_to_string(&path)
         .map_err(|e| AppError::FileError(e.to_string()))?;
-    parse_srt(&content)
+    let subs = parse_srt(&content)?;
+    logger::info(
+        &app,
+        "file",
+        format!("Imported {} segments from {}", subs.len(), path),
+    );
+    Ok(subs)
 }
 
 #[tauri::command]
-pub async fn export_srt(path: String, subtitles: Vec<Subtitle>) -> Result<(), AppError> {
+pub async fn export_srt(
+    app: AppHandle,
+    path: String,
+    subtitles: Vec<Subtitle>,
+) -> Result<(), AppError> {
     let content = write_srt(&subtitles);
-    std::fs::write(&path, content)
-        .map_err(|e| AppError::FileError(e.to_string()))
+    std::fs::write(&path, content).map_err(|e| AppError::FileError(e.to_string()))?;
+    logger::info(
+        &app,
+        "file",
+        format!("Exported {} segments as SRT → {}", subtitles.len(), path),
+    );
+    Ok(())
 }
 
 #[tauri::command]
-pub async fn export_word_srt(path: String, subtitles: Vec<Subtitle>) -> Result<(), AppError> {
+pub async fn export_word_srt(
+    app: AppHandle,
+    path: String,
+    subtitles: Vec<Subtitle>,
+) -> Result<(), AppError> {
     let content = write_word_srt(&subtitles);
-    std::fs::write(&path, content)
-        .map_err(|e| AppError::FileError(e.to_string()))
+    std::fs::write(&path, content).map_err(|e| AppError::FileError(e.to_string()))?;
+    logger::info(
+        &app,
+        "file",
+        format!("Exported word-level SRT ({} segments) → {}", subtitles.len(), path),
+    );
+    Ok(())
 }
 
 #[tauri::command]
-pub async fn export_txt(path: String, subtitles: Vec<Subtitle>) -> Result<(), AppError> {
+pub async fn export_txt(
+    app: AppHandle,
+    path: String,
+    subtitles: Vec<Subtitle>,
+) -> Result<(), AppError> {
     let content = write_txt(&subtitles);
-    std::fs::write(&path, content)
-        .map_err(|e| AppError::FileError(e.to_string()))
+    std::fs::write(&path, content).map_err(|e| AppError::FileError(e.to_string()))?;
+    logger::info(
+        &app,
+        "file",
+        format!("Exported TXT ({} segments) → {}", subtitles.len(), path),
+    );
+    Ok(())
 }
 
 #[tauri::command]
