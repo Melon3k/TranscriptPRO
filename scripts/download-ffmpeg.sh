@@ -42,6 +42,21 @@ download_macos_intel() {
   chmod +x "$OUT/ffmpeg-x86_64-apple-darwin"
 }
 
+# Tauri's --target universal-apple-darwin expects a single fat binary
+# at binaries/ffmpeg-universal-apple-darwin (not the two per-arch files).
+build_macos_universal() {
+  echo ">> ffmpeg-universal-apple-darwin (lipo)"
+  if ! command -v lipo >/dev/null; then
+    echo "lipo not found (only available on macOS) — skipping universal build" >&2
+    return
+  fi
+  lipo -create \
+    "$OUT/ffmpeg-aarch64-apple-darwin" \
+    "$OUT/ffmpeg-x86_64-apple-darwin" \
+    -output "$OUT/ffmpeg-universal-apple-darwin"
+  chmod +x "$OUT/ffmpeg-universal-apple-darwin"
+}
+
 download_windows() {
   echo ">> ffmpeg-x86_64-pc-windows-msvc.exe"
   curl -fL --retry 3 -o "$TMP/ff-win.zip" "$WIN_URL"
@@ -69,6 +84,7 @@ case "$TARGET" in
   macos)
     download_macos_arm
     download_macos_intel
+    build_macos_universal
     ;;
   windows)
     download_windows
@@ -76,6 +92,7 @@ case "$TARGET" in
   all)
     download_macos_arm
     download_macos_intel
+    build_macos_universal
     download_windows
     ;;
   *)
