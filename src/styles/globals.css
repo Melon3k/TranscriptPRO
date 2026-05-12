@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+/* Tailwind v4 no longer reads `darkMode: 'class'` from a tailwind.config.js
+ * (we don't even ship that file). Declaring the variant in CSS is the
+ * supported way to opt out of `prefers-color-scheme` and bind dark styles
+ * to the `.dark` class that App.tsx toggles on <html> based on settingsStore. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* ── Base resets ─────────────────────────────────────────────────────────── */
 *, *::before, *::after {
   box-sizing: border-box;
