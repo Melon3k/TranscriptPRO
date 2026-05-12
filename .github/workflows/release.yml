@@ -52,6 +52,25 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Extract release notes from CHANGELOG
+        id: changelog
+        shell: bash
+        run: |
+          body=$(node scripts/extract-changelog.mjs "${{ github.ref_name }}")
+          {
+            echo "body<<RELEASE_BODY_EOF"
+            echo "$body"
+            echo ""
+            echo "---"
+            echo ""
+            echo "**Pobierz instalator dla swojego systemu poniżej:**"
+            echo "- macOS: \`*.dmg\` (Universal — Intel + Apple Silicon)"
+            echo "- Windows: \`*-setup.exe\` (NSIS)"
+            echo ""
+            echo "Aplikacja sprawdzi aktualizacje automatycznie po uruchomieniu."
+            echo "RELEASE_BODY_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Download ffmpeg sidecar (macOS)
         if: matrix.platform == 'macos-latest'
         run: bash scripts/download-ffmpeg.sh macos
@@ -78,14 +97,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "TranscriptPRO ${{ github.ref_name }}"
-          releaseBody: |
-            Zobacz [CHANGELOG](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) lub commity od poprzedniego tagu.
-
-            **Pobierz instalator dla swojego systemu poniżej:**
-            - macOS: `*.dmg` (Universal — Intel + Apple Silicon)
-            - Windows: `*-setup.exe` (NSIS)
-
-            Aplikacja sprawdzi aktualizacje automatycznie po uruchomieniu.
+          releaseBody: ${{ steps.changelog.outputs.body }}
           releaseDraft: true
           # Tags containing a dash (v0.1.3-rc.1, v0.2.0-beta, etc.) are prereleases.
           # GitHub omits prereleases from /releases/latest/, so installed clients
