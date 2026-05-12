@@ -116,74 +116,12 @@ Ustawienia są persystowane w `localStorage` pod kluczem `transcriptpro-settings
 
 Żeby zresetować do defaults: DevTools → Application → Local Storage → usuń klucz.
 
-## Architektura
-
-```
-React (Vite, port 1420 w dev)
-  ↕  Tauri IPC (Channel<T> dla streamingu)
-Rust (whisper-rs, reqwest, tokio)
-  ↕  whisper.cpp (FFI)
-```
-
-- **Frontend state**: Zustand (`subtitleStore`, `playerStore`, `settingsStore`, `versionStore`, `logStore`)
-- **Backend commands**: `src-tauri/src/commands/` (audio, file_io, transcribe, translate)
-- **Whisper integration**: `src-tauri/src/whisper/model.rs` — direct FFI dla progress callback (bypass znanego use-after-free w `set_progress_callback_safe` z whisper-rs 0.13)
-- **Logger**: `src-tauri/src/logger.rs` emituje eventy `app-log` przez Tauri's emit API
-
 ## Znane ograniczenia
 
 - Modele Whispera większe niż `small` wymagają sporo RAM (large-v3 — ok. 5 GB)
 - Diarization to prosty algorytm (RMS + zero-crossing + spectral centroid), nie equivalent profesjonalnym narzędziom typu pyannote
 - Translation przez Gemini/Claude wymaga klucza API i połączenia z internetem
 - Aplikacja nie jest jeszcze podpisana komercyjnym certyfikatem OS (macOS Developer ID, Windows Authenticode) — pierwsze uruchomienie wymaga zaakceptowania ostrzeżenia, patrz sekcja **Pierwsze uruchomienie — ostrzeżenia OS** wyżej. Sam mechanizm aktualizacji jest podpisany kluczem Ed25519 (Tauri updater) niezależnie od OS.
-
-## Wydawanie nowych wersji (maintainer)
-
-### Procedura przed każdym tagiem (must-do)
-
-**Nie pushuj `vX.Y.Z` zanim wszystkie 3 bramki nie są zielone.** Publiczny Release nie służy do iteracji — istniejące instalacje automatycznie pobierają każdy `latest`, więc zepsuty build to natychmiastowy problem dla wszystkich użytkowników.
-
-1. **Lokalny pre-flight na macOS** (~5–10 min):
-   ```bash
-   npm run build                                            # tsc + vite
-   ./scripts/download-ffmpeg.sh macos                       # bundled sidecar
-   npm run tauri build -- --target universal-apple-darwin   # pełny bundle
-   ```
-   Łapie: błędy TypeScript, compile Rust, sidecar config, `lipo` universal binary, schema `tauri.conf.json`.
-
-2. **CI gate** (`.github/workflows/ci.yml`) — automat na każdy PR do `main`. Buduje obie platformy bez publikacji. Musi być zielone przed merge.
-
-3. **Tag RC dla testu end-to-end** gdy zmiana dotyka builda, updater'a, sidecara, podpisów albo czegokolwiek widocznego dopiero na realnej instalacji:
-   - Otaguj `vX.Y.Z-rc.1` (`.2`, `.3`…) — workflow wykrywa `-` w nazwie taga → ustawia `prerelease: true`
-   - GitHub pomija prereleases z `/releases/latest/`, więc istniejące instalacje go nie zobaczą
-   - Pobierz prerelease DMG/EXE ręcznie, zainstaluj, przejdź pełny scenariusz (transkrypcja, tłumaczenie, toast aktualizacji, restart)
-
-4. **Dopiero gdy wszystkie 3 przejdą** → otaguj `vX.Y.Z` (bez sufiksu) → publiczny release.
-
-### Klucz podpisu (jednorazowo)
-
-Wygeneruj parę kluczy podpisu updater'a na bezpiecznej maszynie:
-
-```
-npm run tauri signer generate -- -w ~/.tauri/transcriptpro.key
-```
-
-- **Public key** → wklej do `src-tauri/tauri.conf.json` → `plugins.updater.pubkey` (zamień `REPLACE_WITH_TAURI_SIGNING_PUBLIC_KEY`)
-- **Private key + hasło** → w GitHub repo Settings → Secrets and variables → Actions:
-  - `TAURI_SIGNING_PRIVATE_KEY` — pełna zawartość pliku `.key`
-  - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` — hasło wybrane przy generowaniu
-- Plik prywatny zachowaj w password managerze. **Utrata = nie ma jak wypuścić aktualizacji dla istniejących instalacji** (użytkownicy będą musieli reinstalować ręcznie).
-
-### Rutynowy release
-
-1. Zbumpuj wersję w trzech miejscach (muszą być spójne):
-   - `package.json` → `version`
-   - `src-tauri/tauri.conf.json` → `version`
-   - `src-tauri/Cargo.toml` → `version`
-2. Przejdź **całą procedurę bramek** powyżej (lokalny build, CI, RC tag jeśli ryzykowne).
-3. `git tag vX.Y.Z && git push origin vX.Y.Z`
-4. GitHub Actions zbuduje macOS + Windows, podpisze, wrzuci **draft** release z plikami `.dmg`, `.exe`, `.sig` i `latest.json`. Otwórz Release, dopisz changelog, kliknij **Publish release**.
-5. Zainstalowane aplikacje pobiorą `latest.json` z `releases/latest/download/` i pokażą toast aktualizacji.
 
 ## Licencja
 
