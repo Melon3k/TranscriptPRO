@@ -45,13 +45,13 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <div
-        className="w-full max-w-md rounded-xl bg-white dark:bg-gray-800 shadow-2xl border border-gray-200 dark:border-gray-700"
+        className="flex w-full max-w-md max-h-[90vh] flex-col rounded-xl bg-white dark:bg-gray-800 shadow-2xl border border-gray-200 dark:border-gray-700"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 px-5 py-3">
+        <div className="flex shrink-0 items-center justify-between border-b border-gray-200 dark:border-gray-700 px-5 py-3">
           <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-200">Settings</h2>
           <button
             onClick={onClose}
@@ -62,7 +62,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
         </div>
 
         {/* Body */}
-        <div className="px-5 py-4 space-y-5">
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 space-y-5">
           {/* Gemini API Key */}
           <ApiKeyField
             label="Gemini API Key"
@@ -194,7 +194,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
         </div>
 
         {/* Footer */}
-        <div className="border-t border-gray-200 dark:border-gray-700 px-5 py-3 flex justify-end">
+        <div className="shrink-0 border-t border-gray-200 dark:border-gray-700 px-5 py-3 flex justify-end">
           <button
             onClick={onClose}
             className="rounded-lg bg-blue-500 hover:bg-blue-600 px-4 py-1.5 text-sm font-medium text-white transition-colors"
