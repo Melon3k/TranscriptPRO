@@ -1,13 +1,12 @@
-name: Release
+name: CI
 
 on:
-  push:
-    tags:
-      - "v*"
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -25,8 +24,6 @@ jobs:
     runs-on: ${{ matrix.platform }}
 
     env:
-      # Override the local-dev target-dir from src-tauri/.cargo/config.toml
-      # (which points at a user-specific path that doesn't exist on the runner).
       CARGO_TARGET_DIR: ${{ github.workspace }}/src-tauri/target
 
     steps:
@@ -69,29 +66,27 @@ jobs:
           if (-not $exe) { throw "ffmpeg.exe not found in archive" }
           Copy-Item -Path $exe.FullName -Destination "src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe"
 
-      - name: Build & release Tauri app
+      # tauri-action with no tagName performs build+bundle without publishing.
+      # We re-use the exact same action + args + signing env as release.yml so
+      # this CI is a high-fidelity dry run of the public release path. Signing
+      # secrets must be present because the pubkey in tauri.conf.json makes
+      # the bundler require a matching private key when createUpdaterArtifacts
+      # is on. Safe for same-repo PRs (no external forks have access).
+      - name: Build Tauri app (no release)
         uses: tauri-apps/tauri-action@v0
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "TranscriptPRO ${{ github.ref_name }}"
-          releaseBody: |
-            Zobacz [CHANGELOG](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) lub commity od poprzedniego tagu.
-
-            **Pobierz instalator dla swojego systemu poniżej:**
-            - macOS: `*.dmg` (Universal — Intel + Apple Silicon)
-            - Windows: `*-setup.exe` (NSIS)
-
-            Aplikacja sprawdzi aktualizacje automatycznie po uruchomieniu.
-          releaseDraft: true
-          # Tags containing a dash (v0.1.3-rc.1, v0.2.0-beta, etc.) are prereleases.
-          # GitHub omits prereleases from /releases/latest/, so installed clients
-          # ignore them — letting us test the full DMG/EXE/updater path without
-          # affecting users on stable.
-          prerelease: ${{ contains(github.ref_name, '-') }}
-          includeUpdaterJson: true
-          updaterJsonPreferNsis: true
           args: ${{ matrix.args }}
+
+      - name: Upload bundles as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TranscriptPRO-${{ matrix.platform }}-${{ github.run_id }}
+          path: |
+            src-tauri/target/**/release/bundle/dmg/*.dmg
+            src-tauri/target/**/release/bundle/nsis/*-setup.exe
+            src-tauri/target/**/release/bundle/macos/*.app.tar.gz
+          if-no-files-found: error
+          retention-days: 7
