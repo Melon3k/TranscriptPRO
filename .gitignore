@@ -33,3 +33,6 @@ src-tauri/binaries
 
 # macOS resource forks
 ._*
+
+# Local Cargo overrides (e.g. target-dir off external drives — user-specific)
+src-tauri/.cargo/config.toml
