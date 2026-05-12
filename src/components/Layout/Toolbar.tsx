@@ -11,6 +11,7 @@ import {
   Moon,
   Terminal,
 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useSubtitleStore } from "../../stores/subtitleStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useVersionStore } from "../../stores/versionStore";
@@ -35,6 +36,7 @@ interface ToolbarProps {
 }
 
 export default function Toolbar({ onOpenSettings, onStartTranscription, onError }: ToolbarProps) {
+  const { t } = useTranslation(["toolbar", "common"]);
   const { subtitles, setSubtitles, undo, redo, canUndo, canRedo } = useSubtitleStore();
   const { darkMode, toggleDarkMode, autoSaveOnImport } = useSettingsStore();
   const { setFilePath } = usePlayerStore();
@@ -52,7 +54,7 @@ export default function Toolbar({ onOpenSettings, onStartTranscription, onError 
       const audioPath = await extractAudio(path);
       onStartTranscription(audioPath);
     } catch (e) {
-      onError(`Audio extraction failed: ${e}. Make sure FFmpeg is installed.`);
+      onError(t("common:audioExtractionFailed", { error: String(e) }));
     }
   };
 
@@ -107,24 +109,24 @@ export default function Toolbar({ onOpenSettings, onStartTranscription, onError 
   return (
     <div className="flex items-center gap-1 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-1.5">
       {/* File operations */}
-      <ToolbarButton icon={<FolderOpen size={16} />} label="Open Media" onClick={handleOpenMedia} />
-      <ToolbarButton icon={<FileAudio size={16} />} label="Import SRT" onClick={handleImportSrt} />
+      <ToolbarButton icon={<FolderOpen size={16} />} label={t("toolbar:openMedia")} onClick={handleOpenMedia} />
+      <ToolbarButton icon={<FileAudio size={16} />} label={t("toolbar:importSrt")} onClick={handleImportSrt} />
       <ToolbarDivider />
       <ToolbarButton
         icon={<Download size={16} />}
-        label="Export SRT"
+        label={t("toolbar:exportSrt")}
         onClick={handleExportSrt}
         disabled={subtitles.length === 0}
       />
       <ToolbarButton
         icon={<AlignLeft size={16} />}
-        label="Word SRT"
+        label={t("toolbar:wordSrt")}
         onClick={handleExportWordSrt}
         disabled={subtitles.length === 0}
       />
       <ToolbarButton
         icon={<FileText size={16} />}
-        label="Export TXT"
+        label={t("toolbar:exportTxt")}
         onClick={handleExportTxt}
         disabled={subtitles.length === 0}
       />
@@ -133,13 +135,13 @@ export default function Toolbar({ onOpenSettings, onStartTranscription, onError 
       {/* Undo / Redo */}
       <ToolbarButton
         icon={<Undo2 size={16} />}
-        label="Undo"
+        label={t("toolbar:undo")}
         onClick={undo}
         disabled={!canUndo()}
       />
       <ToolbarButton
         icon={<Redo2 size={16} />}
-        label="Redo"
+        label={t("toolbar:redo")}
         onClick={redo}
         disabled={!canRedo()}
       />
@@ -150,15 +152,15 @@ export default function Toolbar({ onOpenSettings, onStartTranscription, onError 
       {/* Right side */}
       <ToolbarButton
         icon={<Terminal size={16} />}
-        label={logsOpen ? "Hide logs" : "Show logs"}
+        label={logsOpen ? t("toolbar:hideLogs") : t("toolbar:showLogs")}
         onClick={togglePanel}
       />
       <ToolbarButton
         icon={darkMode ? <Sun size={16} /> : <Moon size={16} />}
-        label={darkMode ? "Light mode" : "Dark mode"}
+        label={darkMode ? t("toolbar:lightMode") : t("toolbar:darkMode")}
         onClick={toggleDarkMode}
       />
-      <ToolbarButton icon={<Settings size={16} />} label="Settings" onClick={onOpenSettings} />
+      <ToolbarButton icon={<Settings size={16} />} label={t("toolbar:settings")} onClick={onOpenSettings} />
     </div>
   );
 }

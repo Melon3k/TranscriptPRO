@@ -1,0 +1,16 @@
+{
+  "available": "Dostępna aktualizacja v{{version}}",
+  "downloading": "Pobieranie v{{version}}",
+  "installing": "Instalowanie…",
+  "ready": "Aktualizacja gotowa",
+  "error": "Błąd aktualizacji",
+  "installNow": "Zainstaluj teraz",
+  "later": "Później",
+  "tryAgain": "Spróbuj ponownie",
+  "showDetails": "Pokaż szczegóły",
+  "hideDetails": "Ukryj szczegóły",
+  "willRestart": "Aplikacja uruchomi się ponownie za chwilę…",
+  "restarting": "Restartowanie…",
+  "downloadedOf": "{{percent}}% — {{downloaded}} / {{total}}",
+  "downloadedBytes": "{{downloaded}} pobrano"
+}

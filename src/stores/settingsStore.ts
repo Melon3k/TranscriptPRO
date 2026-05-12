@@ -2,6 +2,8 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { TranslationProvider } from "../types/subtitle";
 
+export type UiLanguage = "pl" | "en";
+
 interface SettingsState {
   whisperModel: string;
   translationProvider: TranslationProvider;
@@ -15,6 +17,7 @@ interface SettingsState {
   autoSaveOnTranslation: boolean;
   autoSaveOnImport: boolean;
   autoCheckUpdates: boolean;
+  language: UiLanguage;
 
   setWhisperModel: (model: string) => void;
   setTranslationProvider: (provider: TranslationProvider) => void;
@@ -28,6 +31,15 @@ interface SettingsState {
   setAutoSaveOnTranslation: (v: boolean) => void;
   setAutoSaveOnImport: (v: boolean) => void;
   setAutoCheckUpdates: (v: boolean) => void;
+  setLanguage: (lang: UiLanguage) => void;
+}
+
+function detectInitialLanguage(): UiLanguage {
+  // Persisted value wins (handled by zustand persist middleware after rehydrate).
+  // For the very first run we look at navigator.language so PL users start in PL
+  // and everyone else gets EN.
+  if (typeof navigator === "undefined") return "pl";
+  return navigator.language?.toLowerCase().startsWith("pl") ? "pl" : "en";
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -45,6 +57,7 @@ export const useSettingsStore = create<SettingsState>()(
       autoSaveOnTranslation: true,
       autoSaveOnImport: true,
       autoCheckUpdates: true,
+      language: detectInitialLanguage(),
 
       setWhisperModel: (model) => set({ whisperModel: model }),
       setTranslationProvider: (provider) =>
@@ -59,6 +72,7 @@ export const useSettingsStore = create<SettingsState>()(
       setAutoSaveOnTranslation: (v) => set({ autoSaveOnTranslation: v }),
       setAutoSaveOnImport: (v) => set({ autoSaveOnImport: v }),
       setAutoCheckUpdates: (v) => set({ autoCheckUpdates: v }),
+      setLanguage: (lang) => set({ language: lang }),
     }),
     {
       name: "transcriptpro-settings",
