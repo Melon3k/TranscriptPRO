@@ -67,10 +67,16 @@ jobs:
           Copy-Item -Path $exe.FullName -Destination "src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe"
 
       # tauri-action with no tagName performs build+bundle without publishing.
-      # We re-use the exact same action + args as release.yml so this CI is a
-      # high-fidelity dry run of the public release path.
+      # We re-use the exact same action + args + signing env as release.yml so
+      # this CI is a high-fidelity dry run of the public release path. Signing
+      # secrets must be present because the pubkey in tauri.conf.json makes
+      # the bundler require a matching private key when createUpdaterArtifacts
+      # is on. Safe for same-repo PRs (no external forks have access).
       - name: Build Tauri app (no release)
         uses: tauri-apps/tauri-action@v0
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           args: ${{ matrix.args }}
 
