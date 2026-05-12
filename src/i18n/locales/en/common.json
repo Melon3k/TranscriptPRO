@@ -7,5 +7,8 @@
   "transcribe": "Transcribe",
   "translate": "Translate",
   "history": "History",
-  "audioExtractionFailed": "Audio extraction failed: {{error}}"
+  "audioExtractionFailed": "Audio extraction failed: {{error}}",
+  "dropFileToOpen": "Drop a file to open",
+  "dropFileHint": "Video / audio → transcription  •  .srt → subtitle import",
+  "unsupportedFileFormat": "Unsupported format: {{exts}}. Drop a video/audio file or .srt."
 }

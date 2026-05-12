@@ -21,12 +21,11 @@ import {
   openSrtFileDialog,
   saveSrtFileDialog,
   saveTxtFileDialog,
-  importSrt,
   exportSrt,
   exportWordSrt,
   exportTxt,
-  extractAudio,
 } from "../../lib/tauri-commands";
+import { routeFile } from "../../lib/file-routing";
 import { usePlayerStore } from "../../stores/playerStore";
 
 interface ToolbarProps {
@@ -44,33 +43,27 @@ export default function Toolbar({ onOpenSettings, onStartTranscription, onError 
   const togglePanel = useLogStore((s) => s.togglePanel);
   const logsOpen = useLogStore((s) => s.open);
 
+  const routeCallbacks = {
+    setFilePath,
+    setProjectKey,
+    setSubtitles,
+    addVersion,
+    autoSaveOnImport,
+    onStartTranscription,
+    onError: (msg: string) =>
+      onError(t("common:audioExtractionFailed", { error: msg })),
+  };
+
   const handleOpenMedia = async () => {
     const path = await openMediaFileDialog();
     if (!path) return;
-    setFilePath(path);
-    await setProjectKey(path);
-
-    try {
-      const audioPath = await extractAudio(path);
-      onStartTranscription(audioPath);
-    } catch (e) {
-      onError(t("common:audioExtractionFailed", { error: String(e) }));
-    }
+    await routeFile(path, routeCallbacks);
   };
 
   const handleImportSrt = async () => {
     const path = await openSrtFileDialog();
     if (!path) return;
-    try {
-      const subs = await importSrt(path);
-      setSubtitles(subs);
-      await setProjectKey(path);
-      if (autoSaveOnImport) {
-        addVersion(subs, "import", { srtPath: path });
-      }
-    } catch (e) {
-      console.error("SRT import failed:", e);
-    }
+    await routeFile(path, routeCallbacks);
   };
 
   const handleExportSrt = async () => {

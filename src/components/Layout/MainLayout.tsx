@@ -1,8 +1,13 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
 import { useSubtitleStore } from "../../stores/subtitleStore";
+import { useSettingsStore } from "../../stores/settingsStore";
+import { usePlayerStore } from "../../stores/playerStore";
+import { useVersionStore } from "../../stores/versionStore";
 import { useLogStore, type LogEntry } from "../../stores/logStore";
+import { useFileDrop } from "../../hooks/useFileDrop";
+import { routeFile, classifyFile } from "../../lib/file-routing";
 import Toolbar from "./Toolbar";
 import Player from "../Player/Player";
 import SubtitleEditor from "../Editor/SubtitleEditor";
@@ -11,18 +16,52 @@ import TranslationPanel from "../Translation/TranslationPanel";
 import HistoryPanel from "../History/HistoryPanel";
 import LogPanel from "../LogPanel/LogPanel";
 import SettingsModal from "../Settings/SettingsModal";
-import { Mic, Languages, History, X } from "lucide-react";
+import { Mic, Languages, History, X, Upload } from "lucide-react";
 
 type SidePanel = "transcription" | "translation" | "history";
 
 export default function MainLayout() {
   const { t } = useTranslation("common");
-  const { undo, redo, canUndo, canRedo } = useSubtitleStore();
+  const { undo, redo, canUndo, canRedo, setSubtitles } = useSubtitleStore();
+  const { setFilePath } = usePlayerStore();
+  const { setProjectKey, addVersion } = useVersionStore();
+  const autoSaveOnImport = useSettingsStore((s) => s.autoSaveOnImport);
   const appendLog = useLogStore((s) => s.append);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [audioPath, setAudioPath] = useState<string | null>(null);
   const [activePanel, setActivePanel] = useState<SidePanel>("transcription");
   const [error, setError] = useState<string | null>(null);
+
+  const handleDroppedFiles = useCallback(
+    async (paths: string[]) => {
+      // Find the first file the app knows how to handle. Bulk-drop of multiple
+      // media files isn't a coherent operation here (we only have one player).
+      const supported = paths.find((p) => classifyFile(p) !== "unsupported");
+      if (!supported) {
+        const exts = paths
+          .map((p) => p.split(".").pop()?.toLowerCase() ?? "?")
+          .join(", ");
+        setError(t("unsupportedFileFormat", { exts }));
+        return;
+      }
+      setError(null);
+      await routeFile(supported, {
+        setFilePath,
+        setProjectKey,
+        setSubtitles,
+        addVersion,
+        autoSaveOnImport,
+        onStartTranscription: (audio) => {
+          setAudioPath(audio);
+          setActivePanel("transcription");
+        },
+        onError: (msg) => setError(t("audioExtractionFailed", { error: msg })),
+      });
+    },
+    [t, setFilePath, setProjectKey, setSubtitles, addVersion, autoSaveOnImport],
+  );
+
+  const { isDragging } = useFileDrop(handleDroppedFiles);
 
   useEffect(() => {
     const unlistenPromise = listen<LogEntry>("app-log", (event) => {
@@ -131,6 +170,23 @@ export default function MainLayout() {
 
       {/* Settings modal */}
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+
+      {/* Drag-and-drop overlay */}
+      {isDragging && (
+        <div className="pointer-events-none fixed inset-0 z-[70] flex items-center justify-center bg-blue-500/10 backdrop-blur-sm border-4 border-dashed border-blue-500 rounded-lg">
+          <div className="flex flex-col items-center gap-3 rounded-xl bg-white/95 dark:bg-gray-800/95 px-8 py-6 shadow-2xl border border-blue-300 dark:border-blue-700">
+            <Upload size={36} className="text-blue-500" />
+            <div className="text-center">
+              <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+                {t("dropFileToOpen")}
+              </p>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {t("dropFileHint")}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
