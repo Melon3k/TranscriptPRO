@@ -139,19 +139,48 @@ Rust (whisper-rs, reqwest, tokio)
 
 ## Wydawanie nowych wersji (maintainer)
 
-1. Wygeneruj jednorazowo parę kluczy podpisu updater'a (lokalnie, na bezpiecznej maszynie):
+### Procedura przed każdym tagiem (must-do)
+
+**Nie pushuj `vX.Y.Z` zanim wszystkie 3 bramki nie są zielone.** Publiczny Release nie służy do iteracji — istniejące instalacje automatycznie pobierają każdy `latest`, więc zepsuty build to natychmiastowy problem dla wszystkich użytkowników.
+
+1. **Lokalny pre-flight na macOS** (~5–10 min):
+   ```bash
+   npm run build                                            # tsc + vite
+   ./scripts/download-ffmpeg.sh macos                       # bundled sidecar
+   npm run tauri build -- --target universal-apple-darwin   # pełny bundle
    ```
-   npm run tauri signer generate -- -w ~/.tauri/transcriptpro.key
-   ```
-   - **Public key** → wklej do `src-tauri/tauri.conf.json` → `plugins.updater.pubkey` (zamień `REPLACE_WITH_TAURI_SIGNING_PUBLIC_KEY`)
-   - **Private key + hasło** → w GitHub repo Settings → Secrets and variables → Actions:
-     - `TAURI_SIGNING_PRIVATE_KEY` — pełna zawartość pliku `.key`
-     - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` — hasło wybrane przy generowaniu
-   - Plik prywatny zachowaj w password managerze. **Utrata = nie ma jak wypuścić aktualizacji dla istniejących instalacji** (użytkownicy będą musieli reinstalować ręcznie).
-2. Zbumpuj wersję w trzech miejscach (muszą być spójne):
+   Łapie: błędy TypeScript, compile Rust, sidecar config, `lipo` universal binary, schema `tauri.conf.json`.
+
+2. **CI gate** (`.github/workflows/ci.yml`) — automat na każdy PR do `main`. Buduje obie platformy bez publikacji. Musi być zielone przed merge.
+
+3. **Tag RC dla testu end-to-end** gdy zmiana dotyka builda, updater'a, sidecara, podpisów albo czegokolwiek widocznego dopiero na realnej instalacji:
+   - Otaguj `vX.Y.Z-rc.1` (`.2`, `.3`…) — workflow wykrywa `-` w nazwie taga → ustawia `prerelease: true`
+   - GitHub pomija prereleases z `/releases/latest/`, więc istniejące instalacje go nie zobaczą
+   - Pobierz prerelease DMG/EXE ręcznie, zainstaluj, przejdź pełny scenariusz (transkrypcja, tłumaczenie, toast aktualizacji, restart)
+
+4. **Dopiero gdy wszystkie 3 przejdą** → otaguj `vX.Y.Z` (bez sufiksu) → publiczny release.
+
+### Klucz podpisu (jednorazowo)
+
+Wygeneruj parę kluczy podpisu updater'a na bezpiecznej maszynie:
+
+```
+npm run tauri signer generate -- -w ~/.tauri/transcriptpro.key
+```
+
+- **Public key** → wklej do `src-tauri/tauri.conf.json` → `plugins.updater.pubkey` (zamień `REPLACE_WITH_TAURI_SIGNING_PUBLIC_KEY`)
+- **Private key + hasło** → w GitHub repo Settings → Secrets and variables → Actions:
+  - `TAURI_SIGNING_PRIVATE_KEY` — pełna zawartość pliku `.key`
+  - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` — hasło wybrane przy generowaniu
+- Plik prywatny zachowaj w password managerze. **Utrata = nie ma jak wypuścić aktualizacji dla istniejących instalacji** (użytkownicy będą musieli reinstalować ręcznie).
+
+### Rutynowy release
+
+1. Zbumpuj wersję w trzech miejscach (muszą być spójne):
    - `package.json` → `version`
    - `src-tauri/tauri.conf.json` → `version`
    - `src-tauri/Cargo.toml` → `version`
+2. Przejdź **całą procedurę bramek** powyżej (lokalny build, CI, RC tag jeśli ryzykowne).
 3. `git tag vX.Y.Z && git push origin vX.Y.Z`
 4. GitHub Actions zbuduje macOS + Windows, podpisze, wrzuci **draft** release z plikami `.dmg`, `.exe`, `.sig` i `latest.json`. Otwórz Release, dopisz changelog, kliknij **Publish release**.
 5. Zainstalowane aplikacje pobiorą `latest.json` z `releases/latest/download/` i pokażą toast aktualizacji.
