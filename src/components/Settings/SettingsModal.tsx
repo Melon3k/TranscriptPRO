@@ -1,9 +1,11 @@
 import { X, Eye, EyeOff, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
-import { useSettingsStore } from "../../stores/settingsStore";
+import { useTranslation } from "react-i18next";
+import { useSettingsStore, type UiLanguage } from "../../stores/settingsStore";
 import { useUpdateStore } from "../../stores/updateStore";
 import { checkForUpdates } from "../../lib/updater";
+import { SUPPORTED_LANGUAGES } from "../../i18n";
 
 interface SettingsModalProps {
   open: boolean;
@@ -11,6 +13,7 @@ interface SettingsModalProps {
 }
 
 export default function SettingsModal({ open, onClose }: SettingsModalProps) {
+  const { t } = useTranslation(["settings", "common"]);
   const {
     geminiApiKey,
     setGeminiApiKey,
@@ -30,6 +33,8 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
     setAutoSaveOnImport,
     autoCheckUpdates,
     setAutoCheckUpdates,
+    language,
+    setLanguage,
   } = useSettingsStore();
 
   const updateStatus = useUpdateStore((s) => s.status);
@@ -52,9 +57,10 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
       >
         {/* Header */}
         <div className="flex shrink-0 items-center justify-between border-b border-gray-200 dark:border-gray-700 px-5 py-3">
-          <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-200">Settings</h2>
+          <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-200">{t("settings:title")}</h2>
           <button
             onClick={onClose}
+            aria-label={t("common:close")}
             className="rounded p-1 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
           >
             <X size={16} />
@@ -63,9 +69,27 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
 
         {/* Body */}
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 space-y-5">
+          {/* Language switcher — top of modal so users can find it from any locale */}
+          <div className="space-y-1.5">
+            <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">
+              {t("settings:language.label")}
+            </label>
+            <select
+              value={language}
+              onChange={(e) => setLanguage(e.target.value as UiLanguage)}
+              className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1.5 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
+            >
+              {SUPPORTED_LANGUAGES.map((lng) => (
+                <option key={lng} value={lng}>
+                  {t(`settings:language.${lng}`)}
+                </option>
+              ))}
+            </select>
+          </div>
+
           {/* Gemini API Key */}
           <ApiKeyField
-            label="Gemini API Key"
+            label={t("settings:geminiApiKey")}
             value={geminiApiKey}
             onChange={setGeminiApiKey}
             placeholder="AIzaSy..."
@@ -74,7 +98,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
           {/* Gemini Model */}
           <div className="space-y-1.5">
             <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">
-              Gemini Model
+              {t("settings:geminiModel")}
             </label>
             <select
               value={geminiModel}
@@ -90,7 +114,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
 
           {/* Claude API Key */}
           <ApiKeyField
-            label="Claude API Key"
+            label={t("settings:claudeApiKey")}
             value={claudeApiKey}
             onChange={setClaudeApiKey}
             placeholder="sk-ant-api03-..."
@@ -99,11 +123,11 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
           {/* LibreTranslate */}
           <div className="border-t border-gray-200 dark:border-gray-700 pt-4 space-y-3">
             <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-              LibreTranslate (Free)
+              {t("settings:libreTranslate.section")}
             </p>
             <div className="space-y-1.5">
               <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">
-                Server URL
+                {t("settings:libreTranslate.serverUrl")}
               </label>
               <input
                 type="text"
@@ -114,22 +138,22 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
               />
             </div>
             <ApiKeyField
-              label="API Key (optional)"
+              label={t("settings:libreTranslate.apiKey")}
               value={libreTranslateApiKey}
               onChange={setLibreTranslateApiKey}
-              placeholder="Leave empty for public server"
+              placeholder={t("settings:libreTranslate.apiKeyPlaceholder")}
             />
           </div>
 
           {/* Version history */}
           <div className="border-t border-gray-200 dark:border-gray-700 pt-4 space-y-2.5">
             <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-              Historia wersji
+              {t("settings:history.section")}
             </p>
             {([
-              ["Auto-zapisuj po transkrypcji", autoSaveOnTranscription, setAutoSaveOnTranscription],
-              ["Auto-zapisuj po tłumaczeniu", autoSaveOnTranslation, setAutoSaveOnTranslation],
-              ["Auto-zapisuj po imporcie SRT", autoSaveOnImport, setAutoSaveOnImport],
+              [t("settings:history.afterTranscription"), autoSaveOnTranscription, setAutoSaveOnTranscription],
+              [t("settings:history.afterTranslation"), autoSaveOnTranslation, setAutoSaveOnTranslation],
+              [t("settings:history.afterImport"), autoSaveOnImport, setAutoSaveOnImport],
             ] as [string, boolean, (v: boolean) => void][]).map(([label, value, setter]) => (
               <label key={label} className="flex items-center gap-2.5 cursor-pointer">
                 <input
@@ -143,14 +167,14 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
             ))}
           </div>
 
-          {/* Aktualizacje */}
+          {/* Updates */}
           <div className="border-t border-gray-200 dark:border-gray-700 pt-4 space-y-2.5">
             <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-              Aktualizacje
+              {t("settings:updates.section")}
             </p>
             <div className="flex items-center justify-between">
               <span className="text-sm text-gray-700 dark:text-gray-300">
-                Wersja aplikacji
+                {t("settings:updates.appVersion")}
               </span>
               <span className="text-sm font-mono text-gray-500 dark:text-gray-400">
                 {appVersion ? `v${appVersion}` : "—"}
@@ -164,7 +188,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
                 className="h-4 w-4 rounded border-gray-300 text-blue-500 focus:ring-blue-400"
               />
               <span className="text-sm text-gray-700 dark:text-gray-300">
-                Automatycznie sprawdzaj aktualizacje
+                {t("settings:updates.autoCheck")}
               </span>
             </label>
             <div className="flex items-center gap-2">
@@ -177,16 +201,16 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
                   size={12}
                   className={updateStatus === "checking" ? "animate-spin" : ""}
                 />
-                Sprawdź teraz
+                {t("settings:updates.checkNow")}
               </button>
               {updateStatus === "up-to-date" && (
                 <span className="text-xs text-green-600 dark:text-green-400">
-                  Masz najnowszą wersję
+                  {t("settings:updates.upToDate")}
                 </span>
               )}
               {updateStatus === "checking" && (
                 <span className="text-xs text-gray-500 dark:text-gray-400">
-                  Sprawdzanie…
+                  {t("settings:updates.checking")}
                 </span>
               )}
             </div>
@@ -199,7 +223,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
             onClick={onClose}
             className="rounded-lg bg-blue-500 hover:bg-blue-600 px-4 py-1.5 text-sm font-medium text-white transition-colors"
           >
-            Done
+            {t("common:done")}
           </button>
         </div>
       </div>

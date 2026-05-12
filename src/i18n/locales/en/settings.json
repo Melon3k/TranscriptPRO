@@ -1,0 +1,32 @@
+{
+  "title": "Settings",
+  "geminiApiKey": "Gemini API Key",
+  "geminiModel": "Gemini Model",
+  "claudeApiKey": "Claude API Key",
+  "libreTranslate": {
+    "section": "LibreTranslate (free)",
+    "serverUrl": "Server URL",
+    "apiKey": "API key (optional)",
+    "apiKeyPlaceholder": "Leave empty for the public server"
+  },
+  "history": {
+    "section": "Version history",
+    "afterTranscription": "Auto-save after transcription",
+    "afterTranslation": "Auto-save after translation",
+    "afterImport": "Auto-save after SRT import"
+  },
+  "updates": {
+    "section": "Updates",
+    "appVersion": "App version",
+    "autoCheck": "Automatically check for updates",
+    "checkNow": "Check now",
+    "checking": "Checking…",
+    "upToDate": "You're up to date"
+  },
+  "language": {
+    "section": "Language",
+    "label": "Interface language",
+    "pl": "Polski",
+    "en": "English"
+  }
+}

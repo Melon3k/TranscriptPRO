@@ -1,0 +1,14 @@
+{
+  "openMedia": "Open media",
+  "importSrt": "Import SRT",
+  "exportSrt": "Export SRT",
+  "wordSrt": "Word SRT",
+  "exportTxt": "Export TXT",
+  "undo": "Undo",
+  "redo": "Redo",
+  "showLogs": "Show logs",
+  "hideLogs": "Hide logs",
+  "lightMode": "Light mode",
+  "darkMode": "Dark mode",
+  "settings": "Settings"
+}

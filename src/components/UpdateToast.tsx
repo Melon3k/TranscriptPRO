@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Download, X, RefreshCw, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useUpdateStore } from "../stores/updateStore";
 import { installCurrentUpdate, checkForUpdates } from "../lib/updater";
 
@@ -10,6 +11,7 @@ function formatBytes(bytes: number): string {
 }
 
 export default function UpdateToast() {
+  const { t } = useTranslation(["update", "common"]);
   const status = useUpdateStore((s) => s.status);
   const version = useUpdateStore((s) => s.version);
   const notes = useUpdateStore((s) => s.notes);
@@ -49,20 +51,20 @@ export default function UpdateToast() {
           )}
           <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100">
             {status === "error"
-              ? "Błąd aktualizacji"
+              ? t("update:error")
               : status === "done"
-              ? "Aktualizacja gotowa"
+              ? t("update:ready")
               : status === "installing"
-              ? "Instalowanie…"
+              ? t("update:installing")
               : status === "downloading"
-              ? `Pobieranie v${version}`
-              : `Dostępna aktualizacja v${version}`}
+              ? t("update:downloading", { version })
+              : t("update:available", { version })}
           </h3>
         </div>
         {!busy && (
           <button
             onClick={status === "error" ? reset : dismiss}
-            aria-label="Zamknij"
+            aria-label={t("common:close")}
             className="rounded p-1 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
           >
             <X size={14} />
@@ -83,7 +85,7 @@ export default function UpdateToast() {
                     onClick={() => setShowDetails((v) => !v)}
                     className="mt-1 text-blue-500 hover:underline"
                   >
-                    {showDetails ? "Ukryj szczegóły" : "Pokaż szczegóły"}
+                    {showDetails ? t("update:hideDetails") : t("update:showDetails")}
                   </button>
                 )}
               </div>
@@ -93,13 +95,13 @@ export default function UpdateToast() {
                 onClick={() => void installCurrentUpdate()}
                 className="flex-1 rounded-md bg-blue-500 hover:bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition-colors"
               >
-                Zainstaluj teraz
+                {t("update:installNow")}
               </button>
               <button
                 onClick={dismiss}
                 className="rounded-md border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
               >
-                Później
+                {t("update:later")}
               </button>
             </div>
           </>
@@ -115,21 +117,25 @@ export default function UpdateToast() {
             </div>
             <p className="text-xs text-gray-500 dark:text-gray-400">
               {progressPct !== null
-                ? `${progressPct}% — ${formatBytes(downloaded)} / ${formatBytes(contentLength!)}`
-                : `${formatBytes(downloaded)} pobrano`}
+                ? t("update:downloadedOf", {
+                    percent: progressPct,
+                    downloaded: formatBytes(downloaded),
+                    total: formatBytes(contentLength!),
+                  })
+                : t("update:downloadedBytes", { downloaded: formatBytes(downloaded) })}
             </p>
           </>
         )}
 
         {status === "installing" && (
           <p className="text-xs text-gray-500 dark:text-gray-400">
-            Aplikacja uruchomi się ponownie za chwilę…
+            {t("update:willRestart")}
           </p>
         )}
 
         {status === "done" && (
           <p className="text-xs text-gray-500 dark:text-gray-400">
-            Restartowanie…
+            {t("update:restarting")}
           </p>
         )}
 
@@ -142,13 +148,13 @@ export default function UpdateToast() {
                 className="flex-1 rounded-md bg-blue-500 hover:bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition-colors inline-flex items-center justify-center gap-1.5"
               >
                 <RefreshCw size={12} />
-                Spróbuj ponownie
+                {t("update:tryAgain")}
               </button>
               <button
                 onClick={reset}
                 className="rounded-md border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
               >
-                Zamknij
+                {t("common:close")}
               </button>
             </div>
           </>

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { useTranslation } from "react-i18next";
 import { useSubtitleStore } from "../../stores/subtitleStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { usePlayerStore } from "../../stores/playerStore";
@@ -20,6 +21,7 @@ import { Mic, Languages, History, X, Upload } from "lucide-react";
 type SidePanel = "transcription" | "translation" | "history";
 
 export default function MainLayout() {
+  const { t } = useTranslation("common");
   const { undo, redo, canUndo, canRedo, setSubtitles } = useSubtitleStore();
   const { setFilePath } = usePlayerStore();
   const { setProjectKey, addVersion } = useVersionStore();
@@ -39,7 +41,7 @@ export default function MainLayout() {
         const exts = paths
           .map((p) => p.split(".").pop()?.toLowerCase() ?? "?")
           .join(", ");
-        setError(`Unsupported file format: ${exts}. Drop a media file or .srt.`);
+        setError(t("unsupportedFileFormat", { exts }));
         return;
       }
       setError(null);
@@ -53,10 +55,10 @@ export default function MainLayout() {
           setAudioPath(audio);
           setActivePanel("transcription");
         },
-        onError: (msg) => setError(`Audio extraction failed: ${msg}. Make sure FFmpeg is installed.`),
+        onError: (msg) => setError(t("audioExtractionFailed", { error: msg })),
       });
     },
-    [setFilePath, setProjectKey, setSubtitles, addVersion, autoSaveOnImport],
+    [t, setFilePath, setProjectKey, setSubtitles, addVersion, autoSaveOnImport],
   );
 
   const { isDragging } = useFileDrop(handleDroppedFiles);
@@ -134,19 +136,19 @@ export default function MainLayout() {
           <div className="flex border-b border-gray-200 dark:border-gray-700">
             <PanelTab
               icon={<Mic size={14} />}
-              label="Transcribe"
+              label={t("transcribe")}
               active={activePanel === "transcription"}
               onClick={() => setActivePanel("transcription")}
             />
             <PanelTab
               icon={<Languages size={14} />}
-              label="Translate"
+              label={t("translate")}
               active={activePanel === "translation"}
               onClick={() => setActivePanel("translation")}
             />
             <PanelTab
               icon={<History size={14} />}
-              label="Historia"
+              label={t("history")}
               active={activePanel === "history"}
               onClick={() => setActivePanel("history")}
             />
@@ -176,10 +178,10 @@ export default function MainLayout() {
             <Upload size={36} className="text-blue-500" />
             <div className="text-center">
               <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">
-                Upuść plik aby otworzyć
+                {t("dropFileToOpen")}
               </p>
               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                Wideo / audio → transkrypcja • .srt → import napisów
+                {t("dropFileHint")}
               </p>
             </div>
           </div>
