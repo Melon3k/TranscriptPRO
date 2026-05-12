@@ -24,9 +24,13 @@ pub async fn extract_audio(app: AppHandle, input_path: String) -> Result<String,
     );
     let started = std::time::Instant::now();
 
-    let output = app
-        .shell()
-        .command("ffmpeg")
+    let sidecar = app.shell().sidecar("ffmpeg").map_err(|e| {
+        let msg = format!("Bundled FFmpeg sidecar is unavailable: {}", e);
+        logger::error(&app, "audio", &msg);
+        AppError::AudioExtractionFailed(msg)
+    })?;
+
+    let output = sidecar
         .args([
             "-i",
             &input_path,
@@ -42,10 +46,7 @@ pub async fn extract_audio(app: AppHandle, input_path: String) -> Result<String,
         .output()
         .await
         .map_err(|e: tauri_plugin_shell::Error| {
-            let msg = format!(
-                "FFmpeg not found. Install it via 'brew install ffmpeg' or add it to PATH. ({})",
-                e
-            );
+            let msg = format!("FFmpeg execution failed: {}", e);
             logger::error(&app, "audio", &msg);
             AppError::AudioExtractionFailed(msg)
         })?;

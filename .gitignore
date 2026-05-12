@@ -36,3 +36,6 @@ src-tauri/binaries
 
 # Local Cargo overrides (e.g. target-dir off external drives — user-specific)
 src-tauri/.cargo/config.toml
+
+# ffmpeg sidecar binaries — downloaded by scripts/download-ffmpeg.sh, not committed
+src-tauri/binaries/

@@ -52,6 +52,23 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Download ffmpeg sidecar (macOS)
+        if: matrix.platform == 'macos-latest'
+        run: bash scripts/download-ffmpeg.sh macos
+
+      - name: Download ffmpeg sidecar (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path src-tauri/binaries | Out-Null
+          $zip = "$env:RUNNER_TEMP\ffmpeg.zip"
+          $dir = "$env:RUNNER_TEMP\ffmpeg-extracted"
+          Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $dir -Force
+          $exe = Get-ChildItem -Path $dir -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
+          if (-not $exe) { throw "ffmpeg.exe not found in archive" }
+          Copy-Item -Path $exe.FullName -Destination "src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe"
+
       - name: Build & release Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
