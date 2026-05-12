@@ -1,0 +1,11 @@
+{
+  "close": "Close",
+  "cancel": "Cancel",
+  "save": "Save",
+  "done": "Done",
+  "loading": "Loading…",
+  "transcribe": "Transcribe",
+  "translate": "Translate",
+  "history": "History",
+  "audioExtractionFailed": "Audio extraction failed: {{error}}"
+}

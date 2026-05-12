@@ -1,0 +1,14 @@
+{
+  "openMedia": "Otwórz media",
+  "importSrt": "Importuj SRT",
+  "exportSrt": "Eksportuj SRT",
+  "wordSrt": "SRT per słowo",
+  "exportTxt": "Eksportuj TXT",
+  "undo": "Cofnij",
+  "redo": "Ponów",
+  "showLogs": "Pokaż logi",
+  "hideLogs": "Ukryj logi",
+  "lightMode": "Tryb jasny",
+  "darkMode": "Tryb ciemny",
+  "settings": "Ustawienia"
+}

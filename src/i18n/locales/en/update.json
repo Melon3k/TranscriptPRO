@@ -1,0 +1,16 @@
+{
+  "available": "Update available v{{version}}",
+  "downloading": "Downloading v{{version}}",
+  "installing": "Installing…",
+  "ready": "Update ready",
+  "error": "Update error",
+  "installNow": "Install now",
+  "later": "Later",
+  "tryAgain": "Try again",
+  "showDetails": "Show details",
+  "hideDetails": "Hide details",
+  "willRestart": "The app will restart shortly…",
+  "restarting": "Restarting…",
+  "downloadedOf": "{{percent}}% — {{downloaded}} / {{total}}",
+  "downloadedBytes": "{{downloaded}} downloaded"
+}

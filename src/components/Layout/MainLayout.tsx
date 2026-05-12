@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { useTranslation } from "react-i18next";
 import { useSubtitleStore } from "../../stores/subtitleStore";
 import { useLogStore, type LogEntry } from "../../stores/logStore";
 import Toolbar from "./Toolbar";
@@ -15,6 +16,7 @@ import { Mic, Languages, History, X } from "lucide-react";
 type SidePanel = "transcription" | "translation" | "history";
 
 export default function MainLayout() {
+  const { t } = useTranslation("common");
   const { undo, redo, canUndo, canRedo } = useSubtitleStore();
   const appendLog = useLogStore((s) => s.append);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -95,19 +97,19 @@ export default function MainLayout() {
           <div className="flex border-b border-gray-200 dark:border-gray-700">
             <PanelTab
               icon={<Mic size={14} />}
-              label="Transcribe"
+              label={t("transcribe")}
               active={activePanel === "transcription"}
               onClick={() => setActivePanel("transcription")}
             />
             <PanelTab
               icon={<Languages size={14} />}
-              label="Translate"
+              label={t("translate")}
               active={activePanel === "translation"}
               onClick={() => setActivePanel("translation")}
             />
             <PanelTab
               icon={<History size={14} />}
-              label="Historia"
+              label={t("history")}
               active={activePanel === "history"}
               onClick={() => setActivePanel("history")}
             />

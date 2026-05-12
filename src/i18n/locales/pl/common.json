@@ -1,0 +1,11 @@
+{
+  "close": "Zamknij",
+  "cancel": "Anuluj",
+  "save": "Zapisz",
+  "done": "Gotowe",
+  "loading": "Ładowanie…",
+  "transcribe": "Transkrypcja",
+  "translate": "Tłumaczenie",
+  "history": "Historia",
+  "audioExtractionFailed": "Nie udało się wyekstrahować dźwięku: {{error}}"
+}
