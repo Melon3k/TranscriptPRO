@@ -205,14 +205,15 @@ function PanelTab({
   return (
     <button
       onClick={onClick}
-      className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors ${
+      title={label}
+      className={`flex-1 min-w-0 flex items-center justify-center gap-1 px-1.5 py-2 text-xs font-medium transition-colors ${
         active
           ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-500"
           : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
       }`}
     >
-      {icon}
-      {label}
+      <span className="shrink-0">{icon}</span>
+      <span className="truncate">{label}</span>
     </button>
   );
 }
