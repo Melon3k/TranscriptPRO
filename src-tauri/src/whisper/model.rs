@@ -171,7 +171,7 @@ pub fn transcribe(
             progress: 0.0,
             message: "Cancelled".into(),
         });
-        return Err(AppError::Other("Transcription cancelled".into()));
+        return Err(AppError::Cancelled);
     }
 
     // ── Extract segments ────────────────────────────────────────────────

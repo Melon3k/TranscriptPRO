@@ -1,1 +1,7 @@
-{}
+{
+  "header": "Logs",
+  "clear": "Clear logs",
+  "clearShort": "Clear",
+  "close": "Close logs",
+  "empty": "No log entries yet."
+}

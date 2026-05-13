@@ -10,8 +10,11 @@ import {
   Clock,
   GitCompare,
 } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { useVersionStore } from "../../stores/versionStore";
 import { useSubtitleStore } from "../../stores/subtitleStore";
+import { useSettingsStore } from "../../stores/settingsStore";
 import { SubtitleVersion, VersionAction } from "../../types/version";
 import { Subtitle } from "../../types/subtitle";
 import { formatTimestamp } from "../../lib/time-format";
@@ -26,8 +29,8 @@ function actionIcon(action: VersionAction) {
   }
 }
 
-function formatTs(timestamp: number): string {
-  return new Date(timestamp).toLocaleString("pl-PL", {
+function formatTs(timestamp: number, locale: string): string {
+  return new Date(timestamp).toLocaleString(locale === "pl" ? "pl-PL" : "en-US", {
     day: "2-digit",
     month: "2-digit",
     hour: "2-digit",
@@ -103,9 +106,11 @@ function DiffRow({ diff }: { diff: SubtitleDiff }) {
 function DiffPanel({
   version,
   current,
+  t,
 }: {
   version: Subtitle[];
   current: Subtitle[];
+  t: TFunction;
 }) {
   const diffs = diffSubtitles(current, version);
   const changed = diffs.filter((d) => d.status !== "equal").length;
@@ -118,20 +123,26 @@ function DiffPanel({
       {/* Summary bar */}
       <div className="flex items-center gap-3 px-2 py-1 bg-gray-100 dark:bg-gray-700 text-[11px]">
         <span className="text-gray-500 dark:text-gray-400 flex items-center gap-1">
-          <GitCompare size={11} /> Różnice vs obecny
+          <GitCompare size={11} /> {t("history:diffVsCurrent")}
         </span>
         {changed === 0 ? (
-          <span className="text-gray-400">brak zmian</span>
+          <span className="text-gray-400">{t("history:noChanges")}</span>
         ) : (
           <>
             {modified > 0 && (
-              <span className="text-amber-600 dark:text-amber-400">{modified} zmienionych</span>
+              <span className="text-amber-600 dark:text-amber-400">
+                {t("history:modified", { count: modified })}
+              </span>
             )}
             {added > 0 && (
-              <span className="text-green-600 dark:text-green-400">+{added} dodanych</span>
+              <span className="text-green-600 dark:text-green-400">
+                {t("history:added", { count: added })}
+              </span>
             )}
             {removed > 0 && (
-              <span className="text-red-500 dark:text-red-400">−{removed} usuniętych</span>
+              <span className="text-red-500 dark:text-red-400">
+                {t("history:removed", { count: removed })}
+              </span>
             )}
           </>
         )}
@@ -141,7 +152,7 @@ function DiffPanel({
       <div className="max-h-64 overflow-y-auto">
         {changed === 0 ? (
           <p className="px-3 py-2 text-xs text-gray-400 dark:text-gray-500 text-center">
-            Ta wersja jest identyczna z obecnym stanem.
+            {t("history:identicalToCurrent")}
           </p>
         ) : (
           diffs
@@ -159,12 +170,16 @@ function VersionItem({
   isPreviewing,
   onTogglePreview,
   onRestore,
+  t,
+  locale,
 }: {
   version: SubtitleVersion;
   current: Subtitle[];
   isPreviewing: boolean;
   onTogglePreview: () => void;
   onRestore: () => void;
+  t: TFunction;
+  locale: string;
 }) {
   return (
     <li className="rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 overflow-hidden">
@@ -177,21 +192,21 @@ function VersionItem({
             {version.label}
           </p>
           <p className="text-[11px] text-gray-400 dark:text-gray-500">
-            {formatTs(version.timestamp)} · {version.subtitles.length} seg.
+            {formatTs(version.timestamp, locale)} · {version.subtitles.length} {t("history:segmentsShort")}
           </p>
         </div>
         <div className="flex items-center gap-1 shrink-0">
           <button
             onClick={onRestore}
-            title="Przywróć tę wersję"
+            title={t("history:restoreTitle")}
             className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium bg-blue-500 hover:bg-blue-600 text-white transition-colors"
           >
             <RotateCcw size={11} />
-            Przywróć
+            {t("history:restore")}
           </button>
           <button
             onClick={onTogglePreview}
-            title={isPreviewing ? "Ukryj różnice" : "Pokaż różnice"}
+            title={isPreviewing ? t("history:hideDiff") : t("history:showDiff")}
             className="rounded p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
           >
             {isPreviewing ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
@@ -200,7 +215,7 @@ function VersionItem({
       </div>
       {isPreviewing && (
         <div className="px-2.5 pb-2.5">
-          <DiffPanel version={version.subtitles} current={current} />
+          <DiffPanel version={version.subtitles} current={current} t={t} />
         </div>
       )}
     </li>
@@ -208,6 +223,8 @@ function VersionItem({
 }
 
 export default function HistoryPanel() {
+  const { t } = useTranslation(["history", "common"]);
+  const locale = useSettingsStore((s) => s.language);
   const { versions, addVersion, restoreVersion } = useVersionStore();
   const { subtitles, setSubtitles } = useSubtitleStore();
   const [previewId, setPreviewId] = useState<string | null>(null);
@@ -231,7 +248,7 @@ export default function HistoryPanel() {
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2">
           <Clock size={16} />
-          Historia wersji
+          {t("history:header")}
         </h3>
         <button
           onClick={handleManualSave}
@@ -239,16 +256,16 @@ export default function HistoryPanel() {
           className="flex items-center gap-1 rounded px-2 py-1 text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
           <Save size={12} />
-          Zapisz wersję
+          {t("history:saveManual")}
         </button>
       </div>
 
       {/* Empty state */}
       {versions.length === 0 && (
         <p className="text-xs text-gray-400 dark:text-gray-500 text-center py-4">
-          Brak zapisanych wersji.
+          {t("history:empty")}
           <br />
-          Wersje są tworzone automatycznie po transkrypcji i tłumaczeniu.
+          {t("history:emptyHint")}
         </p>
       )}
 
@@ -262,6 +279,8 @@ export default function HistoryPanel() {
             isPreviewing={previewId === v.id}
             onTogglePreview={() => handleTogglePreview(v.id)}
             onRestore={() => handleRestore(v.id)}
+            t={t}
+            locale={locale}
           />
         ))}
       </ul>

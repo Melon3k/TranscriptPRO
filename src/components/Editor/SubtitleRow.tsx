@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Scissors, ChevronUp, ChevronDown, Trash2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Subtitle } from "../../types/subtitle";
 import { formatTimestamp, parseTimestamp } from "../../lib/time-format";
 
@@ -45,6 +46,7 @@ export default function SubtitleRow({
   isFirst,
   isLast,
 }: SubtitleRowProps) {
+  const { t } = useTranslation(["editor"]);
   const [editing, setEditing] = useState(false);
   const [editingText, setEditingText] = useState(subtitle.text);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -149,7 +151,7 @@ export default function SubtitleRow({
     >
       {isDropTarget && (
         <div className="text-[11px] text-green-600 dark:text-green-400 font-medium mb-1.5 flex items-center gap-1">
-          <span>↓ Kliknij aby przenieść tutaj</span>
+          <span>{t("editor:dropHereHint")}</span>
         </div>
       )}
       <div className="flex gap-2">
@@ -199,7 +201,7 @@ export default function SubtitleRow({
             <div
               className="px-2 py-1 cursor-text min-h-[2rem]"
               onDoubleClick={() => setEditing(true)}
-              title="Double-click to edit text"
+              title={t("editor:doubleClickToEdit")}
             >
               {/* Sentence text */}
               <p className="text-sm leading-relaxed text-gray-800 dark:text-gray-200">
@@ -227,8 +229,11 @@ export default function SubtitleRow({
                         }`}
                         title={
                           isSelected
-                            ? "Zaznaczone — przeciągnij do innego bloku (⌘+klik aby odznaczyć)"
-                            : `${formatTimestamp(word.startTime)} → ${formatTimestamp(word.endTime)} · ⌘+klik aby zaznaczyć`
+                            ? t("editor:wordSelected")
+                            : t("editor:wordTooltip", {
+                                startTime: formatTimestamp(word.startTime),
+                                endTime: formatTimestamp(word.endTime),
+                              })
                         }
                       >
                         {word.text}
@@ -272,7 +277,7 @@ export default function SubtitleRow({
                     </>
                   ) : (
                     <span className="text-xs text-green-600 dark:text-green-400 italic">
-                      (brak słów — kliknij aby wstawić na końcu)
+                      {t("editor:emptyWordsHint")}
                     </span>
                   )}
                 </div>
@@ -285,24 +290,24 @@ export default function SubtitleRow({
         <div className="flex flex-col gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
           <ActionButton
             icon={<Scissors size={13} />}
-            title="Split"
+            title={t("editor:actions.split")}
             onClick={() => onSplit(subtitle.id)}
           />
           <ActionButton
             icon={<ChevronUp size={13} />}
-            title="Merge up"
+            title={t("editor:actions.mergeUp")}
             onClick={() => onMergeUp(subtitle.id)}
             disabled={isFirst}
           />
           <ActionButton
             icon={<ChevronDown size={13} />}
-            title="Merge down"
+            title={t("editor:actions.mergeDown")}
             onClick={() => onMergeDown(subtitle.id)}
             disabled={isLast}
           />
           <ActionButton
             icon={<Trash2 size={13} />}
-            title="Delete"
+            title={t("editor:actions.delete")}
             onClick={() => onDelete(subtitle.id)}
             danger
           />
@@ -321,6 +326,7 @@ function TimestampInput({
   onChange: (v: string) => void;
   onClick: () => void;
 }) {
+  const { t } = useTranslation(["editor"]);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
 
@@ -353,7 +359,7 @@ function TimestampInput({
       className="timestamp-input w-[7.5rem] rounded px-1.5 py-0.5 text-left text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
       onClick={onClick}
       onDoubleClick={() => setEditing(true)}
-      title="Click to seek, double-click to edit"
+      title={t("editor:timestampHint")}
     >
       {value}
     </button>
@@ -413,6 +419,7 @@ function InsertionZone({
   onDragOver: () => void;
   onDrop: (e: React.DragEvent) => void;
 }) {
+  const { t } = useTranslation(["editor"]);
   return (
     <button
       className={`mx-0.5 h-5 w-3 flex items-center justify-center rounded transition-all shrink-0 ${
@@ -420,7 +427,7 @@ function InsertionZone({
           ? "bg-green-300 dark:bg-green-600 w-4"
           : "hover:bg-green-200 dark:hover:bg-green-800"
       }`}
-      title={`Wstaw tutaj (pozycja ${index})`}
+      title={t("editor:insertHere", { index })}
       onMouseEnter={onHover}
       onClick={onClick}
       onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); onDragOver(); }}

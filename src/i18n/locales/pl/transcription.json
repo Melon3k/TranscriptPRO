@@ -1,1 +1,27 @@
-{}
+{
+  "header": "Transkrypcja",
+  "modelLabel": "Model Whisper",
+  "downloading": "Pobieranie… {{percent}}%",
+  "downloadModel": "Pobierz model ({{sizeMb}} MB)",
+  "languageLabel": "Język",
+  "language": {
+    "auto": "Wykryj automatycznie",
+    "en": "Angielski",
+    "pl": "Polski",
+    "de": "Niemiecki",
+    "fr": "Francuski",
+    "es": "Hiszpański",
+    "it": "Włoski",
+    "pt": "Portugalski",
+    "nl": "Holenderski",
+    "ja": "Japoński",
+    "ko": "Koreański",
+    "zh": "Chiński",
+    "ru": "Rosyjski",
+    "uk": "Ukraiński"
+  },
+  "detectSpeakers": "Wykrywaj mówców",
+  "transcribe": "Transkrybuj",
+  "cancel": "Anuluj",
+  "emptyState": "Otwórz plik multimedialny aby rozpocząć transkrypcję"
+}

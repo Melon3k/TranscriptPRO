@@ -1,1 +1,24 @@
-{}
+{
+  "emptyTitle": "No subtitles loaded",
+  "emptyHint": "Open a media file or import an SRT",
+  "selectionBanner_one": "{{count}} word selected — click a target block to move",
+  "selectionBanner_other": "{{count}} words selected — click a target block to move",
+  "clearSelection": "Clear selection",
+  "dropHereHint": "↓ Click to move here",
+  "doubleClickToEdit": "Double-click to edit text",
+  "wordSelected": "Selected — drag to another block (⌘+click to deselect)",
+  "wordTooltip": "{{startTime}} → {{endTime}} · ⌘+click to select",
+  "emptyWordsHint": "(no words — click to insert at end)",
+  "actions": {
+    "split": "Split",
+    "mergeUp": "Merge up",
+    "mergeDown": "Merge down",
+    "delete": "Delete"
+  },
+  "timestampHint": "Click to seek, double-click to edit",
+  "insertHere": "Insert here (position {{index}})",
+  "comparison": {
+    "original": "Original",
+    "translated": "Translated"
+  }
+}

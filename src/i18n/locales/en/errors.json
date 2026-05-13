@@ -1,1 +1,11 @@
-{}
+{
+  "MODEL_NOT_FOUND": "Model is not downloaded. Please download it first.",
+  "MODEL_DOWNLOAD_FAILED": "Failed to download model: {{detail}}",
+  "AUDIO_EXTRACTION_FAILED": "Failed to extract audio: {{detail}}",
+  "TRANSCRIPTION_FAILED": "Transcription failed: {{detail}}",
+  "TRANSLATION_API_ERROR": "Translation service error: {{detail}}",
+  "FILE_ERROR": "File error: {{detail}}",
+  "INVALID_SRT_FORMAT": "Invalid SRT format: {{detail}}",
+  "CANCELLED": "Operation cancelled",
+  "UNKNOWN_ERROR": "Unexpected error: {{detail}}"
+}

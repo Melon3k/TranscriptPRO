@@ -1,11 +1,31 @@
 import { useState } from "react";
 import { Languages, Loader2, Columns2, X } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useSubtitleStore } from "../../stores/subtitleStore";
 import { useVersionStore } from "../../stores/versionStore";
 import { translateSubtitles } from "../../lib/tauri-commands";
+import { formatError } from "../../lib/error-format";
+
+const PROVIDER_OPTIONS = ["libretranslate", "gemini", "claude"] as const;
+const LANGUAGE_OPTIONS = [
+  "EN",
+  "PL",
+  "DE",
+  "FR",
+  "ES",
+  "IT",
+  "PT",
+  "NL",
+  "JA",
+  "KO",
+  "ZH",
+  "RU",
+  "UK",
+] as const;
 
 export default function TranslationPanel() {
+  const { t } = useTranslation(["translation", "common"]);
   const {
     translationProvider,
     setTranslationProvider,
@@ -70,7 +90,7 @@ export default function TranslationPanel() {
       }
       setTranslated(true);
     } catch (e) {
-      setError(String(e));
+      setError(formatError(t, e));
       // Clear snapshot on failure
       clearOriginalSubtitles();
     } finally {
@@ -82,13 +102,13 @@ export default function TranslationPanel() {
     <div className="p-4 space-y-4">
       <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2">
         <Languages size={16} />
-        Translation
+        {t("translation:header")}
       </h3>
 
       {/* Provider */}
       <div className="space-y-2">
         <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">
-          Provider
+          {t("translation:providerLabel")}
         </label>
         <select
           value={translationProvider}
@@ -96,16 +116,18 @@ export default function TranslationPanel() {
           className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1.5 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
           disabled={translating}
         >
-          <option value="libretranslate">LibreTranslate (Free)</option>
-          <option value="gemini">Gemini</option>
-          <option value="claude">Claude</option>
+          {PROVIDER_OPTIONS.map((p) => (
+            <option key={p} value={p}>
+              {t(`translation:provider.${p}`)}
+            </option>
+          ))}
         </select>
       </div>
 
       {/* Target language */}
       <div className="space-y-2">
         <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">
-          Target language
+          {t("translation:targetLanguageLabel")}
         </label>
         <select
           value={targetLang}
@@ -113,26 +135,18 @@ export default function TranslationPanel() {
           className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1.5 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
           disabled={translating}
         >
-          <option value="EN">English</option>
-          <option value="PL">Polish</option>
-          <option value="DE">German</option>
-          <option value="FR">French</option>
-          <option value="ES">Spanish</option>
-          <option value="IT">Italian</option>
-          <option value="PT">Portuguese</option>
-          <option value="NL">Dutch</option>
-          <option value="JA">Japanese</option>
-          <option value="KO">Korean</option>
-          <option value="ZH">Chinese</option>
-          <option value="RU">Russian</option>
-          <option value="UK">Ukrainian</option>
+          {LANGUAGE_OPTIONS.map((code) => (
+            <option key={code} value={code}>
+              {t(`translation:language.${code}`)}
+            </option>
+          ))}
         </select>
       </div>
 
       {/* Source language (optional) */}
       <div className="space-y-2">
         <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">
-          Source language (optional)
+          {t("translation:sourceLanguageLabel")}
         </label>
         <select
           value={sourceLang}
@@ -140,20 +154,12 @@ export default function TranslationPanel() {
           className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1.5 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
           disabled={translating}
         >
-          <option value="">Auto-detect</option>
-          <option value="EN">English</option>
-          <option value="PL">Polish</option>
-          <option value="DE">German</option>
-          <option value="FR">French</option>
-          <option value="ES">Spanish</option>
-          <option value="IT">Italian</option>
-          <option value="PT">Portuguese</option>
-          <option value="NL">Dutch</option>
-          <option value="JA">Japanese</option>
-          <option value="KO">Korean</option>
-          <option value="ZH">Chinese</option>
-          <option value="RU">Russian</option>
-          <option value="UK">Ukrainian</option>
+          <option value="">{t("translation:sourceAuto")}</option>
+          {LANGUAGE_OPTIONS.map((code) => (
+            <option key={code} value={code}>
+              {t(`translation:language.${code}`)}
+            </option>
+          ))}
         </select>
       </div>
 
@@ -170,12 +176,12 @@ export default function TranslationPanel() {
         {translating ? (
           <>
             <Loader2 size={16} className="animate-spin" />
-            Translating...
+            {t("translation:translating")}
           </>
         ) : (
           <>
             <Languages size={16} />
-            Translate ({subtitles.length} segments)
+            {t("translation:translate", { count: subtitles.length })}
           </>
         )}
       </button>
@@ -194,12 +200,12 @@ export default function TranslationPanel() {
             {comparisonMode ? (
               <>
                 <X size={16} />
-                Hide comparison
+                {t("translation:hideComparison")}
               </>
             ) : (
               <>
                 <Columns2 size={16} />
-                Compare with original
+                {t("translation:compare")}
               </>
             )}
           </button>
@@ -212,7 +218,7 @@ export default function TranslationPanel() {
               }}
               className="w-full text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
             >
-              Dismiss original
+              {t("translation:dismissOriginal")}
             </button>
           )}
         </div>
@@ -221,12 +227,14 @@ export default function TranslationPanel() {
       {/* Warnings */}
       {!apiKey && translationProvider !== "libretranslate" && (
         <p className="text-xs text-amber-500 dark:text-amber-400 text-center">
-          Set your {translationProvider === "gemini" ? "Gemini" : "Claude"} API key in Settings
+          {t("translation:apiKeyMissing", {
+            provider: t(`translation:providerName.${translationProvider}`),
+          })}
         </p>
       )}
       {translationProvider === "libretranslate" && (
         <p className="text-xs text-green-600 dark:text-green-400 text-center">
-          Free — no API key required
+          {t("translation:freeNoKey")}
         </p>
       )}
 

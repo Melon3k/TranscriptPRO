@@ -55,7 +55,7 @@ export default function MainLayout() {
           setAudioPath(audio);
           setActivePanel("transcription");
         },
-        onError: (msg) => setError(t("audioExtractionFailed", { error: msg })),
+        onError: (msg) => setError(msg),
       });
     },
     [t, setFilePath, setProjectKey, setSubtitles, addVersion, autoSaveOnImport],

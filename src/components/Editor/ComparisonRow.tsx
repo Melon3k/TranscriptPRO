@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Subtitle } from "../../types/subtitle";
 import { formatTimestamp } from "../../lib/time-format";
 
@@ -12,6 +13,7 @@ export default function ComparisonRow({
   translated,
   isActive,
 }: ComparisonRowProps) {
+  const { t } = useTranslation(["editor"]);
   return (
     <div
       className={`rounded-lg border px-3 py-2 transition-colors ${
@@ -35,7 +37,7 @@ export default function ComparisonRow({
         <div className="flex-1 min-w-0 border-r border-gray-200 dark:border-gray-700 pr-3">
           <div className="flex items-center gap-1.5 mb-0.5">
             <span className="text-[9px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
-              Original
+              {t("editor:comparison.original")}
             </span>
           </div>
           <p className="text-sm leading-relaxed text-gray-500 dark:text-gray-400 italic">
@@ -47,7 +49,7 @@ export default function ComparisonRow({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 mb-0.5">
             <span className="text-[9px] font-semibold uppercase tracking-wider text-blue-500 dark:text-blue-400">
-              Translated
+              {t("editor:comparison.translated")}
             </span>
           </div>
           <p className="text-sm leading-relaxed text-gray-800 dark:text-gray-200">

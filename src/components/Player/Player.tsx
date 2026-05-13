@@ -1,10 +1,12 @@
 import { useRef, useEffect, useCallback } from "react";
 import { Play, Pause, SkipBack, SkipForward, Volume2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { usePlayerStore } from "../../stores/playerStore";
 import { formatDuration } from "../../lib/time-format";
 import { convertFileSrc } from "@tauri-apps/api/core";
 
 export default function Player() {
+  const { t } = useTranslation(["player"]);
   const {
     filePath,
     currentTimeMs,
@@ -103,7 +105,7 @@ export default function Player() {
           onClick={() => skip(-5000)}
           className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 disabled:opacity-30"
           disabled={!filePath}
-          title="Back 5s"
+          title={t("player:back5s")}
         >
           <SkipBack size={16} />
         </button>
@@ -120,7 +122,7 @@ export default function Player() {
           onClick={() => skip(5000)}
           className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 disabled:opacity-30"
           disabled={!filePath}
-          title="Forward 5s"
+          title={t("player:forward5s")}
         >
           <SkipForward size={16} />
         </button>

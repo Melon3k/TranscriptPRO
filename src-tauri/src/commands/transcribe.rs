@@ -78,11 +78,11 @@ pub async fn download_model(
         .await
         .map_err(|e: reqwest::Error| {
             logger::error(&app, "model", format!("Download request failed: {}", e));
-            AppError::Other(format!("Download failed: {}", e))
+            AppError::ModelDownloadFailed(format!("Download failed: {}", e))
         })?;
 
     if !response.status().is_success() {
-        return Err(AppError::Other(format!(
+        return Err(AppError::ModelDownloadFailed(format!(
             "Download failed with status: {}",
             response.status()
         )));
@@ -106,7 +106,7 @@ pub async fn download_model(
     let mut stream = response.bytes_stream();
 
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e: reqwest::Error| AppError::Other(e.to_string()))?;
+        let chunk = chunk.map_err(|e: reqwest::Error| AppError::ModelDownloadFailed(e.to_string()))?;
         file.write_all(&chunk)
             .await
             .map_err(|e: std::io::Error| AppError::FileError(e.to_string()))?;

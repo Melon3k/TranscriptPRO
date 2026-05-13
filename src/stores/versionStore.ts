@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import i18n from "../i18n";
 import { Subtitle } from "../types/subtitle";
 import {
   SubtitleVersion,
@@ -20,13 +21,24 @@ function deriveProjectKey(filePath: string): string {
 function makeLabel(action: VersionAction, metadata: SubtitleVersionMetadata): string {
   switch (action) {
     case "transcription":
-      return `Transkrypcja (${metadata.whisperModel ?? ""}, ${metadata.language ?? "auto"})`;
+      return i18n.t("history:label.transcription", {
+        ns: "history",
+        whisperModel: metadata.whisperModel ?? "",
+        language: metadata.language ?? "auto",
+      });
     case "translation":
-      return `Tłumaczenie → ${metadata.targetLang} (${metadata.provider})`;
+      return i18n.t("history:label.translation", {
+        ns: "history",
+        targetLang: metadata.targetLang ?? "",
+        provider: metadata.provider ?? "",
+      });
     case "import":
-      return `Import SRT: ${metadata.srtPath?.split("/").pop() ?? ""}`;
+      return i18n.t("history:label.import", {
+        ns: "history",
+        filename: metadata.srtPath?.split("/").pop() ?? "",
+      });
     case "manual":
-      return "Zapisana ręcznie";
+      return i18n.t("history:label.manual", { ns: "history" });
   }
 }
 
