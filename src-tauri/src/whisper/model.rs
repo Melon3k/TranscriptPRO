@@ -28,9 +28,10 @@ unsafe extern "C" fn progress_trampoline(
     let frac = (progress as f32 / 100.0).clamp(0.0, 1.0);
     let mapped = 0.10 + 0.75 * frac;
     let _ = channel.send(TranscriptionProgress {
-        stage: "transcribing".into(),
+        stage: "transcribing_audio".into(),
         progress: mapped,
         message: format!("Transcribing audio… {}%", progress),
+        ..Default::default()
     });
 }
 
@@ -62,28 +63,15 @@ pub fn transcribe(
         stage: "loading_model".into(),
         progress: 0.0,
         message: "Loading Whisper model…".into(),
+        ..Default::default()
     });
-
-    let load_started = Instant::now();
-    let ctx = WhisperContext::new_with_params(
-        model_path.to_str().unwrap_or_default(),
-        WhisperContextParameters::default(),
-    )
-    .map_err(|e| {
-        logger::error(app, "whisper", format!("Model load failed: {}", e));
-        AppError::TranscriptionFailed(format!("Failed to load model: {}", e))
-    })?;
-    logger::info(
-        app,
-        "whisper",
-        format!("Model loaded in {:.2}s", load_started.elapsed().as_secs_f32()),
-    );
 
     // ── Read WAV audio ──────────────────────────────────────────────────
     let _ = on_progress.send(TranscriptionProgress {
         stage: "loading_audio".into(),
         progress: 0.05,
         message: "Reading audio file…".into(),
+        ..Default::default()
     });
 
     let audio_data = read_wav_pcm_f32(audio_path)?;
@@ -99,70 +87,106 @@ pub fn transcribe(
         ),
     );
 
-    // ── Configure transcription ─────────────────────────────────────────
-    let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-
-    if let Some(lang) = language {
-        params.set_language(Some(lang));
-        logger::info(app, "whisper", format!("Language: {} (forced)", lang));
-    } else {
-        params.set_language(Some("auto"));
-        logger::info(app, "whisper", "Language: auto-detect");
+    // ── Diagnostics: audio sanity + whisper.cpp system info ─────────────
+    let (mut amin, mut amax, mut nan_count, mut inf_count) = (f32::INFINITY, f32::NEG_INFINITY, 0u64, 0u64);
+    for &s in &audio_data {
+        if s.is_nan() { nan_count += 1; }
+        else if s.is_infinite() { inf_count += 1; }
+        else {
+            if s < amin { amin = s; }
+            if s > amax { amax = s; }
+        }
     }
-
-    params.set_translate(false);
-    params.set_print_special(false);
-    params.set_print_progress(false);
-    params.set_print_realtime(false);
-    params.set_print_timestamps(false);
-    params.set_token_timestamps(true);
-    // Do NOT set max_len — let Whisper decide sentence boundaries naturally
-
-    // Stream whisper's internal progress (0-100) into the channel via the raw FFI callback.
-    // Mapped to 0.10–0.85 so we leave room for segment extraction (0.85–0.95)
-    // and optional speaker detection (0.95–1.0).
-    let cb_channel: Box<Channel<TranscriptionProgress>> = Box::new(on_progress.clone());
-    let cb_ptr = &*cb_channel as *const Channel<TranscriptionProgress> as *mut c_void;
-    unsafe {
-        params.set_progress_callback(Some(progress_trampoline));
-        params.set_progress_callback_user_data(cb_ptr);
-    }
-
-    // Cooperative cancellation: whisper.cpp polls this callback during decode.
-    let cancel_for_abort = cancel.clone();
-    params.set_abort_callback_safe(move || cancel_for_abort.load(Ordering::Relaxed));
-
-    // ── Run transcription ───────────────────────────────────────────────
-    logger::info(app, "whisper", "Starting whisper.cpp inference");
-    let _ = on_progress.send(TranscriptionProgress {
-        stage: "transcribing".into(),
-        progress: 0.1,
-        message: "Transcribing audio…".into(),
-    });
-
-    let mut state = ctx
-        .create_state()
-        .map_err(|e| AppError::TranscriptionFailed(format!("Failed to create state: {}", e)))?;
-
-    let infer_started = Instant::now();
-    state
-        .full(params, &audio_data)
-        .map_err(|e| {
-            logger::error(app, "whisper", format!("Inference failed: {}", e));
-            AppError::TranscriptionFailed(format!("Transcription failed: {}", e))
-        })?;
     logger::info(
         app,
         "whisper",
         format!(
-            "Inference finished in {:.2}s ({:.2}x realtime)",
-            infer_started.elapsed().as_secs_f32(),
-            duration_s / infer_started.elapsed().as_secs_f32().max(0.001)
+            "Audio stats: min={:.4} max={:.4} nans={} infs={} first8={:?}",
+            amin, amax, nan_count, inf_count,
+            audio_data.iter().take(8).copied().collect::<Vec<_>>()
         ),
     );
+    logger::info(
+        app,
+        "whisper",
+        format!("whisper system info: {}", whisper_rs::print_system_info()),
+    );
 
-    // Keep the callback channel alive until after `state.full()` returns.
-    drop(cb_channel);
+    // ── Run inference, with GPU → CPU fallback on encode failure ────────
+    logger::info(app, "whisper", "Starting whisper.cpp inference");
+    let _ = on_progress.send(TranscriptionProgress {
+        stage: "transcribing_audio".into(),
+        progress: 0.1,
+        message: "Transcribing audio…".into(),
+        ..Default::default()
+    });
+
+    // Fallback chain — kept short to avoid Metal/whisper.cpp global-state corruption
+    // observed when recreating GPU contexts more than twice in one process. We've
+    // confirmed empirically (1) forced-language + medium fails on BOTH GPU and CPU,
+    // so CPU is not a useful fallback for that case; (2) auto-detect on GPU works.
+    // So if the user forced a language and it fails, we drop to auto-detect.
+    let attempts: Vec<(bool, Option<&str>, &str)> = if language.is_some() {
+        vec![
+            (true, language, "GPU + requested language"),
+            (true, None, "GPU + auto-detect (fallback)"),
+        ]
+    } else {
+        vec![
+            (true, language, "GPU + auto"),
+            (false, language, "CPU + auto (fallback)"),
+        ]
+    };
+
+    let mut subtitles: Option<Vec<Subtitle>> = None;
+    let mut last_err: Option<AppError> = None;
+    for (i, (use_gpu, lang, label)) in attempts.iter().enumerate() {
+        if i > 0 {
+            logger::emit(
+                app,
+                "warn",
+                "whisper",
+                format!("Previous attempt failed with whisper -6, retrying: {}", label),
+            );
+            let _ = on_progress.send(TranscriptionProgress {
+                stage: "transcribing_audio".into(),
+                progress: 0.1,
+                message: format!("Retrying ({})…", label),
+                ..Default::default()
+            });
+            // Give the Metal/whisper.cpp backend time to fully tear down the
+            // previous context before we allocate a new one. Without this pause,
+            // the second context can come up in a degraded state and silently
+            // produce zero segments.
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+
+        match run_inference_pass(
+            app,
+            model_path,
+            &audio_data,
+            *lang,
+            on_progress,
+            cancel.clone(),
+            *use_gpu,
+        ) {
+            Ok(s) => {
+                subtitles = Some(s);
+                break;
+            }
+            Err(AppError::TranscriptionFailed(msg)) if is_encode_failure(&msg) => {
+                last_err = Some(AppError::TranscriptionFailed(msg));
+                continue;
+            }
+            Err(other) => return Err(other),
+        }
+    }
+
+    let mut subtitles = subtitles.ok_or_else(|| {
+        last_err.unwrap_or_else(|| {
+            AppError::TranscriptionFailed("Inference failed on all backends".into())
+        })
+    })?;
 
     if cancel.load(Ordering::Relaxed) {
         logger::info(app, "whisper", "Transcription cancelled by user");
@@ -170,144 +194,25 @@ pub fn transcribe(
             stage: "cancelled".into(),
             progress: 0.0,
             message: "Cancelled".into(),
+            ..Default::default()
         });
         return Err(AppError::Cancelled);
     }
 
-    // ── Extract segments ────────────────────────────────────────────────
-    let _ = on_progress.send(TranscriptionProgress {
-        stage: "transcribing".into(),
-        progress: 0.85,
-        message: "Extracting segments…".into(),
-    });
-
-    let num_segments = state.full_n_segments().map_err(|e| {
-        AppError::TranscriptionFailed(format!("Failed to get segment count: {}", e))
-    })?;
-    logger::info(
-        app,
-        "whisper",
-        format!("Extracting {} segments", num_segments),
-    );
-
-    let mut subtitles = Vec::new();
-
-    for i in 0..num_segments {
-        let start_ts = state.full_get_segment_t0(i).map_err(|e| {
-            AppError::TranscriptionFailed(format!("Failed to get segment start: {}", e))
-        })?;
-        let end_ts = state.full_get_segment_t1(i).map_err(|e| {
-            AppError::TranscriptionFailed(format!("Failed to get segment end: {}", e))
-        })?;
-        let text = state.full_get_segment_text(i).map_err(|e| {
-            AppError::TranscriptionFailed(format!("Failed to get segment text: {}", e))
-        })?;
-
-        let text = text.trim().to_string();
-        if text.is_empty() {
-            continue;
-        }
-
-        // whisper timestamps are in centiseconds (10ms units)
-        let start_ms = (start_ts as u64) * 10;
-        let end_ms = (end_ts as u64) * 10;
-
-        // Extract word-level timestamps by merging BPE sub-tokens into words.
-        // Whisper BPE convention: tokens starting with a space begin a new word,
-        // tokens without a leading space are continuations of the previous word.
-        let num_tokens = state.full_n_tokens(i).map_err(|e| {
-            AppError::TranscriptionFailed(format!("Failed to get token count: {}", e))
-        })?;
-
-        let mut raw_tokens: Vec<(String, u64, u64)> = Vec::new();
-        for t in 0..num_tokens {
-            let token_text = state.full_get_token_text(i, t).unwrap_or_default();
-            let token_data = state.full_get_token_data(i, t);
-
-            // Skip empty, special tokens like [_BEG_], [_SOT_], etc.
-            if token_text.is_empty()
-                || token_text.starts_with('[')
-                || token_text.starts_with("<|")
-            {
-                continue;
-            }
-
-            if let Ok(data) = token_data {
-                raw_tokens.push((
-                    token_text,
-                    (data.t0 as u64) * 10,
-                    (data.t1 as u64) * 10,
-                ));
-            }
-        }
-
-        // Merge sub-tokens into full words
-        let mut words: Vec<Word> = Vec::new();
-        for (token_text, t0, t1) in &raw_tokens {
-            let starts_new_word = token_text.starts_with(' ') || words.is_empty();
-            let clean = token_text.trim().to_string();
-            if clean.is_empty() {
-                continue;
-            }
-
-            if starts_new_word {
-                words.push(Word {
-                    text: clean,
-                    start_time: *t0,
-                    end_time: *t1,
-                });
-            } else if let Some(last) = words.last_mut() {
-                // Continuation of previous word — append text, extend end time
-                last.text.push_str(&clean);
-                last.end_time = *t1;
-            }
-        }
-
-        let preview: String = text.chars().take(80).collect();
-        let preview = if text.chars().count() > 80 {
-            format!("{}…", preview)
-        } else {
-            preview
-        };
-        logger::info(
-            app,
-            "whisper",
-            format!(
-                "[{}/{}] {:.2}s–{:.2}s: {}",
-                i + 1,
-                num_segments,
-                start_ms as f32 / 1000.0,
-                end_ms as f32 / 1000.0,
-                preview
-            ),
-        );
-
-        subtitles.push(Subtitle {
-            id: uuid::Uuid::new_v4().to_string(),
-            index: subtitles.len() + 1,
-            start_time: start_ms,
-            end_time: end_ms,
-            text,
-            words,
-            speaker: None,
-        });
-
-        // Update progress proportionally over the extraction band (0.85 → 0.95).
-        let progress = 0.85 + 0.10 * ((i + 1) as f32 / num_segments as f32);
-        let _ = on_progress.send(TranscriptionProgress {
-            stage: "transcribing".into(),
-            progress,
-            message: format!("Segment {}/{}", i + 1, num_segments),
-        });
+    // Reindex subtitles (run_inference_pass numbers them locally, but the final
+    // index needs to be 1-based across the whole transcript).
+    for (i, sub) in subtitles.iter_mut().enumerate() {
+        sub.index = i + 1;
     }
 
     // ── Speaker detection (optional) ──────────────────────────────────────
     if enable_diarization {
         logger::info(app, "whisper", "Running speaker diarization");
         let _ = on_progress.send(TranscriptionProgress {
-            stage: "transcribing".into(),
+            stage: "detecting_speakers".into(),
             progress: 0.95,
             message: "Detecting speakers…".into(),
+            ..Default::default()
         });
         let diar_started = Instant::now();
         detect_speakers(&mut subtitles, &audio_data);
@@ -343,7 +248,237 @@ pub fn transcribe(
         stage: "done".into(),
         progress: 1.0,
         message: format!("Done — {} segments", subtitles.len()),
+        total: subtitles.len() as u32,
+        ..Default::default()
     });
+
+    Ok(subtitles)
+}
+
+/// True when the error string from `state.full()` indicates a whisper.cpp encode failure
+/// (return code -6 from `whisper_full_with_state`). This is the well-known crash we
+/// recover from by retrying with `use_gpu=false`.
+fn is_encode_failure(msg: &str) -> bool {
+    msg.contains("code: -6") || msg.contains("Error code: -6")
+}
+
+/// One transcription attempt for a single backend choice (GPU or CPU). Builds a fresh
+/// `WhisperContext`, runs `state.full()`, and extracts segments. Used by `transcribe()`
+/// with `use_gpu=true` first; on encode failure (-6), retried with `use_gpu=false`.
+fn run_inference_pass(
+    app: &AppHandle,
+    model_path: &Path,
+    audio_data: &[f32],
+    language: Option<&str>,
+    on_progress: &Channel<TranscriptionProgress>,
+    cancel: Arc<AtomicBool>,
+    use_gpu: bool,
+) -> Result<Vec<Subtitle>, AppError> {
+    let backend = if use_gpu { "GPU" } else { "CPU" };
+
+    let load_started = Instant::now();
+    let mut ctx_params = WhisperContextParameters::default();
+    ctx_params.use_gpu(use_gpu);
+    let ctx = WhisperContext::new_with_params(
+        model_path.to_str().unwrap_or_default(),
+        ctx_params,
+    )
+    .map_err(|e| {
+        logger::error(app, "whisper", format!("Model load failed: {}", e));
+        AppError::TranscriptionFailed(format!("Failed to load model: {}", e))
+    })?;
+    logger::info(
+        app,
+        "whisper",
+        format!(
+            "Model loaded in {:.2}s ({} backend)",
+            load_started.elapsed().as_secs_f32(),
+            backend,
+        ),
+    );
+
+    // ── Configure transcription params ─────────────────────────────────
+    let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+
+    if let Some(lang) = language {
+        params.set_language(Some(lang));
+        params.set_detect_language(false);
+        logger::info(app, "whisper", format!("Language: {} (forced)", lang));
+    } else {
+        params.set_language(Some("auto"));
+        params.set_detect_language(true);
+        logger::info(app, "whisper", "Language: auto-detect");
+    }
+
+    let threads = std::thread::available_parallelism()
+        .map(|n| n.get().min(4) as i32)
+        .unwrap_or(2);
+    params.set_n_threads(threads);
+    logger::info(app, "whisper", format!("Threads: {}", threads));
+
+    params.set_translate(false);
+    params.set_print_special(false);
+    params.set_print_progress(false);
+    params.set_print_realtime(false);
+    params.set_print_timestamps(false);
+    params.set_token_timestamps(true);
+
+    // Stream whisper.cpp's internal progress (0-100) into the channel via the raw FFI callback.
+    // We use the unsafe API instead of `set_progress_callback_safe` because the latter
+    // historically stored a stale stack pointer and SIGSEGV'd on first invocation.
+    let cb_channel: Box<Channel<TranscriptionProgress>> = Box::new(on_progress.clone());
+    let cb_ptr = &*cb_channel as *const Channel<TranscriptionProgress> as *mut c_void;
+    unsafe {
+        params.set_progress_callback(Some(progress_trampoline));
+        params.set_progress_callback_user_data(cb_ptr);
+    }
+
+    let cancel_for_abort = cancel.clone();
+    params.set_abort_callback_safe(move || cancel_for_abort.load(Ordering::Relaxed));
+
+    let mut state = ctx
+        .create_state()
+        .map_err(|e| AppError::TranscriptionFailed(format!("Failed to create state: {}", e)))?;
+
+    let infer_started = Instant::now();
+    state.full(params, audio_data).map_err(|e| {
+        logger::error(app, "whisper", format!("Inference failed ({} backend): {}", backend, e));
+        AppError::TranscriptionFailed(format!("Transcription failed: {}", e))
+    })?;
+
+    let duration_s = audio_data.len() as f32 / SAMPLE_RATE as f32;
+    logger::info(
+        app,
+        "whisper",
+        format!(
+            "Inference finished in {:.2}s ({:.2}x realtime, {} backend)",
+            infer_started.elapsed().as_secs_f32(),
+            duration_s / infer_started.elapsed().as_secs_f32().max(0.001),
+            backend,
+        ),
+    );
+
+    drop(cb_channel);
+
+    if cancel.load(Ordering::Relaxed) {
+        // Caller handles the cancellation surface — just return empty result.
+        return Ok(Vec::new());
+    }
+
+    // ── Extract segments ────────────────────────────────────────────────
+    let _ = on_progress.send(TranscriptionProgress {
+        stage: "extracting_segments".into(),
+        progress: 0.85,
+        message: "Extracting segments…".into(),
+        ..Default::default()
+    });
+
+    let num_segments = state.full_n_segments();
+    logger::info(app, "whisper", format!("Extracting {} segments", num_segments));
+
+    let mut subtitles = Vec::new();
+
+    for i in 0..num_segments {
+        let segment = match state.get_segment(i) {
+            Some(s) => s,
+            None => continue,
+        };
+        let start_ts = segment.start_timestamp();
+        let end_ts = segment.end_timestamp();
+        let text = segment
+            .to_str_lossy()
+            .map_err(|e| {
+                AppError::TranscriptionFailed(format!("Failed to get segment text: {}", e))
+            })?
+            .to_string();
+
+        let text = text.trim().to_string();
+        if text.is_empty() {
+            continue;
+        }
+
+        let start_ms = (start_ts as u64) * 10;
+        let end_ms = (end_ts as u64) * 10;
+
+        let num_tokens = segment.n_tokens();
+
+        let mut raw_tokens: Vec<(String, u64, u64)> = Vec::new();
+        for t in 0..num_tokens {
+            let token = match segment.get_token(t) {
+                Some(tok) => tok,
+                None => continue,
+            };
+            let token_text = token.to_str_lossy().map(|c| c.into_owned()).unwrap_or_default();
+            let data = token.token_data();
+
+            if token_text.is_empty()
+                || token_text.starts_with('[')
+                || token_text.starts_with("<|")
+            {
+                continue;
+            }
+
+            raw_tokens.push((token_text, (data.t0 as u64) * 10, (data.t1 as u64) * 10));
+        }
+
+        let mut words: Vec<Word> = Vec::new();
+        for (token_text, t0, t1) in &raw_tokens {
+            let starts_new_word = token_text.starts_with(' ') || words.is_empty();
+            let clean = token_text.trim().to_string();
+            if clean.is_empty() {
+                continue;
+            }
+
+            if starts_new_word {
+                words.push(Word {
+                    text: clean,
+                    start_time: *t0,
+                    end_time: *t1,
+                });
+            } else if let Some(last) = words.last_mut() {
+                last.text.push_str(&clean);
+                last.end_time = *t1;
+            }
+        }
+
+        let preview: String = text.chars().take(80).collect();
+        let preview = if text.chars().count() > 80 {
+            format!("{}…", preview)
+        } else {
+            preview
+        };
+        logger::info(
+            app,
+            "whisper",
+            format!(
+                "[{}/{}] {:.2}s–{:.2}s: {}",
+                i + 1,
+                num_segments,
+                start_ms as f32 / 1000.0,
+                end_ms as f32 / 1000.0,
+                preview
+            ),
+        );
+
+        subtitles.push(Subtitle {
+            id: uuid::Uuid::new_v4().to_string(),
+            index: subtitles.len() + 1,
+            start_time: start_ms,
+            end_time: end_ms,
+            text,
+            words,
+            speaker: None,
+        });
+
+        let progress = 0.85 + 0.10 * ((i + 1) as f32 / num_segments as f32);
+        let _ = on_progress.send(TranscriptionProgress {
+            stage: "segment_progress".into(),
+            progress,
+            message: format!("Segment {}/{}", i + 1, num_segments),
+            index: (i + 1) as u32,
+            total: num_segments as u32,
+        });
+    }
 
     Ok(subtitles)
 }

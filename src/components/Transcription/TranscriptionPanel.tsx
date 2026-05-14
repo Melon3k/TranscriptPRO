@@ -232,7 +232,13 @@ export default function TranscriptionPanel({ audioPath }: TranscriptionPanelProp
             ) : (
               <Loader2 size={14} className="animate-spin" />
             )}
-            {progress.message}
+            {t(`transcription:progress.${progress.stage}`, {
+              percent: Math.round(progress.progress * 100),
+              index: progress.index ?? 0,
+              total: progress.total ?? 0,
+              count: progress.total ?? 0,
+              defaultValue: progress.message,
+            })}
           </div>
           <div className="h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
             <div

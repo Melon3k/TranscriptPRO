@@ -33,12 +33,19 @@ pub struct Project {
     pub whisper_model: String,
 }
 
-/// Progress update during transcription
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Progress update during transcription. `stage` is a stable key the frontend maps
+/// to a localized string; `message` is the English fallback. `index`/`total` are
+/// used when the stage carries countable progress (e.g. segment N of M).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TranscriptionProgress {
-    pub stage: String,    // "extracting_audio" | "loading_model" | "transcribing" | "done"
-    pub progress: f32,    // 0.0 to 1.0
+    pub stage: String,
+    pub progress: f32,
     pub message: String,
+    #[serde(default)]
+    pub index: u32,
+    #[serde(default)]
+    pub total: u32,
 }
 
 /// Information about an available Whisper model

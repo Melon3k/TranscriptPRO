@@ -23,5 +23,18 @@
   "detectSpeakers": "Wykrywaj mówców",
   "transcribe": "Transkrybuj",
   "cancel": "Anuluj",
-  "emptyState": "Otwórz plik multimedialny aby rozpocząć transkrypcję"
+  "emptyState": "Otwórz plik multimedialny aby rozpocząć transkrypcję",
+  "progress": {
+    "loading_model": "Ładowanie modelu Whisper…",
+    "loading_audio": "Wczytywanie pliku audio…",
+    "transcribing_audio": "Transkrypcja audio… {{percent}}%",
+    "extracting_segments": "Wydobywanie segmentów…",
+    "segment_progress": "Segment {{index}}/{{total}}",
+    "detecting_speakers": "Wykrywanie mówców…",
+    "cancelled": "Przerwano",
+    "done_one": "Gotowe — {{count}} segment",
+    "done_few": "Gotowe — {{count}} segmenty",
+    "done_many": "Gotowe — {{count}} segmentów",
+    "done_other": "Gotowe — {{count}} segmentów"
+  }
 }
