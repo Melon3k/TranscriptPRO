@@ -1,1 +1,39 @@
-{}
+{
+  "header": "Translation",
+  "providerLabel": "Provider",
+  "provider": {
+    "libretranslate": "LibreTranslate (Free)",
+    "gemini": "Gemini",
+    "claude": "Claude"
+  },
+  "targetLanguageLabel": "Target language",
+  "sourceLanguageLabel": "Source language (optional)",
+  "sourceAuto": "Auto-detect",
+  "language": {
+    "EN": "English",
+    "PL": "Polish",
+    "DE": "German",
+    "FR": "French",
+    "ES": "Spanish",
+    "IT": "Italian",
+    "PT": "Portuguese",
+    "NL": "Dutch",
+    "JA": "Japanese",
+    "KO": "Korean",
+    "ZH": "Chinese",
+    "RU": "Russian",
+    "UK": "Ukrainian"
+  },
+  "translating": "Translating…",
+  "translate_one": "Translate ({{count}} segment)",
+  "translate_other": "Translate ({{count}} segments)",
+  "hideComparison": "Hide comparison",
+  "compare": "Compare with original",
+  "dismissOriginal": "Dismiss original",
+  "apiKeyMissing": "Set your {{provider}} API key in Settings",
+  "providerName": {
+    "gemini": "Gemini",
+    "claude": "Claude"
+  },
+  "freeNoKey": "Free — no API key required"
+}

@@ -1,4 +1,5 @@
 import { useRef, useEffect, useState, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { useSubtitleStore } from "../../stores/subtitleStore";
 import { usePlayerStore } from "../../stores/playerStore";
 import SubtitleRow from "./SubtitleRow";
@@ -7,6 +8,7 @@ import ComparisonRow from "./ComparisonRow";
 import { ListX, X } from "lucide-react";
 
 export default function SubtitleEditor() {
+  const { t } = useTranslation(["editor", "common"]);
   const {
     subtitles,
     updateSubtitle,
@@ -112,9 +114,9 @@ export default function SubtitleEditor() {
     return (
       <div className="flex-1 flex flex-col items-center justify-center text-gray-400 dark:text-gray-500 gap-3">
         <ListX size={48} strokeWidth={1} />
-        <p className="text-sm">No subtitles loaded</p>
+        <p className="text-sm">{t("editor:emptyTitle")}</p>
         <p className="text-xs text-gray-300 dark:text-gray-600">
-          Open a media file or import an SRT
+          {t("editor:emptyHint")}
         </p>
       </div>
     );
@@ -123,12 +125,12 @@ export default function SubtitleEditor() {
   const selectionBanner = totalSelected > 0 && (
     <div className="flex items-center gap-2 px-3 py-1.5 bg-violet-50 dark:bg-violet-900/20 border-b border-violet-200 dark:border-violet-700 text-xs text-violet-700 dark:text-violet-300">
       <span className="flex-1">
-        <strong>{totalSelected}</strong> {totalSelected === 1 ? "słowo zaznaczone" : "słowa zaznaczone"} — kliknij blok docelowy aby przenieść
+        {t("editor:selectionBanner", { count: totalSelected })}
       </span>
       <button
         onClick={clearSelection}
         className="text-violet-400 hover:text-violet-600 dark:hover:text-violet-200"
-        title="Anuluj zaznaczenie"
+        title={t("editor:clearSelection")}
       >
         <X size={13} />
       </button>

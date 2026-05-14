@@ -1,1 +1,26 @@
-{}
+{
+  "header": "Version history",
+  "saveManual": "Save version",
+  "restore": "Restore",
+  "restoreTitle": "Restore this version",
+  "showDiff": "Show diff",
+  "hideDiff": "Hide diff",
+  "diffVsCurrent": "Diff vs current",
+  "noChanges": "no changes",
+  "modified_one": "{{count}} modified",
+  "modified_other": "{{count}} modified",
+  "added_one": "+{{count}} added",
+  "added_other": "+{{count}} added",
+  "removed_one": "−{{count}} removed",
+  "removed_other": "−{{count}} removed",
+  "identicalToCurrent": "This version is identical to the current state.",
+  "empty": "No versions saved yet.",
+  "emptyHint": "Versions are auto-saved after transcription and translation.",
+  "segmentsShort": "seg.",
+  "label": {
+    "transcription": "Transcription ({{whisperModel}}, {{language}})",
+    "translation": "Translation → {{targetLang}} ({{provider}})",
+    "import": "SRT import: {{filename}}",
+    "manual": "Saved manually"
+  }
+}

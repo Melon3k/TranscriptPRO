@@ -28,7 +28,7 @@ WIN_URL="https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
 
 download_macos_arm() {
   echo ">> ffmpeg-aarch64-apple-darwin"
-  curl -fL --retry 3 -o "$TMP/ff-arm.zip" "$OSX_ARM_URL"
+  curl -fL --http1.1 --retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 30 -o "$TMP/ff-arm.zip" "$OSX_ARM_URL"
   unzip -o -q "$TMP/ff-arm.zip" -d "$TMP/ff-arm"
   cp "$TMP/ff-arm/ffmpeg" "$OUT/ffmpeg-aarch64-apple-darwin"
   chmod +x "$OUT/ffmpeg-aarch64-apple-darwin"
@@ -36,7 +36,7 @@ download_macos_arm() {
 
 download_macos_intel() {
   echo ">> ffmpeg-x86_64-apple-darwin"
-  curl -fL --retry 3 -o "$TMP/ff-intel.zip" "$OSX_INTEL_URL"
+  curl -fL --http1.1 --retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 30 -o "$TMP/ff-intel.zip" "$OSX_INTEL_URL"
   unzip -o -q "$TMP/ff-intel.zip" -d "$TMP/ff-intel"
   cp "$TMP/ff-intel/ffmpeg" "$OUT/ffmpeg-x86_64-apple-darwin"
   chmod +x "$OUT/ffmpeg-x86_64-apple-darwin"
@@ -59,7 +59,7 @@ build_macos_universal() {
 
 download_windows() {
   echo ">> ffmpeg-x86_64-pc-windows-msvc.exe"
-  curl -fL --retry 3 -o "$TMP/ff-win.zip" "$WIN_URL"
+  curl -fL --http1.1 --retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 30 -o "$TMP/ff-win.zip" "$WIN_URL"
   unzip -o -q "$TMP/ff-win.zip" -d "$TMP/ff-win"
   EXE="$(find "$TMP/ff-win" -name ffmpeg.exe -type f | head -n1)"
   if [ -z "$EXE" ]; then

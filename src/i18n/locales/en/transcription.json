@@ -1,1 +1,38 @@
-{}
+{
+  "header": "Transcription",
+  "modelLabel": "Whisper Model",
+  "downloading": "Downloading… {{percent}}%",
+  "downloadModel": "Download model ({{sizeMb}} MB)",
+  "languageLabel": "Language",
+  "language": {
+    "auto": "Auto-detect",
+    "en": "English",
+    "pl": "Polish",
+    "de": "German",
+    "fr": "French",
+    "es": "Spanish",
+    "it": "Italian",
+    "pt": "Portuguese",
+    "nl": "Dutch",
+    "ja": "Japanese",
+    "ko": "Korean",
+    "zh": "Chinese",
+    "ru": "Russian",
+    "uk": "Ukrainian"
+  },
+  "detectSpeakers": "Detect speakers",
+  "transcribe": "Transcribe",
+  "cancel": "Cancel",
+  "emptyState": "Open a media file to start transcription",
+  "progress": {
+    "loading_model": "Loading Whisper model…",
+    "loading_audio": "Reading audio file…",
+    "transcribing_audio": "Transcribing audio… {{percent}}%",
+    "extracting_segments": "Extracting segments…",
+    "segment_progress": "Segment {{index}}/{{total}}",
+    "detecting_speakers": "Detecting speakers…",
+    "cancelled": "Cancelled",
+    "done_one": "Done — {{count}} segment",
+    "done_other": "Done — {{count}} segments"
+  }
+}

@@ -3,10 +3,12 @@
  * Both the Toolbar's open dialogs and the global drag-drop listener call into
  * the same handlers so behaviour stays in sync.
  */
+import i18n from "../i18n";
 import {
   importSrt as importSrtCmd,
   extractAudio,
 } from "./tauri-commands";
+import { formatError } from "./error-format";
 import type { Subtitle } from "../types/subtitle";
 
 export const MEDIA_EXTENSIONS = [
@@ -53,7 +55,7 @@ export async function routeFile(
       const audioPath = await extractAudio(path);
       cb.onStartTranscription(audioPath);
     } catch (e) {
-      cb.onError(String(e));
+      cb.onError(formatError(i18n.t, e));
     }
     return true;
   }
@@ -67,7 +69,7 @@ export async function routeFile(
         cb.addVersion(subs, "import", { srtPath: path });
       }
     } catch (e) {
-      cb.onError(String(e));
+      cb.onError(formatError(i18n.t, e));
     }
     return true;
   }

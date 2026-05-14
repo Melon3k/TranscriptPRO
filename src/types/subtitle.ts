@@ -21,10 +21,22 @@ export interface Project {
   whisperModel: string;
 }
 
+export type TranscriptionStage =
+  | "loading_model"
+  | "loading_audio"
+  | "transcribing_audio"
+  | "extracting_segments"
+  | "segment_progress"
+  | "detecting_speakers"
+  | "done"
+  | "cancelled";
+
 export interface TranscriptionProgress {
-  stage: "extracting_audio" | "loading_model" | "loading_audio" | "transcribing" | "done" | "cancelled";
+  stage: TranscriptionStage;
   progress: number; // 0.0 to 1.0
-  message: string;
+  message: string;  // English fallback — UI prefers `stage` + interpolation
+  index?: number;
+  total?: number;
 }
 
 export interface WhisperModelInfo {

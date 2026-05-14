@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Trash2, X } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useLogStore, type LogLevel } from "../../stores/logStore";
 
 const LEVEL_STYLES: Record<LogLevel, string> = {
@@ -19,6 +20,7 @@ function formatTime(ts: number) {
 }
 
 export default function LogPanel() {
+  const { t } = useTranslation(["logPanel"]);
   const { entries, open, setOpen, clear } = useLogStore();
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -35,21 +37,21 @@ export default function LogPanel() {
     <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-900 text-gray-100 flex flex-col h-56 shrink-0">
       <div className="flex items-center gap-2 border-b border-gray-700 px-3 py-1.5 text-xs">
         <span className="font-semibold uppercase tracking-wide text-gray-400">
-          Logs
+          {t("logPanel:header")}
         </span>
         <span className="text-gray-500">{entries.length}</span>
         <div className="flex-1" />
         <button
           onClick={clear}
-          title="Clear logs"
+          title={t("logPanel:clear")}
           className="flex items-center gap-1 rounded px-2 py-1 text-gray-400 hover:bg-gray-800 hover:text-gray-200"
         >
           <Trash2 size={12} />
-          Clear
+          {t("logPanel:clearShort")}
         </button>
         <button
           onClick={() => setOpen(false)}
-          title="Close logs"
+          title={t("logPanel:close")}
           className="flex items-center rounded p-1 text-gray-400 hover:bg-gray-800 hover:text-gray-200"
         >
           <X size={14} />
@@ -60,7 +62,7 @@ export default function LogPanel() {
         className="flex-1 overflow-y-auto font-mono text-[11px] leading-relaxed px-3 py-2"
       >
         {entries.length === 0 ? (
-          <div className="text-gray-500 italic">No log entries yet.</div>
+          <div className="text-gray-500 italic">{t("logPanel:empty")}</div>
         ) : (
           entries.map((entry, i) => (
             <div key={i} className="flex gap-2 whitespace-pre-wrap break-words">

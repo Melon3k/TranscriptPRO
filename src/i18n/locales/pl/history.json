@@ -1,1 +1,32 @@
-{}
+{
+  "header": "Historia wersji",
+  "saveManual": "Zapisz wersję",
+  "restore": "Przywróć",
+  "restoreTitle": "Przywróć tę wersję",
+  "showDiff": "Pokaż różnice",
+  "hideDiff": "Ukryj różnice",
+  "diffVsCurrent": "Różnice vs obecny",
+  "noChanges": "brak zmian",
+  "modified_one": "{{count}} zmieniony",
+  "modified_few": "{{count}} zmienione",
+  "modified_many": "{{count}} zmienionych",
+  "modified_other": "{{count}} zmienionych",
+  "added_one": "+{{count}} dodany",
+  "added_few": "+{{count}} dodane",
+  "added_many": "+{{count}} dodanych",
+  "added_other": "+{{count}} dodanych",
+  "removed_one": "−{{count}} usunięty",
+  "removed_few": "−{{count}} usunięte",
+  "removed_many": "−{{count}} usuniętych",
+  "removed_other": "−{{count}} usuniętych",
+  "identicalToCurrent": "Ta wersja jest identyczna z obecnym stanem.",
+  "empty": "Brak zapisanych wersji.",
+  "emptyHint": "Wersje są tworzone automatycznie po transkrypcji i tłumaczeniu.",
+  "segmentsShort": "seg.",
+  "label": {
+    "transcription": "Transkrypcja ({{whisperModel}}, {{language}})",
+    "translation": "Tłumaczenie → {{targetLang}} ({{provider}})",
+    "import": "Import SRT: {{filename}}",
+    "manual": "Zapisana ręcznie"
+  }
+}

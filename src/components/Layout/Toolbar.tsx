@@ -50,8 +50,7 @@ export default function Toolbar({ onOpenSettings, onStartTranscription, onError 
     addVersion,
     autoSaveOnImport,
     onStartTranscription,
-    onError: (msg: string) =>
-      onError(t("common:audioExtractionFailed", { error: msg })),
+    onError,
   };
 
   const handleOpenMedia = async () => {

@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Mic, Download, Loader2, CheckCircle2, X } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useSubtitleStore } from "../../stores/subtitleStore";
 import { useVersionStore } from "../../stores/versionStore";
@@ -9,13 +10,32 @@ import {
   transcribeAudio,
   cancelTranscription,
 } from "../../lib/tauri-commands";
+import { formatError, isCancellation } from "../../lib/error-format";
 import type { WhisperModelInfo, TranscriptionProgress } from "../../types/subtitle";
+
+const LANGUAGE_OPTIONS = [
+  "auto",
+  "en",
+  "pl",
+  "de",
+  "fr",
+  "es",
+  "it",
+  "pt",
+  "nl",
+  "ja",
+  "ko",
+  "zh",
+  "ru",
+  "uk",
+] as const;
 
 interface TranscriptionPanelProps {
   audioPath: string | null;
 }
 
 export default function TranscriptionPanel({ audioPath }: TranscriptionPanelProps) {
+  const { t } = useTranslation(["transcription", "common"]);
   const { whisperModel, setWhisperModel, autoSaveOnTranscription } = useSettingsStore();
   const { setSubtitles } = useSubtitleStore();
   const { addVersion } = useVersionStore();
@@ -52,7 +72,7 @@ export default function TranscriptionPanel({ audioPath }: TranscriptionPanelProp
       await downloadModel(whisperModel, (p) => setDownloadProgress(p));
       await loadModels();
     } catch (e) {
-      setError(String(e));
+      setError(formatError(t, e));
     } finally {
       setDownloading(false);
     }
@@ -79,11 +99,14 @@ export default function TranscriptionPanel({ audioPath }: TranscriptionPanelProp
         });
       }
     } catch (e) {
-      const msg = String(e);
-      if (msg.toLowerCase().includes("cancel")) {
-        setProgress({ stage: "cancelled", progress: 0, message: "Cancelled" });
+      if (isCancellation(e)) {
+        setProgress({
+          stage: "cancelled",
+          progress: 0,
+          message: t("errors:CANCELLED", { ns: "errors" }),
+        });
       } else {
-        setError(msg);
+        setError(formatError(t, e));
       }
     } finally {
       setTranscribing(false);
@@ -102,13 +125,13 @@ export default function TranscriptionPanel({ audioPath }: TranscriptionPanelProp
     <div className="p-4 space-y-4">
       <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2">
         <Mic size={16} />
-        Transcription
+        {t("transcription:header")}
       </h3>
 
       {/* Model selector */}
       <div className="space-y-2">
         <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">
-          Whisper Model
+          {t("transcription:modelLabel")}
         </label>
         <select
           value={whisperModel}
@@ -133,12 +156,14 @@ export default function TranscriptionPanel({ audioPath }: TranscriptionPanelProp
             {downloading ? (
               <>
                 <Loader2 size={14} className="animate-spin" />
-                Downloading... {Math.round(downloadProgress * 100)}%
+                {t("transcription:downloading", {
+                  percent: Math.round(downloadProgress * 100),
+                })}
               </>
             ) : (
               <>
                 <Download size={14} />
-                Download model ({selectedModel.sizeMb} MB)
+                {t("transcription:downloadModel", { sizeMb: selectedModel.sizeMb })}
               </>
             )}
           </button>
@@ -148,7 +173,7 @@ export default function TranscriptionPanel({ audioPath }: TranscriptionPanelProp
       {/* Language */}
       <div className="space-y-2">
         <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">
-          Language
+          {t("transcription:languageLabel")}
         </label>
         <select
           value={language}
@@ -156,20 +181,11 @@ export default function TranscriptionPanel({ audioPath }: TranscriptionPanelProp
           className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1.5 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
           disabled={transcribing}
         >
-          <option value="auto">Auto-detect</option>
-          <option value="en">English</option>
-          <option value="pl">Polish</option>
-          <option value="de">German</option>
-          <option value="fr">French</option>
-          <option value="es">Spanish</option>
-          <option value="it">Italian</option>
-          <option value="pt">Portuguese</option>
-          <option value="nl">Dutch</option>
-          <option value="ja">Japanese</option>
-          <option value="ko">Korean</option>
-          <option value="zh">Chinese</option>
-          <option value="ru">Russian</option>
-          <option value="uk">Ukrainian</option>
+          {LANGUAGE_OPTIONS.map((code) => (
+            <option key={code} value={code}>
+              {t(`transcription:language.${code}`)}
+            </option>
+          ))}
         </select>
       </div>
 
@@ -183,7 +199,7 @@ export default function TranscriptionPanel({ audioPath }: TranscriptionPanelProp
           className="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-500 focus:ring-blue-400"
         />
         <span className="text-xs font-medium text-gray-600 dark:text-gray-400">
-          Detect speakers
+          {t("transcription:detectSpeakers")}
         </span>
       </label>
 
@@ -194,7 +210,7 @@ export default function TranscriptionPanel({ audioPath }: TranscriptionPanelProp
           className="flex items-center gap-2 w-full justify-center rounded-lg bg-red-500 hover:bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors"
         >
           <X size={16} />
-          Cancel
+          {t("transcription:cancel")}
         </button>
       ) : (
         <button
@@ -203,7 +219,7 @@ export default function TranscriptionPanel({ audioPath }: TranscriptionPanelProp
           className="flex items-center gap-2 w-full justify-center rounded-lg bg-blue-500 hover:bg-blue-600 disabled:bg-blue-300 dark:disabled:bg-blue-800 px-4 py-2 text-sm font-medium text-white transition-colors"
         >
           <Mic size={16} />
-          Transcribe
+          {t("transcription:transcribe")}
         </button>
       )}
 
@@ -216,7 +232,13 @@ export default function TranscriptionPanel({ audioPath }: TranscriptionPanelProp
             ) : (
               <Loader2 size={14} className="animate-spin" />
             )}
-            {progress.message}
+            {t(`transcription:progress.${progress.stage}`, {
+              percent: Math.round(progress.progress * 100),
+              index: progress.index ?? 0,
+              total: progress.total ?? 0,
+              count: progress.total ?? 0,
+              defaultValue: progress.message,
+            })}
           </div>
           <div className="h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
             <div
@@ -230,7 +252,7 @@ export default function TranscriptionPanel({ audioPath }: TranscriptionPanelProp
       {/* Status */}
       {!audioPath && (
         <p className="text-xs text-gray-400 dark:text-gray-500 text-center">
-          Open a media file to start transcription
+          {t("transcription:emptyState")}
         </p>
       )}
 

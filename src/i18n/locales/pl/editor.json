@@ -1,1 +1,26 @@
-{}
+{
+  "emptyTitle": "Brak załadowanych napisów",
+  "emptyHint": "Otwórz plik multimedialny lub zaimportuj SRT",
+  "selectionBanner_one": "{{count}} słowo zaznaczone — kliknij blok docelowy aby przenieść",
+  "selectionBanner_few": "{{count}} słowa zaznaczone — kliknij blok docelowy aby przenieść",
+  "selectionBanner_many": "{{count}} słów zaznaczonych — kliknij blok docelowy aby przenieść",
+  "selectionBanner_other": "{{count}} słów zaznaczonych — kliknij blok docelowy aby przenieść",
+  "clearSelection": "Anuluj zaznaczenie",
+  "dropHereHint": "↓ Kliknij aby przenieść tutaj",
+  "doubleClickToEdit": "Kliknij dwukrotnie aby edytować tekst",
+  "wordSelected": "Zaznaczone — przeciągnij do innego bloku (⌘+klik aby odznaczyć)",
+  "wordTooltip": "{{startTime}} → {{endTime}} · ⌘+klik aby zaznaczyć",
+  "emptyWordsHint": "(brak słów — kliknij aby wstawić na końcu)",
+  "actions": {
+    "split": "Podziel",
+    "mergeUp": "Połącz z poprzednim",
+    "mergeDown": "Połącz z następnym",
+    "delete": "Usuń"
+  },
+  "timestampHint": "Kliknij aby przewinąć, dwuklik aby edytować",
+  "insertHere": "Wstaw tutaj (pozycja {{index}})",
+  "comparison": {
+    "original": "Oryginał",
+    "translated": "Tłumaczenie"
+  }
+}

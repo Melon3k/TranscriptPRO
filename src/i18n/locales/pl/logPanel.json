@@ -1,1 +1,7 @@
-{}
+{
+  "header": "Logi",
+  "clear": "Wyczyść logi",
+  "clearShort": "Wyczyść",
+  "close": "Zamknij logi",
+  "empty": "Brak wpisów w logu."
+}

@@ -1,1 +1,11 @@
-{}
+{
+  "MODEL_NOT_FOUND": "Model nie jest pobrany. Pobierz go najpierw.",
+  "MODEL_DOWNLOAD_FAILED": "Nie udało się pobrać modelu: {{detail}}",
+  "AUDIO_EXTRACTION_FAILED": "Nie udało się wydobyć audio: {{detail}}",
+  "TRANSCRIPTION_FAILED": "Transkrypcja nieudana: {{detail}}",
+  "TRANSLATION_API_ERROR": "Błąd usługi tłumaczenia: {{detail}}",
+  "FILE_ERROR": "Błąd pliku: {{detail}}",
+  "INVALID_SRT_FORMAT": "Niepoprawny format SRT: {{detail}}",
+  "CANCELLED": "Operacja przerwana",
+  "UNKNOWN_ERROR": "Nieoczekiwany błąd: {{detail}}"
+}
