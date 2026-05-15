@@ -36,6 +36,7 @@ export interface FileRoutingCallbacks {
   autoSaveOnImport: boolean;
   onStartTranscription: (audioPath: string) => void;
   onError: (message: string) => void;
+  onRecordFile?: (path: string, kind: "media" | "srt") => void;
 }
 
 /**
@@ -51,6 +52,7 @@ export async function routeFile(
   if (kind === "media") {
     cb.setFilePath(path);
     await cb.setProjectKey(path);
+    cb.onRecordFile?.(path, "media");
     try {
       const audioPath = await extractAudio(path);
       cb.onStartTranscription(audioPath);
@@ -65,6 +67,7 @@ export async function routeFile(
       const subs = await importSrtCmd(path);
       cb.setSubtitles(subs);
       await cb.setProjectKey(path);
+      cb.onRecordFile?.(path, "srt");
       if (cb.autoSaveOnImport) {
         cb.addVersion(subs, "import", { srtPath: path });
       }

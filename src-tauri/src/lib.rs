@@ -27,6 +27,8 @@ pub fn run() {
             commands::file_io::export_srt,
             commands::file_io::export_word_srt,
             commands::file_io::export_txt,
+            commands::file_io::export_vtt,
+            commands::file_io::export_ass,
             commands::file_io::save_version_history,
             commands::file_io::load_version_history,
             // Audio extraction

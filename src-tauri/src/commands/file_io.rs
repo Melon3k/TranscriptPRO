@@ -1,7 +1,9 @@
 use crate::logger;
 use crate::subtitle::{
+    ass::write_ass,
     srt::{parse_srt, write_srt, write_word_srt, write_txt},
     types::{AppError, Subtitle},
+    vtt::write_vtt,
 };
 use tauri::{AppHandle, Manager};
 
@@ -62,6 +64,38 @@ pub async fn export_txt(
         &app,
         "file",
         format!("Exported TXT ({} segments) → {}", subtitles.len(), path),
+    );
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn export_vtt(
+    app: AppHandle,
+    path: String,
+    subtitles: Vec<Subtitle>,
+) -> Result<(), AppError> {
+    let content = write_vtt(&subtitles);
+    std::fs::write(&path, content).map_err(|e| AppError::FileError(e.to_string()))?;
+    logger::info(
+        &app,
+        "file",
+        format!("Exported {} segments as VTT → {}", subtitles.len(), path),
+    );
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn export_ass(
+    app: AppHandle,
+    path: String,
+    subtitles: Vec<Subtitle>,
+) -> Result<(), AppError> {
+    let content = write_ass(&subtitles);
+    std::fs::write(&path, content).map_err(|e| AppError::FileError(e.to_string()))?;
+    logger::info(
+        &app,
+        "file",
+        format!("Exported {} segments as ASS → {}", subtitles.len(), path),
     );
     Ok(())
 }

@@ -6,6 +6,8 @@ import { useSettingsStore } from "../../stores/settingsStore";
 import { usePlayerStore } from "../../stores/playerStore";
 import { useVersionStore } from "../../stores/versionStore";
 import { useLogStore, type LogEntry } from "../../stores/logStore";
+import { useRecentFilesStore } from "../../stores/recentFilesStore";
+import { useOnboardingStore } from "../../stores/onboardingStore";
 import { useFileDrop } from "../../hooks/useFileDrop";
 import { routeFile, classifyFile } from "../../lib/file-routing";
 import Toolbar from "./Toolbar";
@@ -16,6 +18,8 @@ import TranslationPanel from "../Translation/TranslationPanel";
 import HistoryPanel from "../History/HistoryPanel";
 import LogPanel from "../LogPanel/LogPanel";
 import SettingsModal from "../Settings/SettingsModal";
+import KeyboardShortcutsModal from "../KeyboardShortcutsModal";
+import OnboardingWizard from "../Onboarding/OnboardingWizard";
 import { Mic, Languages, History, X, Upload } from "lucide-react";
 
 type SidePanel = "transcription" | "translation" | "history";
@@ -27,15 +31,17 @@ export default function MainLayout() {
   const { setProjectKey, addVersion } = useVersionStore();
   const autoSaveOnImport = useSettingsStore((s) => s.autoSaveOnImport);
   const appendLog = useLogStore((s) => s.append);
+  const record = useRecentFilesStore((s) => s.record);
+  const onboardingCompleted = useOnboardingStore((s) => s.completed);
+
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [audioPath, setAudioPath] = useState<string | null>(null);
   const [activePanel, setActivePanel] = useState<SidePanel>("transcription");
   const [error, setError] = useState<string | null>(null);
 
   const handleDroppedFiles = useCallback(
     async (paths: string[]) => {
-      // Find the first file the app knows how to handle. Bulk-drop of multiple
-      // media files isn't a coherent operation here (we only have one player).
       const supported = paths.find((p) => classifyFile(p) !== "unsupported");
       if (!supported) {
         const exts = paths
@@ -56,9 +62,10 @@ export default function MainLayout() {
           setActivePanel("transcription");
         },
         onError: (msg) => setError(msg),
+        onRecordFile: record,
       });
     },
-    [t, setFilePath, setProjectKey, setSubtitles, addVersion, autoSaveOnImport],
+    [t, setFilePath, setProjectKey, setSubtitles, addVersion, autoSaveOnImport, record],
   );
 
   const { isDragging } = useFileDrop(handleDroppedFiles);
@@ -81,18 +88,26 @@ export default function MainLayout() {
         target.isContentEditable;
       if (isEditing) return;
 
-      if (e.metaKey && !e.shiftKey && (e.key === "z" || e.key === "Z")) {
+      const mod = e.metaKey || e.ctrlKey;
+
+      if (mod && !e.shiftKey && (e.key === "z" || e.key === "Z")) {
         if (!canUndo()) return;
         e.preventDefault();
         undo();
       } else if (
-        e.metaKey &&
+        mod &&
         e.shiftKey &&
         (e.key === "z" || e.key === "Z" || e.key === "y" || e.key === "Y")
       ) {
         if (!canRedo()) return;
         e.preventDefault();
         redo();
+      } else if (mod && e.key === "/") {
+        e.preventDefault();
+        setShortcutsOpen((v) => !v);
+      } else if (mod && e.key === ",") {
+        e.preventDefault();
+        setSettingsOpen(true);
       }
     };
     window.addEventListener("keydown", handler);
@@ -104,6 +119,7 @@ export default function MainLayout() {
       {/* Toolbar */}
       <Toolbar
         onOpenSettings={() => setSettingsOpen(true)}
+        onOpenShortcuts={() => setShortcutsOpen(true)}
         onStartTranscription={(path) => {
           setAudioPath(path);
           setActivePanel("transcription");
@@ -170,6 +186,15 @@ export default function MainLayout() {
 
       {/* Settings modal */}
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+
+      {/* Keyboard shortcuts modal */}
+      <KeyboardShortcutsModal
+        open={shortcutsOpen}
+        onClose={() => setShortcutsOpen(false)}
+      />
+
+      {/* Onboarding wizard — shown once on first launch */}
+      {!onboardingCompleted && <OnboardingWizard />}
 
       {/* Drag-and-drop overlay */}
       {isDragging && (
