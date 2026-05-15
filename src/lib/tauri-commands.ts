@@ -51,6 +51,24 @@ export async function saveTxtFileDialog(
   });
 }
 
+export async function saveVttFileDialog(
+  defaultName = "subtitles.vtt"
+): Promise<string | null> {
+  return save({
+    filters: [{ name: "WebVTT Subtitles", extensions: ["vtt"] }],
+    defaultPath: defaultName,
+  });
+}
+
+export async function saveAssFileDialog(
+  defaultName = "subtitles.ass"
+): Promise<string | null> {
+  return save({
+    filters: [{ name: "ASS Subtitles", extensions: ["ass"] }],
+    defaultPath: defaultName,
+  });
+}
+
 // ── File I/O commands ────────────────────────────────────────────────────────
 
 export async function importSrt(path: string): Promise<Subtitle[]> {
@@ -76,6 +94,20 @@ export async function exportTxt(
   subtitles: Subtitle[]
 ): Promise<void> {
   return invoke("export_txt", { path, subtitles });
+}
+
+export async function exportVtt(
+  path: string,
+  subtitles: Subtitle[]
+): Promise<void> {
+  return invoke("export_vtt", { path, subtitles });
+}
+
+export async function exportAss(
+  path: string,
+  subtitles: Subtitle[]
+): Promise<void> {
+  return invoke("export_ass", { path, subtitles });
 }
 
 export async function saveVersionHistory(

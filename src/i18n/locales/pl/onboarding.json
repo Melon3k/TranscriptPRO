@@ -1,0 +1,25 @@
+{
+  "welcome": {
+    "title": "Witaj w TranscriptPRO",
+    "subtitle": "Desktopowy edytor napisów z lokalną transkrypcją AI. Skonfigurujmy aplikację w kilku krokach."
+  },
+  "model": {
+    "title": "Wybierz model Whisper",
+    "subtitle": "Whisper działa w całości na Twoim urządzeniu — transkrypcja nie wymaga połączenia z internetem.",
+    "nextBlocked": "Pobierz model, aby kontynuować"
+  },
+  "apiKeys": {
+    "title": "Klucze API (opcjonalnie)",
+    "subtitle": "Dodaj klucze, aby włączyć tłumaczenie AI. Możesz pominąć ten krok i dodać je później w Ustawieniach.",
+    "skip": "Pomiń — dodam później"
+  },
+  "done": {
+    "title": "Gotowe!",
+    "tip": "Wskazówka: przeciągnij plik wideo lub audio na okno aplikacji, aby otworzyć go natychmiast.",
+    "settingsHint": "Wszystkie ustawienia możesz zmienić w panelu Ustawienia."
+  },
+  "next": "Dalej",
+  "back": "Wstecz",
+  "finish": "Zaczynamy!",
+  "step": "Krok {{current}} z {{total}}"
+}

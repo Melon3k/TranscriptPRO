@@ -1,0 +1,25 @@
+{
+  "welcome": {
+    "title": "Welcome to TranscriptPRO",
+    "subtitle": "A desktop subtitle editor with local AI transcription. Let's get you set up in a few quick steps."
+  },
+  "model": {
+    "title": "Choose a Whisper model",
+    "subtitle": "Whisper runs entirely on your device — no internet required for transcription.",
+    "nextBlocked": "Download a model to continue"
+  },
+  "apiKeys": {
+    "title": "API keys (optional)",
+    "subtitle": "Add keys to enable AI translation. You can skip this and add them later in Settings.",
+    "skip": "Skip — I'll add later"
+  },
+  "done": {
+    "title": "All set!",
+    "tip": "Tip: drag a video or audio file onto the window to open it instantly.",
+    "settingsHint": "All settings can be changed later in the Settings panel."
+  },
+  "next": "Next",
+  "back": "Back",
+  "finish": "Let's go!",
+  "step": "Step {{current}} of {{total}}"
+}

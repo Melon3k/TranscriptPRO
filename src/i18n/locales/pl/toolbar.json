@@ -1,6 +1,11 @@
 {
   "openMedia": "Otwórz media",
   "importSrt": "Importuj SRT",
+  "export": "Eksportuj",
+  "recentFiles": "Ostatnie",
+  "noRecentFiles": "Brak ostatnich plików",
+  "clearRecent": "Wyczyść",
+  "shortcuts": "Skróty klawiszowe",
   "exportSrt": "Eksportuj SRT",
   "wordSrt": "SRT per słowo",
   "exportTxt": "Eksportuj TXT",
