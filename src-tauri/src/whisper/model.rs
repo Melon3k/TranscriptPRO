@@ -121,22 +121,27 @@ pub fn transcribe(
         ..Default::default()
     });
 
-    // Fallback chain — kept short to avoid Metal/whisper.cpp global-state corruption
-    // observed when recreating GPU contexts more than twice in one process. We've
-    // confirmed empirically (1) forced-language + medium fails on BOTH GPU and CPU,
-    // so CPU is not a useful fallback for that case; (2) auto-detect on GPU works.
-    // So if the user forced a language and it fails, we drop to auto-detect.
+    // Fallback chain:
+    // - After a GPU encode failure (-6), the Metal context is tainted — a second GPU
+    //   attempt will silently return 0 segments in unrealistically short time.
+    //   We therefore jump straight to CPU after the first GPU failure.
+    // - We also detect the "0 segments on non-trivial audio" case (a symptom of the
+    //   same Metal corruption) and treat it as a failure requiring the next fallback.
     let attempts: Vec<(bool, Option<&str>, &str)> = if language.is_some() {
         vec![
-            (true, language, "GPU + requested language"),
-            (true, None, "GPU + auto-detect (fallback)"),
+            (true,  language, "GPU + requested language"),
+            (false, language, "CPU + requested language (fallback)"),
+            (false, None,     "CPU + auto-detect (last resort)"),
         ]
     } else {
         vec![
-            (true, language, "GPU + auto"),
+            (true,  language, "GPU + auto"),
             (false, language, "CPU + auto (fallback)"),
         ]
     };
+
+    // Threshold: audio longer than this with 0 segments is a GPU corruption signal.
+    let audio_duration_s = audio_data.len() as f32 / SAMPLE_RATE as f32;
 
     let mut subtitles: Option<Vec<Subtitle>> = None;
     let mut last_err: Option<AppError> = None;
@@ -146,7 +151,7 @@ pub fn transcribe(
                 app,
                 "warn",
                 "whisper",
-                format!("Previous attempt failed with whisper -6, retrying: {}", label),
+                format!("Previous attempt failed, retrying: {}", label),
             );
             let _ = on_progress.send(TranscriptionProgress {
                 stage: "transcribing_audio".into(),
@@ -154,10 +159,7 @@ pub fn transcribe(
                 message: format!("Retrying ({})…", label),
                 ..Default::default()
             });
-            // Give the Metal/whisper.cpp backend time to fully tear down the
-            // previous context before we allocate a new one. Without this pause,
-            // the second context can come up in a degraded state and silently
-            // produce zero segments.
+            // Give Metal/whisper.cpp time to fully release the previous context.
             std::thread::sleep(std::time::Duration::from_millis(500));
         }
 
@@ -170,7 +172,29 @@ pub fn transcribe(
             cancel.clone(),
             *use_gpu,
         ) {
+            Ok(s) if !s.is_empty() => {
+                subtitles = Some(s);
+                break;
+            }
+            Ok(_) if audio_duration_s > 10.0 => {
+                // 0 segments on non-trivial audio — Metal context corruption.
+                logger::emit(
+                    app,
+                    "warn",
+                    "whisper",
+                    format!(
+                        "Got 0 segments on {:.0}s audio ({}), trying next backend",
+                        audio_duration_s, label
+                    ),
+                );
+                last_err = Some(AppError::TranscriptionFailed(format!(
+                    "0 segments on non-trivial audio ({})",
+                    label
+                )));
+                continue;
+            }
             Ok(s) => {
+                // 0 segments on very short audio is valid (silence / no speech).
                 subtitles = Some(s);
                 break;
             }
