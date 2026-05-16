@@ -163,6 +163,7 @@ pub fn transcribe(
             std::thread::sleep(std::time::Duration::from_millis(500));
         }
 
+        let attempt_start = Instant::now();
         match run_inference_pass(
             app,
             model_path,
@@ -176,26 +177,37 @@ pub fn transcribe(
                 subtitles = Some(s);
                 break;
             }
-            Ok(_) if audio_duration_s > 10.0 => {
-                // 0 segments on non-trivial audio — Metal context corruption.
-                logger::emit(
+            Ok(_) => {
+                let elapsed = attempt_start.elapsed().as_secs_f32();
+                let realtime = audio_duration_s / elapsed.max(0.001);
+                if realtime > 50.0 && audio_duration_s > 10.0 {
+                    // Unrealistically fast on non-trivial audio = GPU/Metal context corruption.
+                    // (legitimate CPU runs at ~4-10×; >50× on >10s audio is physically impossible)
+                    logger::emit(
+                        app,
+                        "warn",
+                        "whisper",
+                        format!(
+                            "0 segments at {:.0}×realtime on {:.0}s audio ({}) — GPU corruption, trying next backend",
+                            realtime, audio_duration_s, label
+                        ),
+                    );
+                    last_err = Some(AppError::TranscriptionFailed(format!(
+                        "0 segments at {:.0}x realtime ({})",
+                        realtime, label
+                    )));
+                    continue;
+                }
+                // Realistic timing with 0 segments = no speech in audio, accept result.
+                logger::info(
                     app,
-                    "warn",
                     "whisper",
                     format!(
-                        "Got 0 segments on {:.0}s audio ({}), trying next backend",
-                        audio_duration_s, label
+                        "0 segments on {:.0}s audio at {:.1}×realtime ({}) — no speech detected",
+                        audio_duration_s, realtime, label
                     ),
                 );
-                last_err = Some(AppError::TranscriptionFailed(format!(
-                    "0 segments on non-trivial audio ({})",
-                    label
-                )));
-                continue;
-            }
-            Ok(s) => {
-                // 0 segments on very short audio is valid (silence / no speech).
-                subtitles = Some(s);
+                subtitles = Some(Vec::new());
                 break;
             }
             Err(AppError::TranscriptionFailed(msg)) if is_encode_failure(&msg) => {
