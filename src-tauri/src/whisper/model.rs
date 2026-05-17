@@ -43,6 +43,7 @@ pub fn transcribe(
     audio_path: &Path,
     language: Option<&str>,
     enable_diarization: bool,
+    force_cpu: bool,
     on_progress: &Channel<TranscriptionProgress>,
     cancel: Arc<AtomicBool>,
 ) -> Result<Vec<Subtitle>, AppError> {
@@ -121,13 +122,30 @@ pub fn transcribe(
         ..Default::default()
     });
 
+    if force_cpu {
+        logger::info(app, "whisper", "Force CPU mode — skipping GPU backend");
+    }
+
     // Fallback chain:
     // - After a GPU encode failure (-6), the Metal context is tainted — a second GPU
     //   attempt will silently return 0 segments in unrealistically short time.
     //   We therefore jump straight to CPU after the first GPU failure.
-    // - We also detect the "0 segments on non-trivial audio" case (a symptom of the
-    //   same Metal corruption) and treat it as a failure requiring the next fallback.
-    let attempts: Vec<(bool, Option<&str>, &str)> = if language.is_some() {
+    // - We also detect "0 segments on non-trivial audio" (Metal corruption symptom)
+    //   and treat it as a failure requiring the next fallback.
+    // - force_cpu skips GPU entirely, which avoids Metal initialisation and the
+    //   contamination cascade that follows a -6 error on Apple Silicon.
+    let attempts: Vec<(bool, Option<&str>, &str)> = if force_cpu {
+        if language.is_some() {
+            vec![
+                (false, language, "CPU + requested language"),
+                (false, None,     "CPU + auto-detect (fallback)"),
+            ]
+        } else {
+            vec![
+                (false, language, "CPU + auto"),
+            ]
+        }
+    } else if language.is_some() {
         vec![
             (true,  language, "GPU + requested language"),
             (false, language, "CPU + requested language (fallback)"),
@@ -140,7 +158,9 @@ pub fn transcribe(
         ]
     };
 
-    // Threshold: audio longer than this with 0 segments is a GPU corruption signal.
+    // Threshold: audio longer than 20 s returning 0 segments at >50× realtime is a
+    // GPU/Metal context corruption signal. Short clips (≤20 s) skip the check because
+    // fast models (e.g. tiny) can legitimately exceed 50× on very short audio.
     let audio_duration_s = audio_data.len() as f32 / SAMPLE_RATE as f32;
 
     let mut subtitles: Option<Vec<Subtitle>> = None;
@@ -180,9 +200,9 @@ pub fn transcribe(
             Ok(_) => {
                 let elapsed = attempt_start.elapsed().as_secs_f32();
                 let realtime = audio_duration_s / elapsed.max(0.001);
-                if realtime > 50.0 && audio_duration_s > 10.0 {
+                if realtime > 50.0 && audio_duration_s > 20.0 {
                     // Unrealistically fast on non-trivial audio = GPU/Metal context corruption.
-                    // (legitimate CPU runs at ~4-10×; >50× on >10s audio is physically impossible)
+                    // (>20 s guard avoids false positives on tiny model + short clips)
                     logger::emit(
                         app,
                         "warn",

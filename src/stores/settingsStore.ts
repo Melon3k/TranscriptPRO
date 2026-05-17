@@ -18,6 +18,7 @@ interface SettingsState {
   autoSaveOnImport: boolean;
   autoCheckUpdates: boolean;
   language: UiLanguage;
+  forceCpu: boolean;
 
   setWhisperModel: (model: string) => void;
   setTranslationProvider: (provider: TranslationProvider) => void;
@@ -32,6 +33,7 @@ interface SettingsState {
   setAutoSaveOnImport: (v: boolean) => void;
   setAutoCheckUpdates: (v: boolean) => void;
   setLanguage: (lang: UiLanguage) => void;
+  setForceCpu: (v: boolean) => void;
 }
 
 function detectInitialLanguage(): UiLanguage {
@@ -58,6 +60,7 @@ export const useSettingsStore = create<SettingsState>()(
       autoSaveOnImport: true,
       autoCheckUpdates: true,
       language: detectInitialLanguage(),
+      forceCpu: false,
 
       setWhisperModel: (model) => set({ whisperModel: model }),
       setTranslationProvider: (provider) =>
@@ -73,6 +76,7 @@ export const useSettingsStore = create<SettingsState>()(
       setAutoSaveOnImport: (v) => set({ autoSaveOnImport: v }),
       setAutoCheckUpdates: (v) => set({ autoCheckUpdates: v }),
       setLanguage: (lang) => set({ language: lang }),
+      setForceCpu: (v) => set({ forceCpu: v }),
     }),
     {
       name: "transcriptpro-settings",
