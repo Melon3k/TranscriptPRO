@@ -2,6 +2,8 @@
   "header": "Logs",
   "clear": "Clear logs",
   "clearShort": "Clear",
+  "copy": "Copy all logs",
+  "copyShort": "Copy",
   "close": "Close logs",
   "empty": "No log entries yet."
 }
