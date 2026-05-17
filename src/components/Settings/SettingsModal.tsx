@@ -35,6 +35,8 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
     setAutoCheckUpdates,
     language,
     setLanguage,
+    forceCpu,
+    setForceCpu,
   } = useSettingsStore();
 
   const updateStatus = useUpdateStore((s) => s.status);
@@ -143,6 +145,29 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
               onChange={setLibreTranslateApiKey}
               placeholder={t("settings:libreTranslate.apiKeyPlaceholder")}
             />
+          </div>
+
+          {/* Transcription */}
+          <div className="border-t border-gray-200 dark:border-gray-700 pt-4 space-y-2.5">
+            <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+              {t("settings:transcription.section")}
+            </p>
+            <label className="flex items-center gap-2.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={forceCpu}
+                onChange={(e) => setForceCpu(e.target.checked)}
+                className="h-4 w-4 rounded border-gray-300 text-blue-500 focus:ring-blue-400"
+              />
+              <div>
+                <span className="text-sm text-gray-700 dark:text-gray-300">
+                  {t("settings:transcription.forceCpu")}
+                </span>
+                <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                  {t("settings:transcription.forceCpuHint")}
+                </p>
+              </div>
+            </label>
           </div>
 
           {/* Version history */}

@@ -9,6 +9,11 @@
     "apiKey": "API key (optional)",
     "apiKeyPlaceholder": "Leave empty for the public server"
   },
+  "transcription": {
+    "section": "Transcription",
+    "forceCpu": "Force CPU mode",
+    "forceCpuHint": "Slower but avoids GPU/Metal issues on some Macs. Try this if transcription always fails."
+  },
   "history": {
     "section": "Version history",
     "afterTranscription": "Auto-save after transcription",
