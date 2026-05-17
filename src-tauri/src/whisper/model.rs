@@ -43,6 +43,7 @@ pub fn transcribe(
     audio_path: &Path,
     language: Option<&str>,
     enable_diarization: bool,
+    force_cpu: bool,
     on_progress: &Channel<TranscriptionProgress>,
     cancel: Arc<AtomicBool>,
 ) -> Result<Vec<Subtitle>, AppError> {
@@ -121,13 +122,30 @@ pub fn transcribe(
         ..Default::default()
     });
 
+    if force_cpu {
+        logger::info(app, "whisper", "Force CPU mode — skipping GPU backend");
+    }
+
     // Fallback chain:
     // - After a GPU encode failure (-6), the Metal context is tainted — a second GPU
     //   attempt will silently return 0 segments in unrealistically short time.
     //   We therefore jump straight to CPU after the first GPU failure.
-    // - We also detect the "0 segments on non-trivial audio" case (a symptom of the
-    //   same Metal corruption) and treat it as a failure requiring the next fallback.
-    let attempts: Vec<(bool, Option<&str>, &str)> = if language.is_some() {
+    // - We also detect "0 segments on non-trivial audio" (Metal corruption symptom)
+    //   and treat it as a failure requiring the next fallback.
+    // - force_cpu skips GPU entirely, which avoids Metal initialisation and the
+    //   contamination cascade that follows a -6 error on Apple Silicon.
+    let attempts: Vec<(bool, Option<&str>, &str)> = if force_cpu {
+        if language.is_some() {
+            vec![
+                (false, language, "CPU + requested language"),
+                (false, None,     "CPU + auto-detect (fallback)"),
+            ]
+        } else {
+            vec![
+                (false, language, "CPU + auto"),
+            ]
+        }
+    } else if language.is_some() {
         vec![
             (true,  language, "GPU + requested language"),
             (false, language, "CPU + requested language (fallback)"),
@@ -140,7 +158,9 @@ pub fn transcribe(
         ]
     };
 
-    // Threshold: audio longer than this with 0 segments is a GPU corruption signal.
+    // Threshold: audio longer than 20 s returning 0 segments at >50× realtime is a
+    // GPU/Metal context corruption signal. Short clips (≤20 s) skip the check because
+    // fast models (e.g. tiny) can legitimately exceed 50× on very short audio.
     let audio_duration_s = audio_data.len() as f32 / SAMPLE_RATE as f32;
 
     let mut subtitles: Option<Vec<Subtitle>> = None;
@@ -163,6 +183,7 @@ pub fn transcribe(
             std::thread::sleep(std::time::Duration::from_millis(500));
         }
 
+        let attempt_start = Instant::now();
         match run_inference_pass(
             app,
             model_path,
@@ -176,26 +197,37 @@ pub fn transcribe(
                 subtitles = Some(s);
                 break;
             }
-            Ok(_) if audio_duration_s > 10.0 => {
-                // 0 segments on non-trivial audio — Metal context corruption.
-                logger::emit(
+            Ok(_) => {
+                let elapsed = attempt_start.elapsed().as_secs_f32();
+                let realtime = audio_duration_s / elapsed.max(0.001);
+                if realtime > 50.0 && audio_duration_s > 20.0 {
+                    // Unrealistically fast on non-trivial audio = GPU/Metal context corruption.
+                    // (>20 s guard avoids false positives on tiny model + short clips)
+                    logger::emit(
+                        app,
+                        "warn",
+                        "whisper",
+                        format!(
+                            "0 segments at {:.0}×realtime on {:.0}s audio ({}) — GPU corruption, trying next backend",
+                            realtime, audio_duration_s, label
+                        ),
+                    );
+                    last_err = Some(AppError::TranscriptionFailed(format!(
+                        "0 segments at {:.0}x realtime ({})",
+                        realtime, label
+                    )));
+                    continue;
+                }
+                // Realistic timing with 0 segments = no speech in audio, accept result.
+                logger::info(
                     app,
-                    "warn",
                     "whisper",
                     format!(
-                        "Got 0 segments on {:.0}s audio ({}), trying next backend",
-                        audio_duration_s, label
+                        "0 segments on {:.0}s audio at {:.1}×realtime ({}) — no speech detected",
+                        audio_duration_s, realtime, label
                     ),
                 );
-                last_err = Some(AppError::TranscriptionFailed(format!(
-                    "0 segments on non-trivial audio ({})",
-                    label
-                )));
-                continue;
-            }
-            Ok(s) => {
-                // 0 segments on very short audio is valid (silence / no speech).
-                subtitles = Some(s);
+                subtitles = Some(Vec::new());
                 break;
             }
             Err(AppError::TranscriptionFailed(msg)) if is_encode_failure(&msg) => {

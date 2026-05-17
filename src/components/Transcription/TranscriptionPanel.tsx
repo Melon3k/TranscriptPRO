@@ -36,7 +36,7 @@ interface TranscriptionPanelProps {
 
 export default function TranscriptionPanel({ audioPath }: TranscriptionPanelProps) {
   const { t } = useTranslation(["transcription", "common"]);
-  const { whisperModel, setWhisperModel, autoSaveOnTranscription } = useSettingsStore();
+  const { whisperModel, setWhisperModel, autoSaveOnTranscription, forceCpu } = useSettingsStore();
   const { setSubtitles } = useSubtitleStore();
   const { addVersion } = useVersionStore();
 
@@ -89,6 +89,7 @@ export default function TranscriptionPanel({ audioPath }: TranscriptionPanelProp
         whisperModel,
         language === "auto" ? null : language,
         detectSpeakers,
+        forceCpu,
         (p) => setProgress(p)
       );
       setSubtitles(subs);

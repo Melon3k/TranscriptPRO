@@ -154,6 +154,7 @@ pub async fn transcribe_audio(
     model_name: String,
     language: Option<String>,
     detect_speakers: Option<bool>,
+    force_cpu: Option<bool>,
     on_progress: Channel<TranscriptionProgress>,
 ) -> Result<Vec<crate::subtitle::types::Subtitle>, AppError> {
     // Reset cancellation flag at the start of each run.
@@ -190,15 +191,17 @@ pub async fn transcribe_audio(
 
     let lang = language.clone();
     let diarize = detect_speakers.unwrap_or(false);
+    let cpu_only = force_cpu.unwrap_or(false);
 
     logger::info(
         &app,
         "transcribe",
         format!(
-            "Starting transcription: model={} lang={} diarize={}",
+            "Starting transcription: model={} lang={} diarize={} force_cpu={}",
             model_name,
             lang.as_deref().unwrap_or("auto"),
             diarize,
+            cpu_only,
         ),
     );
 
@@ -211,6 +214,7 @@ pub async fn transcribe_audio(
             &audio,
             lang.as_deref(),
             diarize,
+            cpu_only,
             &on_progress,
             cancel_flag,
         )
