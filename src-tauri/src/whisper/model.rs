@@ -180,9 +180,9 @@ pub fn transcribe(
             Ok(_) => {
                 let elapsed = attempt_start.elapsed().as_secs_f32();
                 let realtime = audio_duration_s / elapsed.max(0.001);
-                if realtime > 50.0 && audio_duration_s > 10.0 {
-                    // Unrealistically fast on non-trivial audio = GPU/Metal context corruption.
-                    // (legitimate CPU runs at ~4-10×; >50× on >10s audio is physically impossible)
+                if *use_gpu && realtime > 50.0 && audio_duration_s > 10.0 {
+                    // GPU only: unrealistically fast on non-trivial audio = Metal context corruption.
+                    // CPU is not affected by Metal and tiny models can legitimately exceed 50×.
                     logger::emit(
                         app,
                         "warn",
