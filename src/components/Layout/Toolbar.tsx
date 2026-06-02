@@ -39,6 +39,7 @@ import { Subtitle } from "../../types/subtitle";
 interface ToolbarProps {
   onOpenSettings: () => void;
   onOpenShortcuts: () => void;
+  onStartAudioExtraction?: () => void;
   onStartTranscription: (audioPath: string) => void;
   onError: (message: string) => void;
 }
@@ -46,6 +47,7 @@ interface ToolbarProps {
 export default function Toolbar({
   onOpenSettings,
   onOpenShortcuts,
+  onStartAudioExtraction,
   onStartTranscription,
   onError,
 }: ToolbarProps) {
@@ -64,6 +66,7 @@ export default function Toolbar({
     setSubtitles,
     addVersion,
     autoSaveOnImport,
+    onStartAudioExtraction,
     onStartTranscription,
     onError,
     onRecordFile: record,

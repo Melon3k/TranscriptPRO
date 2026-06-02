@@ -1,5 +1,5 @@
-import { useEffect, useRef } from "react";
-import { Trash2, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Trash2, Copy, Check, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useLogStore, type LogLevel } from "../../stores/logStore";
 
@@ -23,6 +23,17 @@ export default function LogPanel() {
   const { t } = useTranslation(["logPanel"]);
   const { entries, open, setOpen, clear } = useLogStore();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    const text = entries
+      .map((e) => `${formatTime(e.timestamp)} ${e.level.toUpperCase().padEnd(5)} ${e.source.padEnd(20)} ${e.message}`)
+      .join("\n");
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -41,6 +52,15 @@ export default function LogPanel() {
         </span>
         <span className="text-gray-500">{entries.length}</span>
         <div className="flex-1" />
+        <button
+          onClick={handleCopy}
+          disabled={entries.length === 0}
+          title={t("logPanel:copy")}
+          className="flex items-center gap-1 rounded px-2 py-1 text-gray-400 hover:bg-gray-800 hover:text-gray-200 disabled:opacity-30 disabled:cursor-not-allowed"
+        >
+          {copied ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
+          {t("logPanel:copyShort")}
+        </button>
         <button
           onClick={clear}
           title={t("logPanel:clear")}

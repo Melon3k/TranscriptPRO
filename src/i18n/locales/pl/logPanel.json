@@ -2,6 +2,8 @@
   "header": "Logi",
   "clear": "Wyczyść logi",
   "clearShort": "Wyczyść",
+  "copy": "Kopiuj wszystkie logi",
+  "copyShort": "Kopiuj",
   "close": "Zamknij logi",
   "empty": "Brak wpisów w logu."
 }

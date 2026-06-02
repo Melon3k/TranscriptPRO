@@ -57,6 +57,7 @@ export default function MainLayout() {
         setSubtitles,
         addVersion,
         autoSaveOnImport,
+        onStartAudioExtraction: () => setAudioPath(null),
         onStartTranscription: (audio) => {
           setAudioPath(audio);
           setActivePanel("transcription");
@@ -120,6 +121,7 @@ export default function MainLayout() {
       <Toolbar
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenShortcuts={() => setShortcutsOpen(true)}
+        onStartAudioExtraction={() => setAudioPath(null)}
         onStartTranscription={(path) => {
           setAudioPath(path);
           setActivePanel("transcription");
