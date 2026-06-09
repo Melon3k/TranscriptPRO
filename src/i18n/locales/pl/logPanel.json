@@ -2,8 +2,14 @@
   "header": "Logi",
   "clear": "Wyczyść logi",
   "clearShort": "Wyczyść",
-  "copy": "Kopiuj wszystkie logi",
+  "copy": "Kopiuj widoczne logi",
   "copyShort": "Kopiuj",
   "close": "Zamknij logi",
-  "empty": "Brak wpisów w logu."
+  "empty": "Brak wpisów w logu.",
+  "noMatches": "Brak wpisów pasujących do filtra.",
+  "searchPlaceholder": "Szukaj w treści…",
+  "allSources": "Wszystkie źródła",
+  "filterByLevel": "Filtruj wg poziomu",
+  "filterBySource": "Filtruj wg źródła",
+  "shownOfTotal": "{{shown}} z {{total}}"
 }
