@@ -35,6 +35,25 @@ unsafe extern "C" fn progress_trampoline(
     });
 }
 
+/// FFI trampoline for whisper.cpp's abort callback. `user_data` is a `*const AtomicBool`
+/// (the cancellation flag) kept alive by the caller for the duration of `state.full()`.
+/// Returning `true` aborts whisper.cpp's decode loop.
+///
+/// We deliberately use the raw API instead of `FullParams::set_abort_callback_safe` because
+/// that wrapper is unsound in whisper-rs 0.16: it monomorphises its internal trampoline over
+/// the closure type `F` but stores a pointer to a `Box<dyn FnMut() -> bool>` as user_data.
+/// The trampoline then reinterprets the fat box pointer as `F` and dereferences it, so the
+/// callback reads unrelated heap memory and returns garbage — almost always `true`. That
+/// aborted every transcription after the first 30 s window, surfacing as "0 segments at
+/// >50× realtime" on BOTH GPU and CPU (previously misdiagnosed as Metal GPU corruption).
+unsafe extern "C" fn abort_trampoline(user_data: *mut c_void) -> bool {
+    if user_data.is_null() {
+        return false;
+    }
+    let flag = &*(user_data as *const AtomicBool);
+    flag.load(Ordering::Relaxed)
+}
+
 /// Run Whisper transcription on a 16kHz mono WAV file.
 /// Returns subtitle segments with word-level timestamps.
 pub fn transcribe(
@@ -389,8 +408,14 @@ fn run_inference_pass(
         params.set_progress_callback_user_data(cb_ptr);
     }
 
-    let cancel_for_abort = cancel.clone();
-    params.set_abort_callback_safe(move || cancel_for_abort.load(Ordering::Relaxed));
+    // Raw-FFI abort callback (see `abort_trampoline` for why the `_safe` variant is unsound
+    // in whisper-rs 0.16). `cancel` is an `Arc<AtomicBool>` owned by this function for the
+    // entire call, so a pointer to its inner value stays valid for the duration of `state.full()`.
+    let abort_ptr = Arc::as_ptr(&cancel) as *mut c_void;
+    unsafe {
+        params.set_abort_callback(Some(abort_trampoline));
+        params.set_abort_callback_user_data(abort_ptr);
+    }
 
     let mut state = ctx
         .create_state()
