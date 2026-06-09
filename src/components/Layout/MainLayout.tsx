@@ -172,13 +172,19 @@ export default function MainLayout() {
             />
           </div>
 
-          {/* Panel content */}
+          {/* Panel content — all panels stay mounted (toggled via `hidden`) so that
+              in-flight state (e.g. the transcription progress bar) survives tab switches.
+              Conditionally rendering with `&&` would unmount and wipe that local state. */}
           <div className="flex-1 overflow-y-auto">
-            {activePanel === "transcription" && (
+            <div className={activePanel === "transcription" ? "" : "hidden"}>
               <TranscriptionPanel audioPath={audioPath} />
-            )}
-            {activePanel === "translation" && <TranslationPanel />}
-            {activePanel === "history" && <HistoryPanel />}
+            </div>
+            <div className={activePanel === "translation" ? "" : "hidden"}>
+              <TranslationPanel />
+            </div>
+            <div className={activePanel === "history" ? "" : "hidden"}>
+              <HistoryPanel />
+            </div>
           </div>
         </div>
       </div>
