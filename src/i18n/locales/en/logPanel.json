@@ -2,8 +2,14 @@
   "header": "Logs",
   "clear": "Clear logs",
   "clearShort": "Clear",
-  "copy": "Copy all logs",
+  "copy": "Copy visible logs",
   "copyShort": "Copy",
   "close": "Close logs",
-  "empty": "No log entries yet."
+  "empty": "No log entries yet.",
+  "noMatches": "No entries match the filter.",
+  "searchPlaceholder": "Search messages…",
+  "allSources": "All sources",
+  "filterByLevel": "Filter by level",
+  "filterBySource": "Filter by source",
+  "shownOfTotal": "{{shown}} of {{total}}"
 }
