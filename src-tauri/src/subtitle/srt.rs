@@ -46,7 +46,8 @@ pub fn parse_srt(content: &str) -> Result<Vec<Subtitle>, AppError> {
             caps[8].parse().unwrap_or(0),
         );
 
-        let text = lines[2..].join("\n").trim().to_string();
+        let raw_text = lines[2..].join("\n");
+        let (speaker, text) = split_speaker_tag(raw_text.trim());
         if text.is_empty() {
             continue;
         }
@@ -56,9 +57,9 @@ pub fn parse_srt(content: &str) -> Result<Vec<Subtitle>, AppError> {
             index: subtitles.len() + 1,
             start_time,
             end_time,
-            text,
+            text: text.to_string(),
             words: Vec::new(),
-            speaker: None,
+            speaker,
         });
     }
 
@@ -71,6 +72,27 @@ pub fn parse_srt(content: &str) -> Result<Vec<Subtitle>, AppError> {
     }
 
     Ok(subtitles)
+}
+
+/// Split the leading "[Speaker N] " tag (written by the SRT/VTT/ASS writers for diarized
+/// subtitles) off a cue's text, so export → re-import restores the speaker field instead
+/// of folding the tag into the text. Only the exact `Speaker <digits>` form produced by
+/// diarization is recognized — bracketed sound cues like "[applause]" stay in the text.
+fn split_speaker_tag(text: &str) -> (Option<String>, &str) {
+    let Some(rest) = text.strip_prefix("[Speaker ") else {
+        return (None, text);
+    };
+    let Some(end) = rest.find(']') else {
+        return (None, text);
+    };
+    let num = &rest[..end];
+    if num.is_empty() || !num.bytes().all(|b| b.is_ascii_digit()) {
+        return (None, text);
+    }
+    (
+        Some(format!("Speaker {}", num)),
+        rest[end + 1..].trim_start(),
+    )
 }
 
 /// SRT/VTT entries are separated by a blank line, so a blank line inside a cue's text
@@ -201,6 +223,44 @@ mod tests {
 
         let output = write_srt(&subtitles);
         assert!(output.contains("00:00:01,000 --> 00:00:03,500"));
+    }
+
+    #[test]
+    fn test_speaker_roundtrip() {
+        let subtitles = vec![Subtitle {
+            id: Uuid::new_v4().to_string(),
+            index: 1,
+            start_time: 0,
+            end_time: 1000,
+            text: "Hello world".to_string(),
+            words: Vec::new(),
+            speaker: Some("Speaker 2".to_string()),
+        }];
+
+        let output = write_srt(&subtitles);
+        assert!(output.contains("[Speaker 2] Hello world"));
+
+        let reparsed = parse_srt(&output).unwrap();
+        assert_eq!(reparsed[0].speaker.as_deref(), Some("Speaker 2"));
+        assert_eq!(reparsed[0].text, "Hello world");
+    }
+
+    #[test]
+    fn test_bracketed_text_is_not_a_speaker() {
+        for text in ["[applause] Hello", "[Speaker one] Hello", "[Speaker ] Hello"] {
+            let srt = format!("1\n00:00:00,000 --> 00:00:01,000\n{}\n", text);
+            let parsed = parse_srt(&srt).unwrap();
+            assert_eq!(parsed[0].speaker, None, "input: {}", text);
+            assert_eq!(parsed[0].text, text);
+        }
+    }
+
+    #[test]
+    fn test_speaker_tag_multiline_bracket_not_matched() {
+        // A ']' on a later line must not turn the first lines into a speaker name.
+        let srt = "1\n00:00:00,000 --> 00:00:01,000\n[Speaker\n1] Hello\n";
+        let parsed = parse_srt(srt).unwrap();
+        assert_eq!(parsed[0].speaker, None);
     }
 
     #[test]
