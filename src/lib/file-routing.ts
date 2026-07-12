@@ -37,6 +37,8 @@ export interface FileRoutingCallbacks {
   setFilePath: (path: string) => void;
   setProjectKey: (path: string) => Promise<void>;
   setSubtitles: (subs: Subtitle[]) => void;
+  /** Clear the translation snapshot/comparison UI left over from the previous file. */
+  clearTranslationState: () => void;
   addVersion: (subs: Subtitle[], source: "import", meta: { srtPath: string }) => void;
   autoSaveOnImport: boolean;
   onStartAudioExtraction?: () => void;
@@ -59,6 +61,8 @@ export async function routeFile(
     // Ignore overlapping media opens while an extraction is already running.
     if (mediaExtractionInFlight) return true;
     mediaExtractionInFlight = true;
+    // A new project starts — the previous file's translation snapshot is stale.
+    cb.clearTranslationState();
     cb.setFilePath(path);
     // Deriving/loading the version-history key must never block or abort the
     // transcription pipeline — treat any failure here as "history unavailable".
@@ -86,6 +90,7 @@ export async function routeFile(
   if (kind === "srt") {
     try {
       const subs = await importSrtCmd(path);
+      cb.clearTranslationState();
       cb.setSubtitles(subs);
       await cb.setProjectKey(path);
       cb.onRecordFile?.(path, "srt");

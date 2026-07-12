@@ -2,9 +2,9 @@
   "header": "Tłumaczenie",
   "providerLabel": "Dostawca",
   "provider": {
-    "libretranslate": "LibreTranslate (darmowy)",
     "gemini": "Gemini",
-    "claude": "Claude"
+    "claude": "Claude",
+    "local": "Lokalny — TranslateGemma (offline)"
   },
   "targetLanguageLabel": "Język docelowy",
   "sourceLanguageLabel": "Język źródłowy (opcjonalnie)",
@@ -33,11 +33,17 @@
   "translate_other": "Przetłumacz ({{count}} segmentów)",
   "hideComparison": "Ukryj porównanie",
   "compare": "Porównaj z oryginałem",
-  "dismissOriginal": "Odrzuć oryginał",
+  "keepTranslation": "Zachowaj tłumaczenie",
+  "restoreOriginal": "Przywróć oryginał",
   "apiKeyMissing": "Ustaw klucz API {{provider}} w Ustawieniach",
   "providerName": {
     "gemini": "Gemini",
     "claude": "Claude"
   },
-  "freeNoKey": "Bez klucza dla serwera self-hosted; publiczny serwer może wymagać klucza API (ustaw w Ustawieniach)"
+  "localModel": {
+    "download": "Pobierz model ({{size}} GB)",
+    "downloading": "Pobieranie modelu… {{percent}}%",
+    "needsSource": "Model lokalny wymaga wybrania języka źródłowego (brak auto-wykrywania)",
+    "gemmaNotice": "Gemma jest udostępniana na warunkach Gemma Terms of Use: ai.google.dev/gemma/terms"
+  }
 }

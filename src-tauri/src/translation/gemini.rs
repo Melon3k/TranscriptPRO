@@ -41,7 +41,7 @@ struct GeminiErrorDetail {
     retry_delay: Option<String>,
 }
 
-const DEFAULT_MODEL: &str = "gemini-2.0-flash-lite";
+const DEFAULT_MODEL: &str = "gemini-3.1-flash-lite";
 const MAX_RETRIES: usize = 3;
 
 /// Parse a retryDelay string like "41s" or "41.838117925s" into a Duration.

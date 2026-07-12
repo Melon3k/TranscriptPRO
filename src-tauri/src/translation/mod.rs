@@ -1,6 +1,6 @@
 pub mod claude;
 pub mod gemini;
-pub mod libretranslate;
+pub mod local;
 
 /// Truncate a string to at most `max` characters on a UTF-8 char boundary.
 /// Byte slicing (`&s[..n]`) panics when `n` falls inside a multi-byte character —

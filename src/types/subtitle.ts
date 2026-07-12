@@ -52,7 +52,7 @@ export interface TranslationProgress {
   total: number;
 }
 
-export type TranslationProvider = "gemini" | "claude" | "libretranslate";
+export type TranslationProvider = "gemini" | "claude" | "local";
 
 export interface TranslationConfig {
   provider: TranslationProvider;

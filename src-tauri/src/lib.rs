@@ -27,6 +27,16 @@ pub struct AudioExtraction {
 /// handlers (notably macOS Cmd+Q, which does not emit a per-window close event) guard it.
 pub struct DirtyState(pub AtomicBool);
 
+/// The llama-server sidecar powering local translation, plus the port it listens on.
+/// Kept warm across translations (the model stays loaded); killed on app exit.
+/// `startup` serializes ensure_server: without it, two concurrent translations both
+/// see "no server" and each spawn one (the loser leaks as an orphan process).
+pub struct LocalLlm {
+    pub child: Mutex<Option<CommandChild>>,
+    pub port: Mutex<Option<u16>>,
+    pub startup: tokio::sync::Mutex<()>,
+}
+
 /// Whisper context cached across transcriptions of the same model + backend, so the model
 /// isn't reloaded from disk on every job.
 pub type WhisperCache = Arc<Mutex<Option<whisper::model::CachedContext>>>;
@@ -49,6 +59,19 @@ fn kill_audio_child(app: &tauri::AppHandle) {
             if let Some(child) = guard.take() {
                 let _ = child.kill();
             }
+        }
+    }
+}
+
+fn kill_local_llm(app: &tauri::AppHandle) {
+    if let Some(state) = app.try_state::<LocalLlm>() {
+        if let Ok(mut guard) = state.child.lock() {
+            if let Some(child) = guard.take() {
+                let _ = child.kill();
+            }
+        }
+        if let Ok(mut guard) = state.port.lock() {
+            *guard = None;
         }
     }
 }
@@ -84,6 +107,11 @@ pub fn run() {
             cancelled: AtomicBool::new(false),
         })
         .manage(DirtyState(AtomicBool::new(false)))
+        .manage(LocalLlm {
+            child: Mutex::new(None),
+            port: Mutex::new(None),
+            startup: tokio::sync::Mutex::new(()),
+        })
         .manage(whisper_cache)
         .setup(|app| {
             cleanup_stale_audio();
@@ -127,6 +155,7 @@ pub fn run() {
                     }
                 } else {
                     kill_audio_child(app);
+                    kill_local_llm(app);
                     app.exit(0);
                 }
             }
@@ -161,9 +190,16 @@ pub fn run() {
             commands::transcribe::download_model,
             commands::transcribe::transcribe_audio,
             commands::transcribe::cancel_transcription,
+            // Local translation model
+            commands::local_model::local_model_status,
+            commands::local_model::download_local_model,
             // Translation
             commands::translate::translate_subtitles,
             commands::translate::cancel_translation,
+            // API keys (OS credential store)
+            commands::keys::set_api_key,
+            commands::keys::delete_api_key,
+            commands::keys::has_api_key,
             // App lifecycle
             set_dirty,
             exit_app,
@@ -182,8 +218,10 @@ pub fn run() {
                         let _ = window.emit("confirm-close", ());
                     }
                 } else {
-                    // Actually exiting — make sure ffmpeg doesn't outlive the app.
+                    // Actually exiting — make sure ffmpeg and llama-server don't
+                    // outlive the app.
                     kill_audio_child(app_handle);
+                    kill_local_llm(app_handle);
                 }
             }
         });

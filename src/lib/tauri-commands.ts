@@ -149,6 +149,25 @@ export async function downloadModel(
   return invoke("download_model", { modelName, onProgress: channel });
 }
 
+// ── Local translation model (TranslateGemma) ─────────────────────────────────
+
+export interface LocalModelInfo {
+  downloaded: boolean;
+  sizeMb: number;
+}
+
+export async function localModelStatus(): Promise<LocalModelInfo> {
+  return invoke<LocalModelInfo>("local_model_status");
+}
+
+export async function downloadLocalModel(
+  onProgress: (progress: number) => void
+): Promise<void> {
+  const channel = new Channel<number>();
+  channel.onmessage = onProgress;
+  return invoke("download_local_model", { onProgress: channel });
+}
+
 // ── Transcription ────────────────────────────────────────────────────────────
 
 export async function transcribeAudio(
@@ -180,11 +199,9 @@ export async function cancelTranscription(): Promise<void> {
 export async function translateSubtitles(
   subtitles: Subtitle[],
   targetLang: string,
-  provider: "gemini" | "claude" | "libretranslate",
-  apiKey: string,
+  provider: "gemini" | "claude" | "local",
   sourceLang?: string,
   model?: string,
-  serverUrl?: string,
   onProgress?: (progress: TranslationProgress) => void
 ): Promise<Subtitle[]> {
   const channel = new Channel<TranslationProgress>();
@@ -193,16 +210,35 @@ export async function translateSubtitles(
     subtitles,
     targetLang,
     provider,
-    apiKey,
     sourceLang: sourceLang ?? null,
     model: model ?? null,
-    serverUrl: serverUrl ?? null,
     onProgress: channel,
   });
 }
 
 export async function cancelTranslation(): Promise<void> {
   return invoke("cancel_translation");
+}
+
+// ── API keys (OS credential store) ────────────────────────────────────────────
+// Keys live in the OS keychain / credential manager. The webview only ever
+// learns whether a key is present — the key itself stays backend-side.
+
+export type ApiKeyProvider = "gemini" | "claude";
+
+export async function setApiKey(
+  provider: ApiKeyProvider,
+  key: string
+): Promise<void> {
+  return invoke("set_api_key", { provider, key });
+}
+
+export async function deleteApiKey(provider: ApiKeyProvider): Promise<void> {
+  return invoke("delete_api_key", { provider });
+}
+
+export async function hasApiKey(provider: ApiKeyProvider): Promise<boolean> {
+  return invoke<boolean>("has_api_key", { provider });
 }
 
 // ── Audio extraction cancellation ─────────────────────────────────────────────

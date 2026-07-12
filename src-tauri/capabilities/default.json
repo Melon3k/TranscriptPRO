@@ -8,7 +8,8 @@
     {
       "identifier": "shell:allow-execute",
       "allow": [
-        { "name": "ffmpeg", "sidecar": true, "args": true }
+        { "name": "ffmpeg", "sidecar": true, "args": true },
+        { "name": "llama-server", "sidecar": true, "args": true }
       ]
     },
     "dialog:allow-open",

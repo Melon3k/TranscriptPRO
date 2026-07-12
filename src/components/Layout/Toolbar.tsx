@@ -55,7 +55,15 @@ export default function Toolbar({
   onNotice,
 }: ToolbarProps) {
   const { t } = useTranslation(["toolbar", "common"]);
-  const { subtitles, setSubtitles, undo, redo, canUndo, canRedo } = useSubtitleStore();
+  const {
+    subtitles,
+    setSubtitles,
+    clearOriginalSubtitles,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
+  } = useSubtitleStore();
   const { darkMode, toggleDarkMode, autoSaveOnImport } = useSettingsStore();
   const { setFilePath } = usePlayerStore();
   const { setProjectKey, addVersion } = useVersionStore();
@@ -67,6 +75,7 @@ export default function Toolbar({
     setFilePath,
     setProjectKey,
     setSubtitles,
+    clearTranslationState: clearOriginalSubtitles,
     addVersion,
     autoSaveOnImport,
     onStartAudioExtraction,

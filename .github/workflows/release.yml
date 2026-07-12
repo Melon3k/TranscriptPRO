@@ -88,6 +88,14 @@ jobs:
           if (-not $exe) { throw "ffmpeg.exe not found in archive" }
           Copy-Item -Path $exe.FullName -Destination "src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe"
 
+      - name: Build llama-server sidecar (macOS)
+        if: matrix.platform == 'macos-latest'
+        run: bash scripts/build-llama-server.sh macos
+
+      - name: Build llama-server sidecar (Windows)
+        if: matrix.platform == 'windows-latest'
+        run: bash scripts/build-llama-server.sh windows
+
       - name: Build & release Tauri app
         uses: tauri-apps/tauri-action@v0
         env:

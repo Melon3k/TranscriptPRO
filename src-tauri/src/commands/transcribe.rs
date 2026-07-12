@@ -93,7 +93,7 @@ pub async fn download_model(
 
     // Stream into the temp file; on any failure remove it so a partial download is
     // never mistaken for a complete model by list_models/transcribe_audio.
-    match download_to_temp(&app, &url, &temp_path, &on_progress).await {
+    match download_to_temp(&app, &url, &temp_path, None, &on_progress).await {
         Ok(()) => {
             // Replace any existing (possibly corrupt) file, then move the fresh one in.
             if output_path.exists() {
@@ -115,14 +115,18 @@ pub async fn download_model(
     }
 }
 
-/// Streamed download into `temp_path` with connect/read timeouts and a final size check.
-async fn download_to_temp(
+/// Streamed download into `temp_path` with connect/read timeouts and a final size
+/// check. When `expected_sha256` is given, the stream is hashed on the fly and a
+/// mismatch fails the download (used for models fetched from community mirrors).
+pub(crate) async fn download_to_temp(
     app: &AppHandle,
     url: &str,
     temp_path: &std::path::Path,
+    expected_sha256: Option<&str>,
     on_progress: &Channel<f32>,
 ) -> Result<(), AppError> {
     use futures_util::StreamExt;
+    use sha2::Digest;
     use tokio::io::AsyncWriteExt;
 
     // Per-read timeout guards against a connection that stalls mid-stream — the old
@@ -158,6 +162,7 @@ async fn download_to_temp(
 
     let mut downloaded: u64 = 0;
     let mut last_logged_decile: u64 = 0;
+    let mut hasher = expected_sha256.map(|_| sha2::Sha256::new());
     let mut stream = response.bytes_stream();
 
     loop {
@@ -176,6 +181,9 @@ async fn download_to_temp(
             .await
             .map_err(|e: std::io::Error| AppError::FileError(e.to_string()))?;
 
+        if let Some(h) = hasher.as_mut() {
+            h.update(&chunk);
+        }
         downloaded += chunk.len() as u64;
         if total_size > 0 {
             let progress = downloaded as f32 / total_size as f32;
@@ -199,6 +207,16 @@ async fn download_to_temp(
             "Incomplete download: got {} of {} bytes",
             downloaded, total_size
         )));
+    }
+
+    if let (Some(h), Some(expected)) = (hasher, expected_sha256) {
+        let got = format!("{:x}", h.finalize());
+        if !got.eq_ignore_ascii_case(expected) {
+            return Err(AppError::ModelDownloadFailed(format!(
+                "Checksum mismatch — expected sha256 {}, got {}",
+                expected, got
+            )));
+        }
     }
 
     Ok(())
