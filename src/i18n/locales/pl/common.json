@@ -10,5 +10,8 @@
   "audioExtractionFailed": "Nie udało się wyekstrahować dźwięku: {{error}}",
   "dropFileToOpen": "Upuść plik aby otworzyć",
   "dropFileHint": "Wideo / audio → transkrypcja  •  .srt → import napisów",
-  "unsupportedFileFormat": "Nieobsługiwany format: {{exts}}. Upuść plik wideo/audio lub .srt."
+  "unsupportedFileFormat": "Nieobsługiwany format: {{exts}}. Upuść plik wideo/audio lub .srt.",
+  "unsavedTitle": "Niezapisane zmiany",
+  "unsavedQuit": "Masz niezapisane zmiany, które zostaną utracone. Zamknąć mimo to?",
+  "unsavedUpdate": "Masz niezapisane zmiany, które zostaną utracone przy ponownym uruchomieniu. Zainstalować aktualizację mimo to?"
 }

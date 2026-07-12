@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "react-i18next";
+import { setDirty, exitApp, cancelAudioExtraction } from "../../lib/tauri-commands";
 import { useSubtitleStore } from "../../stores/subtitleStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { usePlayerStore } from "../../stores/playerStore";
@@ -39,6 +41,38 @@ export default function MainLayout() {
   const [audioPath, setAudioPath] = useState<string | null>(null);
   const [activePanel, setActivePanel] = useState<SidePanel>("transcription");
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [extracting, setExtracting] = useState(false);
+
+  const handleStartExtraction = useCallback(() => {
+    setAudioPath(null);
+    setExtracting(true);
+    setActivePanel("transcription"); // so the "Extracting…" + Cancel affordance is visible
+  }, []);
+
+  const handleTranscriptionReady = useCallback((audio: string) => {
+    setAudioPath(audio);
+    setActivePanel("transcription");
+    setExtracting(false);
+    setError(null);
+  }, []);
+
+  const handleCancelExtraction = useCallback(async () => {
+    // Optimistically clear the UI; the resulting Cancelled error is swallowed in file-routing.
+    setExtracting(false);
+    try {
+      await cancelAudioExtraction();
+    } catch (e) {
+      console.error("Cancel extraction failed:", e);
+    }
+  }, []);
+
+  // Transient success notices (e.g. "Exported to …") auto-dismiss after a few seconds.
+  useEffect(() => {
+    if (!notice) return;
+    const id = window.setTimeout(() => setNotice(null), 4000);
+    return () => window.clearTimeout(id);
+  }, [notice]);
 
   const handleDroppedFiles = useCallback(
     async (paths: string[]) => {
@@ -57,16 +91,26 @@ export default function MainLayout() {
         setSubtitles,
         addVersion,
         autoSaveOnImport,
-        onStartAudioExtraction: () => setAudioPath(null),
-        onStartTranscription: (audio) => {
-          setAudioPath(audio);
-          setActivePanel("transcription");
+        onStartAudioExtraction: handleStartExtraction,
+        onStartTranscription: handleTranscriptionReady,
+        onError: (msg) => {
+          setError(msg);
+          setExtracting(false);
         },
-        onError: (msg) => setError(msg),
         onRecordFile: record,
       });
     },
-    [t, setFilePath, setProjectKey, setSubtitles, addVersion, autoSaveOnImport, record],
+    [
+      t,
+      setFilePath,
+      setProjectKey,
+      setSubtitles,
+      addVersion,
+      autoSaveOnImport,
+      record,
+      handleStartExtraction,
+      handleTranscriptionReady,
+    ],
   );
 
   const { isDragging } = useFileDrop(handleDroppedFiles);
@@ -79,6 +123,41 @@ export default function MainLayout() {
       unlistenPromise.then((unlisten) => unlisten());
     };
   }, [appendLog]);
+
+  // Mirror the unsaved-changes flag into native state so the Rust close/quit handlers
+  // (including macOS Cmd+Q, which doesn't emit a per-window close event) can guard it.
+  useEffect(() => {
+    void setDirty(useSubtitleStore.getState().dirty);
+    return useSubtitleStore.subscribe((state, prev) => {
+      if (state.dirty !== prev.dirty) void setDirty(state.dirty);
+    });
+  }, []);
+
+  // Rust prevents close/quit when dirty and emits "confirm-close" — show the dialog here;
+  // on confirm, clear the guard and exit. A local flag avoids a double dialog if both the
+  // window-close and app-quit paths fire.
+  useEffect(() => {
+    let dialogOpen = false;
+    const unlistenPromise = listen("confirm-close", async () => {
+      if (dialogOpen) return;
+      dialogOpen = true;
+      try {
+        const confirmed = await ask(t("unsavedQuit"), {
+          title: t("unsavedTitle"),
+          kind: "warning",
+        });
+        if (confirmed) {
+          await setDirty(false);
+          await exitApp();
+        }
+      } finally {
+        dialogOpen = false;
+      }
+    });
+    return () => {
+      unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, [t]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -121,13 +200,13 @@ export default function MainLayout() {
       <Toolbar
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenShortcuts={() => setShortcutsOpen(true)}
-        onStartAudioExtraction={() => setAudioPath(null)}
-        onStartTranscription={(path) => {
-          setAudioPath(path);
-          setActivePanel("transcription");
-          setError(null);
+        onStartAudioExtraction={handleStartExtraction}
+        onStartTranscription={handleTranscriptionReady}
+        onError={(msg) => {
+          setError(msg);
+          setExtracting(false);
         }}
-        onError={(msg) => setError(msg)}
+        onNotice={(msg) => setNotice(msg)}
       />
 
       {/* Error banner */}
@@ -135,6 +214,16 @@ export default function MainLayout() {
         <div className="flex items-center gap-2 bg-red-50 dark:bg-red-900/30 border-b border-red-200 dark:border-red-800 px-4 py-2 text-xs text-red-700 dark:text-red-300">
           <span className="flex-1">{error}</span>
           <button onClick={() => setError(null)} className="text-red-400 hover:text-red-600">
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
+      {/* Success notice banner */}
+      {notice && (
+        <div className="flex items-center gap-2 bg-green-50 dark:bg-green-900/30 border-b border-green-200 dark:border-green-800 px-4 py-2 text-xs text-green-700 dark:text-green-300">
+          <span className="flex-1">{notice}</span>
+          <button onClick={() => setNotice(null)} className="text-green-400 hover:text-green-600">
             <X size={14} />
           </button>
         </div>
@@ -177,7 +266,11 @@ export default function MainLayout() {
               Conditionally rendering with `&&` would unmount and wipe that local state. */}
           <div className="flex-1 overflow-y-auto">
             <div className={activePanel === "transcription" ? "" : "hidden"}>
-              <TranscriptionPanel audioPath={audioPath} />
+              <TranscriptionPanel
+                audioPath={audioPath}
+                extracting={extracting}
+                onCancelExtraction={handleCancelExtraction}
+              />
             </div>
             <div className={activePanel === "translation" ? "" : "hidden"}>
               <TranslationPanel />

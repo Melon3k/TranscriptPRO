@@ -10,5 +10,8 @@
   "audioExtractionFailed": "Audio extraction failed: {{error}}",
   "dropFileToOpen": "Drop a file to open",
   "dropFileHint": "Video / audio → transcription  •  .srt → subtitle import",
-  "unsupportedFileFormat": "Unsupported format: {{exts}}. Drop a video/audio file or .srt."
+  "unsupportedFileFormat": "Unsupported format: {{exts}}. Drop a video/audio file or .srt.",
+  "unsavedTitle": "Unsaved changes",
+  "unsavedQuit": "You have unsaved changes that will be lost. Close anyway?",
+  "unsavedUpdate": "You have unsaved changes that will be lost when the app restarts. Install the update anyway?"
 }

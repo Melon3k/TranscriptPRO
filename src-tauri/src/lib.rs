@@ -4,14 +4,73 @@ mod subtitle;
 mod translation;
 mod whisper;
 
-use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+use tauri::{Emitter, Manager, RunEvent, WindowEvent};
+use tauri_plugin_shell::process::CommandChild;
 
 /// Shared cancellation flag the frontend can flip to abort an in-progress transcription.
 pub struct TranscriptionCancel(pub Arc<AtomicBool>);
 
+/// Shared cancellation flag for an in-progress translation.
+pub struct TranslationCancel(pub Arc<AtomicBool>);
+
+/// Handle to the running ffmpeg child plus a cancellation flag, so audio extraction can be
+/// killed on demand and never lingers as a zombie after the app quits.
+pub struct AudioExtraction {
+    pub child: Mutex<Option<CommandChild>>,
+    pub cancelled: AtomicBool,
+}
+
+/// Native mirror of the frontend "unsaved changes" flag. Lets the OS-level close/quit
+/// handlers (notably macOS Cmd+Q, which does not emit a per-window close event) guard it.
+pub struct DirtyState(pub AtomicBool);
+
+/// Whisper context cached across transcriptions of the same model + backend, so the model
+/// isn't reloaded from disk on every job.
+pub type WhisperCache = Arc<Mutex<Option<whisper::model::CachedContext>>>;
+
+/// Mirror the frontend dirty flag into native state.
+#[tauri::command]
+fn set_dirty(dirty: bool, state: tauri::State<'_, DirtyState>) {
+    state.0.store(dirty, Ordering::Relaxed);
+}
+
+/// Exit the app (called by the frontend after the user confirms discarding unsaved work).
+#[tauri::command]
+fn exit_app(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
+fn kill_audio_child(app: &tauri::AppHandle) {
+    if let Some(state) = app.try_state::<AudioExtraction>() {
+        if let Ok(mut guard) = state.child.lock() {
+            if let Some(child) = guard.take() {
+                let _ = child.kill();
+            }
+        }
+    }
+}
+
+/// Remove extraction WAVs left over from previous sessions (each can be hundreds of MB).
+/// Runs once at startup so it never races with an in-flight or pending extraction.
+fn cleanup_stale_audio() {
+    if let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with("transcriptpro_audio_") && name.ends_with(".wav") {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let whisper_cache: WhisperCache = Arc::new(Mutex::new(None));
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
@@ -19,6 +78,69 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(TranscriptionCancel(Arc::new(AtomicBool::new(false))))
+        .manage(TranslationCancel(Arc::new(AtomicBool::new(false))))
+        .manage(AudioExtraction {
+            child: Mutex::new(None),
+            cancelled: AtomicBool::new(false),
+        })
+        .manage(DirtyState(AtomicBool::new(false)))
+        .manage(whisper_cache)
+        .setup(|app| {
+            cleanup_stale_audio();
+
+            // Custom menu so Cmd+Q routes through on_menu_event and can be guarded — the
+            // default macOS Quit item bypasses RunEvent::ExitRequested (confirmed at runtime).
+            // The Edit submenu is kept so text fields still have copy/paste/undo shortcuts.
+            let quit = MenuItemBuilder::new("Quit TranscriptPRO")
+                .id("quit")
+                .accelerator("CmdOrCtrl+Q")
+                .build(app)?;
+            let app_menu = SubmenuBuilder::new(app, "TranscriptPRO")
+                .item(&quit)
+                .build()?;
+            // No Undo/Redo here: their Cmd+Z / Cmd+Shift+Z accelerators would shadow the
+            // app's own subtitle undo/redo (handled in MainLayout's keydown listener).
+            let edit_menu = SubmenuBuilder::new(app, "Edit")
+                .cut()
+                .copy()
+                .paste()
+                .select_all()
+                .build()?;
+            let window_menu = SubmenuBuilder::new(app, "Window")
+                .minimize()
+                .close_window()
+                .build()?;
+            let menu = MenuBuilder::new(app)
+                .items(&[&app_menu, &edit_menu, &window_menu])
+                .build()?;
+            app.set_menu(menu)?;
+
+            Ok(())
+        })
+        .on_menu_event(|app, event| {
+            if event.id() == "quit" {
+                let dirty = app.state::<DirtyState>().0.load(Ordering::Relaxed);
+                if dirty {
+                    // Guard: let the frontend confirm before discarding unsaved work.
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.emit("confirm-close", ());
+                    }
+                } else {
+                    kill_audio_child(app);
+                    app.exit(0);
+                }
+            }
+        })
+        // Window "X" close: if there are unsaved changes, defer to the frontend dialog.
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                let dirty = window.state::<DirtyState>().0.load(Ordering::Relaxed);
+                if dirty {
+                    api.prevent_close();
+                    let _ = window.emit("confirm-close", ());
+                }
+            }
+        })
         // IMPORTANT: Every command MUST be listed here.
         // Missing entries cause silent failures when invoked from frontend.
         .invoke_handler(tauri::generate_handler![
@@ -33,6 +155,7 @@ pub fn run() {
             commands::file_io::load_version_history,
             // Audio extraction
             commands::audio::extract_audio,
+            commands::audio::cancel_audio_extraction,
             // Transcription
             commands::transcribe::list_models,
             commands::transcribe::download_model,
@@ -40,7 +163,28 @@ pub fn run() {
             commands::transcribe::cancel_transcription,
             // Translation
             commands::translate::translate_subtitles,
+            commands::translate::cancel_translation,
+            // App lifecycle
+            set_dirty,
+            exit_app,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running TranscriptPRO");
+        .build(tauri::generate_context!())
+        .expect("error while running TranscriptPRO")
+        .run(|app_handle, event| {
+            if let RunEvent::ExitRequested { api, .. } = event {
+                let dirty = app_handle.state::<DirtyState>().0.load(Ordering::Relaxed);
+                if dirty {
+                    // Quit (incl. macOS Cmd+Q) with unsaved changes — stay open and let the
+                    // frontend show the confirmation dialog. It calls set_dirty(false)+exit_app
+                    // to actually quit, so this doesn't loop.
+                    api.prevent_exit();
+                    if let Some(window) = app_handle.get_webview_window("main") {
+                        let _ = window.emit("confirm-close", ());
+                    }
+                } else {
+                    // Actually exiting — make sure ffmpeg doesn't outlive the app.
+                    kill_audio_child(app_handle);
+                }
+            }
+        });
 }

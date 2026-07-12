@@ -5,21 +5,15 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "shell:allow-execute",
-    "shell:allow-open",
-    "shell:allow-spawn",
-    "shell:allow-kill",
-    "shell:allow-stdin-write",
     {
       "identifier": "shell:allow-execute",
       "allow": [
-        { "name": "ffmpeg",    "sidecar": true,    "args": true },
-        { "name": "osascript", "cmd": "osascript", "args": true },
-        { "name": "open",      "cmd": "open",      "args": true }
+        { "name": "ffmpeg", "sidecar": true, "args": true }
       ]
     },
     "dialog:allow-open",
     "dialog:allow-save",
+    "dialog:allow-ask",
     "fs:default",
     "fs:allow-read",
     "fs:allow-write",
