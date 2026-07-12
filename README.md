@@ -23,9 +23,11 @@ Aplikacja zbudowana na Tauri 2.0 (Rust backend + React frontend) — natywne okn
 - **Synchroniczny odtwarzacz** — wideo/audio + podświetlony aktualny segment
 
 ### Tłumaczenie
-- **Gemini** (Google AI) — domyślnie `gemini-2.0-flash-lite`, automatyczny retry przy 429
+- **Gemini** (Google AI) — domyślnie `gemini-3.1-flash-lite`, automatyczny retry przy 429
 - **Claude** (Anthropic API)
-- **LibreTranslate** — self-hosted lub publiczny, bez klucza dla podstawowego użytku
+- **Lokalny — TranslateGemma 4B (offline)** — model pobierany na żądanie (~2,3 GB, weryfikacja
+  SHA-256), inference przez wbudowany sidecar `llama-server` (Metal na Apple Silicon, CPU na
+  Windows); tłumaczenie bez klucza API i bez internetu. Wymaga wskazania języka źródłowego.
 
 ### Import / Export
 - **Import** SRT z dowolnego źródła
@@ -109,18 +111,23 @@ Wynik trafia do `src-tauri/target/release/bundle/`.
 Ustawienia są persystowane w `localStorage` pod kluczem `transcriptpro-settings`:
 
 - Wybrany model Whisper
-- Klucze API (Gemini, Claude)
-- URL LibreTranslate
 - Dark mode
 - Auto-save on import / transcription
 
 Żeby zresetować do defaults: DevTools → Application → Local Storage → usuń klucz.
 
+Klucze API (Gemini, Claude) NIE są trzymane w localStorage — leżą zaszyfrowane (AES-256-GCM)
+w pliku `keys.enc.json` w katalogu aplikacji, a klucz szyfrujący w systemowym magazynie
+poświadczeń (macOS Keychain / Windows Credential Manager). Dzięki temu macOS pyta o dostęp
+do pęku kluczy najwyżej raz na uruchomienie (przy pierwszym tłumaczeniu chmurowym), a nie
+przy każdym odczycie. Klucze nigdy nie wracają do warstwy UI.
+
 ## Znane ograniczenia
 
 - Modele Whispera większe niż `small` wymagają sporo RAM (large-v3 — ok. 5 GB)
 - Diarization to prosty algorytm (RMS + zero-crossing + spectral centroid), nie equivalent profesjonalnym narzędziom typu pyannote
-- Translation przez Gemini/Claude wymaga klucza API i połączenia z internetem
+- Translation przez Gemini/Claude wymaga klucza API i połączenia z internetem; tryb lokalny
+  (TranslateGemma) działa offline, ale jakość idiomów jest niższa niż w modelach chmurowych
 - Aplikacja nie jest jeszcze podpisana komercyjnym certyfikatem OS (macOS Developer ID, Windows Authenticode) — pierwsze uruchomienie wymaga zaakceptowania ostrzeżenia, patrz sekcja **Pierwsze uruchomienie — ostrzeżenia OS** wyżej. Sam mechanizm aktualizacji jest podpisany kluczem Ed25519 (Tauri updater) niezależnie od OS.
 
 ## Licencja

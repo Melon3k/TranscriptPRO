@@ -30,7 +30,12 @@ Two layers communicating via Tauri IPC:
 - Commands are registered in `lib.rs` and implemented in `src-tauri/src/commands/`:
   - `audio.rs` — ffmpeg wrapper for audio extraction
   - `transcribe.rs` — Whisper.cpp model management and transcription
-  - `translate.rs` — Gemini / Claude / LibreTranslate orchestration
+  - `translate.rs` — Gemini / Claude orchestration
+  - `keys.rs` — API keys in the OS credential store (keyring); keys never cross IPC to the webview
+  - `local_model.rs` — download/status of the local TranslateGemma GGUF (SHA-256 pinned)
+  - Local translation engine in `src-tauri/src/translation/local.rs` — drives the `llama-server`
+    sidecar (static build via `scripts/build-llama-server.sh`, pinned llama.cpp tag); prompts are
+    hand-rolled Gemma turns because the GGUF chat template doesn't parse (hence `--no-jinja`)
   - `file_io.rs` — SRT/TXT import and export, version history persistence
 - Domain types live in `src-tauri/src/subtitle/types.rs`; SRT parsing in `src-tauri/src/subtitle/srt.rs`
 
@@ -43,3 +48,4 @@ Two layers communicating via Tauri IPC:
 ## Development Notes
 
 - Settings are persisted to `localStorage` under the key `transcriptpro-settings`; wipe it to reset to defaults during testing.
+- API keys are NOT in localStorage — a single random master key lives in the OS keychain (service `com.transcriptpro.app`, account `master-key`) and the keys themselves sit AES-GCM-encrypted in app-data `keys.enc.json` (the Electron-safeStorage pattern; one keychain item = at most one macOS ACL prompt per run, none at startup). The frontend only tracks presence flags (`hasGeminiKey`/`hasClaudeKey`).
