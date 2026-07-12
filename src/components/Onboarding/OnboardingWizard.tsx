@@ -1,11 +1,12 @@
 import { useState, useEffect } from "react";
-import { Download, Loader2, CheckCircle2, Eye, EyeOff } from "lucide-react";
+import { Download, Loader2, CheckCircle2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useOnboardingStore } from "../../stores/onboardingStore";
 import { useSettingsStore, type UiLanguage } from "../../stores/settingsStore";
 import { listModels, downloadModel } from "../../lib/tauri-commands";
 import { SUPPORTED_LANGUAGES } from "../../i18n";
 import type { WhisperModelInfo } from "../../types/subtitle";
+import ApiKeyField from "../Settings/ApiKeyField";
 
 // ── Step indicators ───────────────────────────────────────────────────────────
 
@@ -183,12 +184,6 @@ function ModelStep({ onDownloaded }: { onDownloaded: (ok: boolean) => void }) {
 
 function ApiKeysStep() {
   const { t } = useTranslation(["onboarding", "settings"]);
-  const {
-    geminiApiKey, setGeminiApiKey,
-    claudeApiKey, setClaudeApiKey,
-    libreTranslateUrl, setLibreTranslateUrl,
-    libreTranslateApiKey, setLibreTranslateApiKey,
-  } = useSettingsStore();
 
   return (
     <div className="space-y-5">
@@ -202,67 +197,16 @@ function ApiKeysStep() {
       </div>
 
       <div className="space-y-4">
-        <InlineApiField
+        <ApiKeyField
+          provider="gemini"
           label={t("settings:geminiApiKey")}
-          value={geminiApiKey}
-          onChange={setGeminiApiKey}
           placeholder="AIzaSy..."
         />
-        <InlineApiField
+        <ApiKeyField
+          provider="claude"
           label={t("settings:claudeApiKey")}
-          value={claudeApiKey}
-          onChange={setClaudeApiKey}
           placeholder="sk-ant-api03-..."
         />
-        <div className="space-y-1.5">
-          <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">
-            {t("settings:libreTranslate.serverUrl")}
-          </label>
-          <input
-            type="text"
-            value={libreTranslateUrl}
-            onChange={(e) => setLibreTranslateUrl(e.target.value)}
-            placeholder="https://libretranslate.com"
-            className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-1.5 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
-          />
-        </div>
-        <InlineApiField
-          label={t("settings:libreTranslate.apiKey")}
-          value={libreTranslateApiKey}
-          onChange={setLibreTranslateApiKey}
-          placeholder={t("settings:libreTranslate.apiKeyPlaceholder")}
-        />
-      </div>
-    </div>
-  );
-}
-
-function InlineApiField({
-  label, value, onChange, placeholder,
-}: {
-  label: string; value: string; onChange: (v: string) => void; placeholder: string;
-}) {
-  const [visible, setVisible] = useState(false);
-  return (
-    <div className="space-y-1.5">
-      <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">
-        {label}
-      </label>
-      <div className="relative">
-        <input
-          type={visible ? "text" : "password"}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder}
-          className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 pl-3 pr-9 py-1.5 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
-        />
-        <button
-          type="button"
-          onClick={() => setVisible(!visible)}
-          className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
-        >
-          {visible ? <EyeOff size={14} /> : <Eye size={14} />}
-        </button>
       </div>
     </div>
   );

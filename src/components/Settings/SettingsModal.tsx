@@ -1,4 +1,4 @@
-import { X, Eye, EyeOff, RefreshCw } from "lucide-react";
+import { X, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { useTranslation } from "react-i18next";
@@ -6,6 +6,7 @@ import { useSettingsStore, type UiLanguage } from "../../stores/settingsStore";
 import { useUpdateStore } from "../../stores/updateStore";
 import { checkForUpdates } from "../../lib/updater";
 import { SUPPORTED_LANGUAGES } from "../../i18n";
+import ApiKeyField from "./ApiKeyField";
 
 interface SettingsModalProps {
   open: boolean;
@@ -15,16 +16,8 @@ interface SettingsModalProps {
 export default function SettingsModal({ open, onClose }: SettingsModalProps) {
   const { t } = useTranslation(["settings", "common"]);
   const {
-    geminiApiKey,
-    setGeminiApiKey,
-    claudeApiKey,
-    setClaudeApiKey,
     geminiModel,
     setGeminiModel,
-    libreTranslateUrl,
-    setLibreTranslateUrl,
-    libreTranslateApiKey,
-    setLibreTranslateApiKey,
     autoSaveOnTranscription,
     setAutoSaveOnTranscription,
     autoSaveOnTranslation,
@@ -91,9 +84,8 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
 
           {/* Gemini API Key */}
           <ApiKeyField
+            provider="gemini"
             label={t("settings:geminiApiKey")}
-            value={geminiApiKey}
-            onChange={setGeminiApiKey}
             placeholder="AIzaSy..."
           />
 
@@ -107,45 +99,18 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
               onChange={(e) => setGeminiModel(e.target.value)}
               className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1.5 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
             >
-              <option value="gemini-2.0-flash-lite">gemini-2.0-flash-lite (Free tier)</option>
-              <option value="gemini-1.5-flash">gemini-1.5-flash (Free tier)</option>
-              <option value="gemini-2.0-flash">gemini-2.0-flash (Paid)</option>
-              <option value="gemini-1.5-pro">gemini-1.5-pro (Paid)</option>
+              <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite (Free tier)</option>
+              <option value="gemini-3.5-flash">gemini-3.5-flash (Paid)</option>
+              <option value="gemini-2.5-pro">gemini-2.5-pro (Paid)</option>
             </select>
           </div>
 
           {/* Claude API Key */}
           <ApiKeyField
+            provider="claude"
             label={t("settings:claudeApiKey")}
-            value={claudeApiKey}
-            onChange={setClaudeApiKey}
             placeholder="sk-ant-api03-..."
           />
-
-          {/* LibreTranslate */}
-          <div className="border-t border-gray-200 dark:border-gray-700 pt-4 space-y-3">
-            <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-              {t("settings:libreTranslate.section")}
-            </p>
-            <div className="space-y-1.5">
-              <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">
-                {t("settings:libreTranslate.serverUrl")}
-              </label>
-              <input
-                type="text"
-                value={libreTranslateUrl}
-                onChange={(e) => setLibreTranslateUrl(e.target.value)}
-                placeholder="https://libretranslate.com"
-                className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-1.5 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
-              />
-            </div>
-            <ApiKeyField
-              label={t("settings:libreTranslate.apiKey")}
-              value={libreTranslateApiKey}
-              onChange={setLibreTranslateApiKey}
-              placeholder={t("settings:libreTranslate.apiKeyPlaceholder")}
-            />
-          </div>
 
           {/* Transcription */}
           <div className="border-t border-gray-200 dark:border-gray-700 pt-4 space-y-2.5">
@@ -256,40 +221,3 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
   );
 }
 
-function ApiKeyField({
-  label,
-  value,
-  onChange,
-  placeholder,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder: string;
-}) {
-  const [visible, setVisible] = useState(false);
-
-  return (
-    <div className="space-y-1.5">
-      <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">
-        {label}
-      </label>
-      <div className="relative">
-        <input
-          type={visible ? "text" : "password"}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder}
-          className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 pl-3 pr-9 py-1.5 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
-        />
-        <button
-          type="button"
-          onClick={() => setVisible(!visible)}
-          className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
-        >
-          {visible ? <EyeOff size={14} /> : <Eye size={14} />}
-        </button>
-      </div>
-    </div>
-  );
-}

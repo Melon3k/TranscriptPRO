@@ -3,11 +3,11 @@
   "geminiApiKey": "Gemini API Key",
   "geminiModel": "Gemini Model",
   "claudeApiKey": "Claude API Key",
-  "libreTranslate": {
-    "section": "LibreTranslate (free)",
-    "serverUrl": "Server URL",
-    "apiKey": "API key (optional)",
-    "apiKeyPlaceholder": "Leave empty for the public server"
+  "apiKey": {
+    "saved": "Key saved securely",
+    "save": "Save",
+    "remove": "Remove",
+    "keychainHint": "Stored in the system keychain, not in app files"
   },
   "transcription": {
     "section": "Transcription",
