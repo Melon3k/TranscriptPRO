@@ -25,6 +25,8 @@
     "UK": "Ukrainian"
   },
   "translating": "Translating…",
+  "cancel": "Cancel",
+  "progress": "Translating {{done}} / {{total}}",
   "translate_one": "Translate ({{count}} segment)",
   "translate_other": "Translate ({{count}} segments)",
   "hideComparison": "Hide comparison",
@@ -35,5 +37,5 @@
     "gemini": "Gemini",
     "claude": "Claude"
   },
-  "freeNoKey": "Free — no API key required"
+  "freeNoKey": "No key needed for self-hosted servers; the public server may require an API key (set it in Settings)"
 }

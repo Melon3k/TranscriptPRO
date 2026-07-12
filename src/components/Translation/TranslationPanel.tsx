@@ -4,8 +4,9 @@ import { useTranslation } from "react-i18next";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useSubtitleStore } from "../../stores/subtitleStore";
 import { useVersionStore } from "../../stores/versionStore";
-import { translateSubtitles } from "../../lib/tauri-commands";
+import { translateSubtitles, cancelTranslation } from "../../lib/tauri-commands";
 import { formatError } from "../../lib/error-format";
+import type { TranslationProgress } from "../../types/subtitle";
 
 const PROVIDER_OPTIONS = ["libretranslate", "gemini", "claude"] as const;
 const LANGUAGE_OPTIONS = [
@@ -50,8 +51,17 @@ export default function TranslationPanel() {
   const [targetLang, setTargetLang] = useState("EN");
   const [sourceLang, setSourceLang] = useState("");
   const [translating, setTranslating] = useState(false);
+  const [progress, setProgress] = useState<TranslationProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [translated, setTranslated] = useState(false);
+
+  const handleCancelTranslation = async () => {
+    try {
+      await cancelTranslation();
+    } catch (e) {
+      console.error("Cancel translation failed:", e);
+    }
+  };
 
   const apiKey =
     translationProvider === "gemini"
@@ -66,6 +76,7 @@ export default function TranslationPanel() {
     if (!apiKey && translationProvider !== "libretranslate") return;
     setTranslating(true);
     setError(null);
+    setProgress(null);
     try {
       // Snapshot originals before translation
       setOriginalSubtitles([...subtitles]);
@@ -77,9 +88,11 @@ export default function TranslationPanel() {
         apiKey,
         sourceLang || undefined,
         translationProvider === "gemini" ? geminiModel : undefined,
-        translationProvider === "libretranslate" ? libreTranslateUrl : undefined
+        translationProvider === "libretranslate" ? libreTranslateUrl : undefined,
+        (p) => setProgress(p)
       );
-      setSubtitles(result);
+      // Not auto-saved to history → mark dirty so the unsaved translation isn't lost on close.
+      setSubtitles(result, { dirty: !autoSaveOnTranslation });
       if (autoSaveOnTranslation) {
         addVersion(result, "translation", {
           provider: translationProvider,
@@ -95,6 +108,7 @@ export default function TranslationPanel() {
       clearOriginalSubtitles();
     } finally {
       setTranslating(false);
+      setProgress(null);
     }
   };
 
@@ -163,28 +177,48 @@ export default function TranslationPanel() {
         </select>
       </div>
 
-      {/* Translate button */}
-      <button
-        onClick={handleTranslate}
-        disabled={
-          translating ||
-          subtitles.length === 0 ||
-          (!apiKey && translationProvider !== "libretranslate")
-        }
-        className="flex items-center gap-2 w-full justify-center rounded-lg bg-purple-500 hover:bg-purple-600 disabled:bg-purple-300 dark:disabled:bg-purple-800 px-4 py-2 text-sm font-medium text-white transition-colors"
-      >
-        {translating ? (
-          <>
-            <Loader2 size={16} className="animate-spin" />
-            {t("translation:translating")}
-          </>
-        ) : (
-          <>
-            <Languages size={16} />
-            {t("translation:translate", { count: subtitles.length })}
-          </>
-        )}
-      </button>
+      {/* Translate / Cancel button */}
+      {translating ? (
+        <button
+          onClick={handleCancelTranslation}
+          className="flex items-center gap-2 w-full justify-center rounded-lg bg-red-500 hover:bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors"
+        >
+          <X size={16} />
+          {t("translation:cancel")}
+        </button>
+      ) : (
+        <button
+          onClick={handleTranslate}
+          disabled={
+            subtitles.length === 0 ||
+            (!apiKey && translationProvider !== "libretranslate")
+          }
+          className="flex items-center gap-2 w-full justify-center rounded-lg bg-purple-500 hover:bg-purple-600 disabled:bg-purple-300 dark:disabled:bg-purple-800 px-4 py-2 text-sm font-medium text-white transition-colors"
+        >
+          <Languages size={16} />
+          {t("translation:translate", { count: subtitles.length })}
+        </button>
+      )}
+
+      {/* Translation progress */}
+      {translating && (
+        <div className="space-y-1">
+          <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+            <Loader2 size={14} className="animate-spin" />
+            {progress && progress.total > 0
+              ? t("translation:progress", { done: progress.done, total: progress.total })
+              : t("translation:translating")}
+          </div>
+          {progress && progress.total > 0 && (
+            <div className="h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+              <div
+                className="h-full bg-purple-500 transition-[width] duration-300"
+                style={{ width: `${(progress.done / progress.total) * 100}%` }}
+              />
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Comparison toggle */}
       {translated && originalSubtitles && (
