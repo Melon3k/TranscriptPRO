@@ -54,8 +54,31 @@ unsafe extern "C" fn abort_trampoline(user_data: *mut c_void) -> bool {
     flag.load(Ordering::Relaxed)
 }
 
+/// A loaded Whisper context cached across transcription jobs, keyed by model path +
+/// backend (GPU/CPU). Reusing it avoids reloading the model (up to 3 GB) from disk every
+/// time — this is whisper.cpp's intended usage (load once, transcribe many).
+pub struct CachedContext {
+    model_path: std::path::PathBuf,
+    use_gpu: bool,
+    ctx: Arc<WhisperContext>,
+}
+
+/// Drop the cached context for a given (model, backend) — used after a failure so a
+/// potentially tainted GPU/Metal context is never reused on a later job.
+fn evict_context(cache: &crate::WhisperCache, model_path: &Path, use_gpu: bool) {
+    // Recover from a poisoned lock (a prior panic) — the cached value is a plain Option.
+    let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+    let matches = guard
+        .as_ref()
+        .is_some_and(|c| c.model_path == model_path && c.use_gpu == use_gpu);
+    if matches {
+        *guard = None;
+    }
+}
+
 /// Run Whisper transcription on a 16kHz mono WAV file.
 /// Returns subtitle segments with word-level timestamps.
+#[allow(clippy::too_many_arguments)]
 pub fn transcribe(
     app: &AppHandle,
     model_path: &Path,
@@ -65,6 +88,7 @@ pub fn transcribe(
     force_cpu: bool,
     on_progress: &Channel<TranscriptionProgress>,
     cancel: Arc<AtomicBool>,
+    cache: &crate::WhisperCache,
 ) -> Result<Vec<Subtitle>, AppError> {
     let started = Instant::now();
 
@@ -211,12 +235,22 @@ pub fn transcribe(
             on_progress,
             cancel.clone(),
             *use_gpu,
+            cache,
         ) {
             Ok(s) if !s.is_empty() => {
                 subtitles = Some(s);
                 break;
             }
             Ok(_) => {
+                // A cancel makes run_inference_pass return early with an empty result.
+                // Recognise that here so it isn't misread as "0 segments at Nx realtime =
+                // GPU corruption", which would cascade into CPU-reload fallbacks and end
+                // as TranscriptionFailed instead of Cancelled. Break with an empty result;
+                // the post-loop cancel check turns it into AppError::Cancelled.
+                if cancel.load(Ordering::Relaxed) {
+                    subtitles = Some(Vec::new());
+                    break;
+                }
                 let elapsed = attempt_start.elapsed().as_secs_f32();
                 let realtime = audio_duration_s / elapsed.max(0.001);
                 if realtime > 50.0 && audio_duration_s > 20.0 {
@@ -235,6 +269,8 @@ pub fn transcribe(
                         "0 segments at {:.0}x realtime ({})",
                         realtime, label
                     )));
+                    // The context that produced this is suspect — don't reuse it.
+                    evict_context(cache, model_path, *use_gpu);
                     continue;
                 }
                 // Realistic timing with 0 segments = no speech in audio, accept result.
@@ -251,6 +287,8 @@ pub fn transcribe(
             }
             Err(AppError::TranscriptionFailed(msg)) if is_encode_failure(&msg) => {
                 last_err = Some(AppError::TranscriptionFailed(msg));
+                // A -6 encode failure taints the (Metal) context — evict before retrying.
+                evict_context(cache, model_path, *use_gpu);
                 continue;
             }
             Err(other) => return Err(other),
@@ -340,6 +378,7 @@ fn is_encode_failure(msg: &str) -> bool {
 /// One transcription attempt for a single backend choice (GPU or CPU). Builds a fresh
 /// `WhisperContext`, runs `state.full()`, and extracts segments. Used by `transcribe()`
 /// with `use_gpu=true` first; on encode failure (-6), retried with `use_gpu=false`.
+#[allow(clippy::too_many_arguments)]
 fn run_inference_pass(
     app: &AppHandle,
     model_path: &Path,
@@ -348,29 +387,51 @@ fn run_inference_pass(
     on_progress: &Channel<TranscriptionProgress>,
     cancel: Arc<AtomicBool>,
     use_gpu: bool,
+    cache: &crate::WhisperCache,
 ) -> Result<Vec<Subtitle>, AppError> {
     let backend = if use_gpu { "GPU" } else { "CPU" };
 
-    let load_started = Instant::now();
-    let mut ctx_params = WhisperContextParameters::default();
-    ctx_params.use_gpu(use_gpu);
-    let ctx = WhisperContext::new_with_params(
-        model_path.to_str().unwrap_or_default(),
-        ctx_params,
-    )
-    .map_err(|e| {
-        logger::error(app, "whisper", format!("Model load failed: {}", e));
-        AppError::TranscriptionFailed(format!("Failed to load model: {}", e))
-    })?;
-    logger::info(
-        app,
-        "whisper",
-        format!(
-            "Model loaded in {:.2}s ({} backend)",
-            load_started.elapsed().as_secs_f32(),
-            backend,
-        ),
-    );
+    // Reuse a cached context for the same model + backend; otherwise load and cache it.
+    let ctx: Arc<WhisperContext> = {
+        // Recover from a poisoned lock (a prior panic) rather than failing permanently —
+        // the cached value is a plain Option and is safe to reuse.
+        let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+        match guard.as_ref() {
+            Some(c) if c.model_path == model_path && c.use_gpu == use_gpu => {
+                logger::info(app, "whisper", format!("Reusing cached {} context", backend));
+                c.ctx.clone()
+            }
+            _ => {
+                let load_started = Instant::now();
+                let mut ctx_params = WhisperContextParameters::default();
+                ctx_params.use_gpu(use_gpu);
+                let loaded = WhisperContext::new_with_params(
+                    model_path.to_str().unwrap_or_default(),
+                    ctx_params,
+                )
+                .map_err(|e| {
+                    logger::error(app, "whisper", format!("Model load failed: {}", e));
+                    AppError::TranscriptionFailed(format!("Failed to load model: {}", e))
+                })?;
+                let loaded = Arc::new(loaded);
+                *guard = Some(CachedContext {
+                    model_path: model_path.to_path_buf(),
+                    use_gpu,
+                    ctx: loaded.clone(),
+                });
+                logger::info(
+                    app,
+                    "whisper",
+                    format!(
+                        "Model loaded in {:.2}s ({} backend)",
+                        load_started.elapsed().as_secs_f32(),
+                        backend,
+                    ),
+                );
+                loaded
+            }
+        }
+    };
 
     // ── Configure transcription params ─────────────────────────────────
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });

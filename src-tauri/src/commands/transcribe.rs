@@ -1,9 +1,24 @@
 use crate::logger;
 use crate::subtitle::types::{AppError, TranscriptionProgress, WhisperModelInfo};
-use crate::TranscriptionCancel;
+use crate::{TranscriptionCancel, WhisperCache};
 use std::sync::atomic::Ordering;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
+
+/// Reject model names that could escape the models directory via path traversal or
+/// aren't a plain model identifier. The frontend only ever sends known names
+/// (tiny / small / medium / large-v3 / large-v3-turbo), so this never rejects
+/// legitimate input — it just closes an IPC path-injection vector.
+fn validate_model_name(name: &str) -> Result<(), AppError> {
+    if !name.is_empty()
+        && name.len() <= 64
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+    {
+        Ok(())
+    } else {
+        Err(AppError::Other(format!("Invalid model name: {}", name)))
+    }
+}
 
 /// List all available Whisper models (bundled + downloaded)
 #[tauri::command]
@@ -46,13 +61,17 @@ pub async fn list_models(app: AppHandle) -> Result<Vec<WhisperModelInfo>, AppErr
 }
 
 /// Download a Whisper model from HuggingFace.
-/// Streams download progress via Channel<f32> (0.0 to 1.0).
+/// Streams to a temporary `.part` file and atomically renames it into place only on
+/// success, so an interrupted download never leaves a truncated file that later looks
+/// "downloaded". Streams progress via Channel<f32> (0.0 to 1.0).
 #[tauri::command]
 pub async fn download_model(
     app: AppHandle,
     model_name: String,
     on_progress: Channel<f32>,
 ) -> Result<(), AppError> {
+    validate_model_name(&model_name)?;
+
     let models_dir = app
         .path()
         .app_data_dir()
@@ -68,18 +87,56 @@ pub async fn download_model(
     );
 
     let output_path = models_dir.join(format!("ggml-{}.bin", model_name));
+    let temp_path = models_dir.join(format!("ggml-{}.bin.part", model_name));
 
     logger::info(&app, "model", format!("Downloading {} from HuggingFace", model_name));
 
-    let client = reqwest::Client::new();
-    let response = client
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e: reqwest::Error| {
-            logger::error(&app, "model", format!("Download request failed: {}", e));
-            AppError::ModelDownloadFailed(format!("Download failed: {}", e))
-        })?;
+    // Stream into the temp file; on any failure remove it so a partial download is
+    // never mistaken for a complete model by list_models/transcribe_audio.
+    match download_to_temp(&app, &url, &temp_path, &on_progress).await {
+        Ok(()) => {
+            // Replace any existing (possibly corrupt) file, then move the fresh one in.
+            if output_path.exists() {
+                let _ = tokio::fs::remove_file(&output_path).await;
+            }
+            tokio::fs::rename(&temp_path, &output_path)
+                .await
+                .map_err(|e: std::io::Error| {
+                    AppError::FileError(format!("Failed to finalize model file: {}", e))
+                })?;
+            logger::info(&app, "model", format!("Model downloaded: {}", model_name));
+            Ok(())
+        }
+        Err(e) => {
+            let _ = tokio::fs::remove_file(&temp_path).await; // best-effort cleanup
+            logger::error(&app, "model", format!("Download failed: {}", e));
+            Err(e)
+        }
+    }
+}
+
+/// Streamed download into `temp_path` with connect/read timeouts and a final size check.
+async fn download_to_temp(
+    app: &AppHandle,
+    url: &str,
+    temp_path: &std::path::Path,
+    on_progress: &Channel<f32>,
+) -> Result<(), AppError> {
+    use futures_util::StreamExt;
+    use tokio::io::AsyncWriteExt;
+
+    // Per-read timeout guards against a connection that stalls mid-stream — the old
+    // client had no timeout at all and could hang forever on a half-open connection.
+    const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e: reqwest::Error| AppError::ModelDownloadFailed(e.to_string()))?;
+
+    let response = client.get(url).send().await.map_err(|e: reqwest::Error| {
+        AppError::ModelDownloadFailed(format!("Download failed: {}", e))
+    })?;
 
     if !response.status().is_success() {
         return Err(AppError::ModelDownloadFailed(format!(
@@ -90,23 +147,31 @@ pub async fn download_model(
 
     let total_size = response.content_length().unwrap_or(0);
     logger::info(
-        &app,
+        app,
         "model",
         format!("Downloading {:.1} MB", total_size as f64 / 1_048_576.0),
     );
-    let mut downloaded: u64 = 0;
-    let mut last_logged_decile: u64 = 0;
 
-    use tokio::io::AsyncWriteExt;
-    let mut file = tokio::fs::File::create(&output_path)
+    let mut file = tokio::fs::File::create(temp_path)
         .await
         .map_err(|e: std::io::Error| AppError::FileError(e.to_string()))?;
 
-    use futures_util::StreamExt;
+    let mut downloaded: u64 = 0;
+    let mut last_logged_decile: u64 = 0;
     let mut stream = response.bytes_stream();
 
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e: reqwest::Error| AppError::ModelDownloadFailed(e.to_string()))?;
+    loop {
+        let next = tokio::time::timeout(READ_TIMEOUT, stream.next())
+            .await
+            .map_err(|_| {
+                AppError::ModelDownloadFailed("Download stalled (read timeout)".to_string())
+            })?;
+        let chunk = match next {
+            Some(c) => c.map_err(|e: reqwest::Error| {
+                AppError::ModelDownloadFailed(e.to_string())
+            })?,
+            None => break,
+        };
         file.write_all(&chunk)
             .await
             .map_err(|e: std::io::Error| AppError::FileError(e.to_string()))?;
@@ -119,7 +184,7 @@ pub async fn download_model(
             let decile = (progress * 10.0) as u64;
             if decile > last_logged_decile {
                 last_logged_decile = decile;
-                logger::info(&app, "model", format!("Download progress: {}%", decile * 10));
+                logger::info(app, "model", format!("Download progress: {}%", decile * 10));
             }
         }
     }
@@ -128,7 +193,13 @@ pub async fn download_model(
         .await
         .map_err(|e: std::io::Error| AppError::FileError(e.to_string()))?;
 
-    logger::info(&app, "model", format!("Model downloaded: {}", model_name));
+    // Guard against a silently truncated download reported as success.
+    if total_size > 0 && downloaded != total_size {
+        return Err(AppError::ModelDownloadFailed(format!(
+            "Incomplete download: got {} of {} bytes",
+            downloaded, total_size
+        )));
+    }
 
     Ok(())
 }
@@ -147,9 +218,11 @@ pub async fn cancel_transcription(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn transcribe_audio(
     app: AppHandle,
     cancel: State<'_, TranscriptionCancel>,
+    cache: State<'_, WhisperCache>,
     audio_path: String,
     model_name: String,
     language: Option<String>,
@@ -157,6 +230,8 @@ pub async fn transcribe_audio(
     force_cpu: Option<bool>,
     on_progress: Channel<TranscriptionProgress>,
 ) -> Result<Vec<crate::subtitle::types::Subtitle>, AppError> {
+    validate_model_name(&model_name)?;
+
     // Reset cancellation flag at the start of each run.
     cancel.0.store(false, Ordering::Relaxed);
     let cancel_flag = cancel.0.clone();
@@ -207,6 +282,7 @@ pub async fn transcribe_audio(
 
     let app_for_log = app.clone();
     let app_for_whisper = app.clone();
+    let cache = cache.inner().clone();
     let result = tokio::task::spawn_blocking(move || {
         crate::whisper::model::transcribe(
             &app_for_whisper,
@@ -217,6 +293,7 @@ pub async fn transcribe_audio(
             cpu_only,
             &on_progress,
             cancel_flag,
+            &cache,
         )
     })
     .await

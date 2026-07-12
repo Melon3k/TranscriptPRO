@@ -24,6 +24,7 @@
   "transcribe": "Transcribe",
   "cancel": "Cancel",
   "emptyState": "Open a media file to start transcription",
+  "extractingAudio": "Extracting audio…",
   "progress": {
     "loading_model": "Loading Whisper model…",
     "loading_audio": "Reading audio file…",
