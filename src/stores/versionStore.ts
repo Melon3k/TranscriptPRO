@@ -10,12 +10,54 @@ import { loadVersionHistory, saveVersionHistory } from "../lib/tauri-commands";
 
 const MAX_VERSIONS = 50;
 
-function deriveProjectKey(filePath: string): string {
-  return btoa(filePath)
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=/g, "")
-    .slice(0, 64);
+/**
+ * FNV-1a over UTF-8 bytes — deterministic and Unicode-safe. Only used as a fallback
+ * when SubtleCrypto is unavailable (should not happen in a secure-context webview).
+ */
+function fnv1aHex(input: string): string {
+  const bytes = new TextEncoder().encode(input);
+  let h = 0x811c9dc5;
+  for (const b of bytes) {
+    h ^= b;
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0");
+}
+
+/**
+ * Stable, collision-resistant project key from a file path.
+ * SHA-256 hex is Unicode-safe (unlike the old `btoa`, which threw on non-Latin-1
+ * paths — e.g. Polish characters) and never truncated, so distinct long paths no
+ * longer collide. The all-hex output is also inherently path-traversal-safe.
+ */
+async function deriveProjectKey(filePath: string): Promise<string> {
+  try {
+    const digest = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(filePath)
+    );
+    return Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+  } catch {
+    return fnv1aHex(filePath);
+  }
+}
+
+/**
+ * The pre-hash key format. Kept only to migrate history files saved before the switch.
+ * Returns null for paths `btoa` can't encode (non-Latin-1) — those never had a file.
+ */
+function legacyProjectKey(filePath: string): string | null {
+  try {
+    return btoa(filePath)
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=/g, "")
+      .slice(0, 64);
+  } catch {
+    return null;
+  }
 }
 
 function makeLabel(action: VersionAction, metadata: SubtitleVersionMetadata): string {
@@ -67,10 +109,26 @@ export const useVersionStore = create<VersionState>()((set, get) => ({
       set({ projectKey: null, versions: [] });
       return;
     }
-    const key = deriveProjectKey(filePath);
+    const key = await deriveProjectKey(filePath);
     set({ projectKey: key, versions: [] });
-    const loaded = await loadVersionHistory(key).catch(() => null);
-    if (loaded) {
+
+    let loaded = await loadVersionHistory(key).catch(() => null);
+
+    // One-time migration: if nothing is stored under the new hash key, try the old
+    // `btoa` key and, if found, re-save it under the new key so it's stable going forward.
+    if (!loaded) {
+      const legacy = legacyProjectKey(filePath);
+      if (legacy && legacy !== key) {
+        const legacyLoaded = await loadVersionHistory(legacy).catch(() => null);
+        if (legacyLoaded) {
+          loaded = legacyLoaded;
+          saveVersionHistory(key, legacyLoaded).catch(console.error);
+        }
+      }
+    }
+
+    // Only apply if the user hasn't switched to another project in the meantime.
+    if (loaded && get().projectKey === key) {
       set({ versions: loaded });
     }
   },

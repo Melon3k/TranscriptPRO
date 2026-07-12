@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import {
   Mic,
   Languages,
@@ -112,7 +112,7 @@ function DiffPanel({
   current: Subtitle[];
   t: TFunction;
 }) {
-  const diffs = diffSubtitles(current, version);
+  const diffs = useMemo(() => diffSubtitles(current, version), [current, version]);
   const changed = diffs.filter((d) => d.status !== "equal").length;
   const added = diffs.filter((d) => d.status === "added").length;
   const removed = diffs.filter((d) => d.status === "removed").length;

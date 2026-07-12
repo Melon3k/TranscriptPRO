@@ -20,7 +20,11 @@ export default function SubtitleEditor() {
     originalSubtitles,
     comparisonMode,
   } = useSubtitleStore();
-  const { currentTimeMs, setCurrentTimeMs } = usePlayerStore();
+  // Select only the fields we use so playback state we don't care about (isPlaying,
+  // duration) doesn't re-render the editor. currentTimeMs still ticks, but SubtitleRow
+  // is memoized so only the active/previously-active rows actually re-render.
+  const currentTimeMs = usePlayerStore((s) => s.currentTimeMs);
+  const setCurrentTimeMs = usePlayerStore((s) => s.setCurrentTimeMs);
   const listRef = useRef<HTMLDivElement>(null);
   const activeRef = useRef<HTMLDivElement>(null);
 

@@ -62,7 +62,37 @@ pub fn parse_srt(content: &str) -> Result<Vec<Subtitle>, AppError> {
         });
     }
 
+    // A file with content but no parseable cues is almost certainly not an SRT (wrong
+    // format, corrupt, or plain text) — surface that instead of silently returning empty.
+    if subtitles.is_empty() && !content.trim().is_empty() {
+        return Err(AppError::InvalidSrtFormat(
+            "No valid subtitle blocks found".to_string(),
+        ));
+    }
+
     Ok(subtitles)
+}
+
+/// SRT/VTT entries are separated by a blank line, so a blank line inside a cue's text
+/// would split it into two malformed entries. Collapse any run of 2+ newlines to one.
+pub(crate) fn sanitize_cue_text(text: &str) -> std::borrow::Cow<'_, str> {
+    if !text.contains("\n\n") {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut prev_nl = false;
+    for ch in text.chars() {
+        if ch == '\n' {
+            if prev_nl {
+                continue;
+            }
+            prev_nl = true;
+        } else {
+            prev_nl = false;
+        }
+        out.push(ch);
+    }
+    std::borrow::Cow::Owned(out)
 }
 
 /// Write subtitles as an SRT string.
@@ -86,7 +116,7 @@ pub fn write_srt(subtitles: &[Subtitle]) -> String {
         if let Some(ref speaker) = sub.speaker {
             output.push_str(&format!("[{}] ", speaker));
         }
-        output.push_str(&sub.text);
+        output.push_str(&sanitize_cue_text(&sub.text));
         output.push('\n');
     }
 
@@ -110,7 +140,7 @@ pub fn write_word_srt(subtitles: &[Subtitle]) -> String {
                 format_timestamp(sub.start_time),
                 format_timestamp(sub.end_time)
             ));
-            output.push_str(&sub.text);
+            output.push_str(&sanitize_cue_text(&sub.text));
             output.push('\n');
             index += 1;
         } else {

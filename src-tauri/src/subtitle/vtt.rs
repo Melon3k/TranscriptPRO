@@ -1,3 +1,4 @@
+use super::srt::sanitize_cue_text;
 use super::types::Subtitle;
 
 pub fn write_vtt(subtitles: &[Subtitle]) -> String {
@@ -16,7 +17,7 @@ pub fn write_vtt(subtitles: &[Subtitle]) -> String {
         if let Some(ref speaker) = sub.speaker {
             output.push_str(&format!("[{}] ", speaker));
         }
-        output.push_str(&sub.text);
+        output.push_str(&sanitize_cue_text(&sub.text));
         output.push('\n');
     }
 

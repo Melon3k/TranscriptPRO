@@ -15,5 +15,6 @@
   "hideLogs": "Ukryj logi",
   "lightMode": "Tryb jasny",
   "darkMode": "Tryb ciemny",
-  "settings": "Ustawienia"
+  "settings": "Ustawienia",
+  "exportSuccess": "Wyeksportowano do {{name}}"
 }

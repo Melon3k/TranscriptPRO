@@ -33,6 +33,7 @@ import {
   exportAss,
 } from "../../lib/tauri-commands";
 import { routeFile, type FileRoutingCallbacks } from "../../lib/file-routing";
+import { formatError } from "../../lib/error-format";
 import { usePlayerStore } from "../../stores/playerStore";
 import { Subtitle } from "../../types/subtitle";
 
@@ -42,6 +43,7 @@ interface ToolbarProps {
   onStartAudioExtraction?: () => void;
   onStartTranscription: (audioPath: string) => void;
   onError: (message: string) => void;
+  onNotice: (message: string) => void;
 }
 
 export default function Toolbar({
@@ -50,6 +52,7 @@ export default function Toolbar({
   onStartAudioExtraction,
   onStartTranscription,
   onError,
+  onNotice,
 }: ToolbarProps) {
   const { t } = useTranslation(["toolbar", "common"]);
   const { subtitles, setSubtitles, undo, redo, canUndo, canRedo } = useSubtitleStore();
@@ -91,7 +94,12 @@ export default function Toolbar({
       <ToolbarButton icon={<FileAudio size={16} />} label={t("toolbar:importSrt")} onClick={handleImportSrt} />
       <RecentFilesDropdown routeCallbacks={routeCallbacks} />
       <ToolbarDivider />
-      <ExportDropdown subtitles={subtitles} disabled={subtitles.length === 0} />
+      <ExportDropdown
+        subtitles={subtitles}
+        disabled={subtitles.length === 0}
+        onError={onError}
+        onNotice={onNotice}
+      />
       <ToolbarDivider />
 
       {/* Undo / Redo */}
@@ -219,8 +227,19 @@ function RecentFilesDropdown({ routeCallbacks }: { routeCallbacks: FileRoutingCa
 
 // ── Export dropdown ───────────────────────────────────────────────────────────
 
-function ExportDropdown({ subtitles, disabled }: { subtitles: Subtitle[]; disabled: boolean }) {
-  const { t } = useTranslation(["toolbar"]);
+function ExportDropdown({
+  subtitles,
+  disabled,
+  onError,
+  onNotice,
+}: {
+  subtitles: Subtitle[];
+  disabled: boolean;
+  onError: (message: string) => void;
+  onNotice: (message: string) => void;
+}) {
+  const { t } = useTranslation(["toolbar", "errors"]);
+  const markSaved = useSubtitleStore((s) => s.markSaved);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -232,49 +251,68 @@ function ExportDropdown({ subtitles, disabled }: { subtitles: Subtitle[]; disabl
     return () => document.removeEventListener("mousedown", onMouseDown);
   }, []);
 
-  async function run(handler: () => Promise<void>) {
+  // Each handler returns the saved path (or null if the user cancelled the dialog),
+  // so `run` can confirm success and surface failures instead of swallowing them.
+  // `faithful` = the format round-trips the full editing state (timing + structure), so a
+  // successful export means "saved". TXT (no timing) and Word SRT (loses segment grouping
+  // on re-import) are lossy, so they must NOT clear the unsaved-changes guard.
+  async function run(handler: () => Promise<string | null>, faithful: boolean) {
     setOpen(false);
     try {
-      await handler();
+      const savedPath = await handler();
+      if (savedPath) {
+        if (faithful) markSaved();
+        onNotice(t("exportSuccess", { name: filename(savedPath) }));
+      }
     } catch (e) {
-      console.error("Export failed:", e);
+      onError(formatError(t, e));
     }
   }
 
-  const items: { label: string; handler: () => Promise<void> }[] = [
+  const items: { label: string; faithful: boolean; handler: () => Promise<string | null> }[] = [
     {
       label: "SRT",
+      faithful: true,
       handler: async () => {
         const path = await saveSrtFileDialog();
         if (path) await exportSrt(path, subtitles);
+        return path;
       },
     },
     {
       label: "Word SRT",
+      faithful: false,
       handler: async () => {
         const path = await saveSrtFileDialog("subtitles-words.srt");
         if (path) await exportWordSrt(path, subtitles);
+        return path;
       },
     },
     {
       label: "VTT",
+      faithful: true,
       handler: async () => {
         const path = await saveVttFileDialog();
         if (path) await exportVtt(path, subtitles);
+        return path;
       },
     },
     {
       label: "ASS",
+      faithful: true,
       handler: async () => {
         const path = await saveAssFileDialog();
         if (path) await exportAss(path, subtitles);
+        return path;
       },
     },
     {
       label: "TXT",
+      faithful: false,
       handler: async () => {
         const path = await saveTxtFileDialog();
         if (path) await exportTxt(path, subtitles);
+        return path;
       },
     },
   ];
@@ -299,7 +337,7 @@ function ExportDropdown({ subtitles, disabled }: { subtitles: Subtitle[]; disabl
           {items.map((item) => (
             <button
               key={item.label}
-              onClick={() => run(item.handler)}
+              onClick={() => run(item.handler, item.faithful)}
               className="w-full text-left px-3 py-1.5 text-xs text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
             >
               {item.label}

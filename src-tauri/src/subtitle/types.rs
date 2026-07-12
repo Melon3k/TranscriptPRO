@@ -48,6 +48,14 @@ pub struct TranscriptionProgress {
     pub total: u32,
 }
 
+/// Progress update during translation: `done` of `total` segments translated so far.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranslationProgress {
+    pub done: u32,
+    pub total: u32,
+}
+
 /// Information about an available Whisper model
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
