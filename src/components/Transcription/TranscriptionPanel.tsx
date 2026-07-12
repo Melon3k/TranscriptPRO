@@ -32,9 +32,15 @@ const LANGUAGE_OPTIONS = [
 
 interface TranscriptionPanelProps {
   audioPath: string | null;
+  extracting: boolean;
+  onCancelExtraction: () => void;
 }
 
-export default function TranscriptionPanel({ audioPath }: TranscriptionPanelProps) {
+export default function TranscriptionPanel({
+  audioPath,
+  extracting,
+  onCancelExtraction,
+}: TranscriptionPanelProps) {
   const { t } = useTranslation(["transcription", "common"]);
   const { whisperModel, setWhisperModel, autoSaveOnTranscription, forceCpu } = useSettingsStore();
   const { setSubtitles } = useSubtitleStore();
@@ -92,7 +98,9 @@ export default function TranscriptionPanel({ audioPath }: TranscriptionPanelProp
         forceCpu,
         (p) => setProgress(p)
       );
-      setSubtitles(subs);
+      // Not auto-saved to history → the result exists only in memory, so mark dirty
+      // to guard against losing it on close.
+      setSubtitles(subs, { dirty: !autoSaveOnTranscription });
       if (autoSaveOnTranscription) {
         addVersion(subs, "transcription", {
           whisperModel,
@@ -250,8 +258,25 @@ export default function TranscriptionPanel({ audioPath }: TranscriptionPanelProp
         </div>
       )}
 
+      {/* Audio extraction status + cancel */}
+      {extracting && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+            <Loader2 size={14} className="animate-spin" />
+            {t("transcription:extractingAudio")}
+          </div>
+          <button
+            onClick={onCancelExtraction}
+            className="flex items-center gap-2 w-full justify-center rounded-lg bg-red-500 hover:bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors"
+          >
+            <X size={16} />
+            {t("transcription:cancel")}
+          </button>
+        </div>
+      )}
+
       {/* Status */}
-      {!audioPath && (
+      {!audioPath && !extracting && (
         <p className="text-xs text-gray-400 dark:text-gray-500 text-center">
           {t("transcription:emptyState")}
         </p>

@@ -1,5 +1,8 @@
-use crate::subtitle::types::AppError;
+use crate::subtitle::types::{AppError, TranslationProgress};
 use serde::Deserialize;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
+use tauri::ipc::Channel;
 
 #[derive(Debug, Deserialize)]
 struct ClaudeResponse {
@@ -18,16 +21,28 @@ pub async fn translate(
     target_lang: &str,
     source_lang: Option<&str>,
     api_key: &str,
+    cancel: &AtomicBool,
+    on_progress: &Channel<TranslationProgress>,
 ) -> Result<Vec<String>, AppError> {
     if texts.is_empty() {
         return Ok(Vec::new());
     }
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(30))
+        .timeout(Duration::from_secs(120))
+        .build()
+        .map_err(|e: reqwest::Error| {
+            AppError::TranslationApiError(format!("HTTP client error: {}", e))
+        })?;
     let mut all_translated = Vec::with_capacity(texts.len());
 
     // Batch in chunks of 50 to stay within context limits
     for chunk in texts.chunks(50) {
+        // Cancelled — return partial results instead of discarding everything.
+        if cancel.load(Ordering::Relaxed) {
+            break;
+        }
         let source_info = match source_lang {
             Some(lang) => format!(" from {} ", lang),
             None => " ".to_string(),
@@ -45,8 +60,12 @@ pub async fn translate(
         );
 
         let body = serde_json::json!({
-            "model": "claude-sonnet-4-20250514",
+            "model": "claude-sonnet-5",
             "max_tokens": 8192,
+            // Translation needs no reasoning. Sonnet 5 enables adaptive thinking by
+            // default when `thinking` is omitted, which would burn tokens and risk
+            // truncating the JSON array within max_tokens — disable it explicitly.
+            "thinking": {"type": "disabled"},
             "messages": [{
                 "role": "user",
                 "content": prompt
@@ -86,23 +105,24 @@ pub async fn translate(
                 AppError::TranslationApiError("Claude returned empty response".into())
             })?;
 
-        // Clean up response — strip markdown code fences if present
-        let cleaned = text
-            .trim()
-            .strip_prefix("```json")
-            .unwrap_or(text.trim())
-            .strip_prefix("```")
-            .unwrap_or(text.trim())
-            .strip_suffix("```")
-            .unwrap_or(text.trim())
-            .trim();
+        // Strip a leading ```json or ``` fence and a trailing ``` fence, if present.
+        // (The old chained `.unwrap_or(text.trim())` reset to the full original whenever
+        // a strip didn't match, leaving the fence in place — serde then failed at col 1.)
+        let cleaned = {
+            let t = text.trim();
+            let t = t
+                .strip_prefix("```json")
+                .or_else(|| t.strip_prefix("```"))
+                .unwrap_or(t);
+            t.strip_suffix("```").unwrap_or(t).trim()
+        };
 
         let translated: Vec<String> =
             serde_json::from_str(cleaned).map_err(|e| {
                 AppError::TranslationApiError(format!(
                     "Failed to parse Claude translation result: {}. Raw: {}",
                     e,
-                    &text[..text.len().min(200)]
+                    crate::translation::truncate_chars(&text, 200)
                 ))
             })?;
 
@@ -115,6 +135,10 @@ pub async fn translate(
         }
 
         all_translated.extend(translated);
+        let _ = on_progress.send(TranslationProgress {
+            done: all_translated.len() as u32,
+            total: texts.len() as u32,
+        });
     }
 
     Ok(all_translated)

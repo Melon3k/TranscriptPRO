@@ -25,6 +25,8 @@
     "UK": "Ukraiński"
   },
   "translating": "Tłumaczenie…",
+  "cancel": "Anuluj",
+  "progress": "Tłumaczenie {{done}} / {{total}}",
   "translate_one": "Przetłumacz ({{count}} segment)",
   "translate_few": "Przetłumacz ({{count}} segmenty)",
   "translate_many": "Przetłumacz ({{count}} segmentów)",
@@ -37,5 +39,5 @@
     "gemini": "Gemini",
     "claude": "Claude"
   },
-  "freeNoKey": "Za darmo — bez klucza API"
+  "freeNoKey": "Bez klucza dla serwera self-hosted; publiczny serwer może wymagać klucza API (ustaw w Ustawieniach)"
 }

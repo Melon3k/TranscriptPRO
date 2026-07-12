@@ -34,6 +34,8 @@ futures-util = "0.3"
 uuid = { version = "1", features = ["v4"] }
 thiserror = "2"
 regex = "1"
+# Decode legacy-encoded subtitle files (e.g. Windows-1250 Polish SRTs) on import.
+encoding_rs = "0.8"
 # whisper-rs Metal backend is macOS-only (links Apple's Foundation.framework).
 # Windows/Linux fall back to the default CPU backend.
 whisper-rs-sys = "0.15"

@@ -1,13 +1,31 @@
 use crate::logger;
-use crate::subtitle::types::{AppError, Subtitle};
+use crate::subtitle::types::{AppError, Subtitle, TranslationProgress};
 use crate::translation;
-use tauri::AppHandle;
+use crate::TranslationCancel;
+use std::sync::atomic::Ordering;
+use tauri::ipc::Channel;
+use tauri::{AppHandle, State};
 
-/// Translate subtitle texts using Gemini or Claude AI.
-/// Preserves timestamps, clears word-level data (invalid after translation).
+/// Request cancellation of an in-progress translation. Providers check the flag between
+/// chunks and return whatever they've translated so far (partial results).
+#[tauri::command]
+pub async fn cancel_translation(
+    app: AppHandle,
+    cancel: State<'_, TranslationCancel>,
+) -> Result<(), AppError> {
+    cancel.0.store(true, Ordering::Relaxed);
+    logger::info(&app, "translate", "Translation cancellation requested");
+    Ok(())
+}
+
+/// Translate subtitle texts using Gemini / Claude / LibreTranslate.
+/// Preserves timestamps and clears word-level data (invalid after translation).
+/// Streams progress via Channel and supports cancellation with partial results.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn translate_subtitles(
     app: AppHandle,
+    cancel: State<'_, TranslationCancel>,
     subtitles: Vec<Subtitle>,
     target_lang: String,
     provider: String,
@@ -15,6 +33,7 @@ pub async fn translate_subtitles(
     source_lang: Option<String>,
     model: Option<String>,
     server_url: Option<String>,
+    on_progress: Channel<TranslationProgress>,
 ) -> Result<Vec<Subtitle>, AppError> {
     if subtitles.is_empty() {
         return Ok(Vec::new());
@@ -26,6 +45,10 @@ pub async fn translate_subtitles(
             "API key is required for translation".into(),
         ));
     }
+
+    // Reset the cancellation flag at the start of each run.
+    cancel.0.store(false, Ordering::Relaxed);
+    let cancel_flag = cancel.0.clone();
 
     let texts: Vec<String> = subtitles.iter().map(|s| s.text.clone()).collect();
     let src = source_lang.as_deref();
@@ -48,13 +71,39 @@ pub async fn translate_subtitles(
 
     let translated_texts = match provider.as_str() {
         "gemini" => {
-            translation::gemini::translate(&texts, &target_lang, src, &api_key, gemini_model).await?
+            translation::gemini::translate(
+                &texts,
+                &target_lang,
+                src,
+                &api_key,
+                gemini_model,
+                &cancel_flag,
+                &on_progress,
+            )
+            .await?
         }
         "claude" => {
-            translation::claude::translate(&texts, &target_lang, src, &api_key).await?
+            translation::claude::translate(
+                &texts,
+                &target_lang,
+                src,
+                &api_key,
+                &cancel_flag,
+                &on_progress,
+            )
+            .await?
         }
         "libretranslate" => {
-            translation::libretranslate::translate(&texts, &target_lang, src, &api_key, libre_url).await?
+            translation::libretranslate::translate(
+                &texts,
+                &target_lang,
+                src,
+                &api_key,
+                libre_url,
+                &cancel_flag,
+                &on_progress,
+            )
+            .await?
         }
         other => {
             return Err(AppError::TranslationApiError(format!(
@@ -64,21 +113,19 @@ pub async fn translate_subtitles(
         }
     };
 
-    if translated_texts.len() != subtitles.len() {
-        return Err(AppError::TranslationApiError(format!(
-            "Translation count mismatch: expected {}, got {}",
-            subtitles.len(),
-            translated_texts.len()
-        )));
-    }
-
+    // Apply the (possibly partial, if cancelled) translations. Segments beyond what was
+    // translated keep their original text, so cancelling doesn't throw away progress.
+    let translated_count = translated_texts.len();
     let result: Vec<Subtitle> = subtitles
         .into_iter()
-        .zip(translated_texts)
-        .map(|(sub, new_text)| Subtitle {
-            text: new_text,
-            words: Vec::new(), // word timestamps invalid after translation
-            ..sub
+        .enumerate()
+        .map(|(i, sub)| match translated_texts.get(i) {
+            Some(new_text) => Subtitle {
+                text: new_text.clone(),
+                words: Vec::new(), // word timestamps invalid after translation
+                ..sub
+            },
+            None => sub,
         })
         .collect();
 
@@ -86,7 +133,8 @@ pub async fn translate_subtitles(
         &app,
         "translate",
         format!(
-            "Translation completed — {} segments in {:.2}s",
+            "Translation completed — {}/{} segments in {:.2}s",
+            translated_count,
             result.len(),
             started.elapsed().as_secs_f32()
         ),

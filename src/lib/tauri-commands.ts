@@ -3,6 +3,7 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import {
   Subtitle,
   TranscriptionProgress,
+  TranslationProgress,
   WhisperModelInfo,
 } from "../types/subtitle";
 import { SubtitleVersion } from "../types/version";
@@ -183,8 +184,11 @@ export async function translateSubtitles(
   apiKey: string,
   sourceLang?: string,
   model?: string,
-  serverUrl?: string
+  serverUrl?: string,
+  onProgress?: (progress: TranslationProgress) => void
 ): Promise<Subtitle[]> {
+  const channel = new Channel<TranslationProgress>();
+  if (onProgress) channel.onmessage = onProgress;
   return invoke<Subtitle[]>("translate_subtitles", {
     subtitles,
     targetLang,
@@ -193,5 +197,28 @@ export async function translateSubtitles(
     sourceLang: sourceLang ?? null,
     model: model ?? null,
     serverUrl: serverUrl ?? null,
+    onProgress: channel,
   });
+}
+
+export async function cancelTranslation(): Promise<void> {
+  return invoke("cancel_translation");
+}
+
+// ── Audio extraction cancellation ─────────────────────────────────────────────
+
+export async function cancelAudioExtraction(): Promise<void> {
+  return invoke("cancel_audio_extraction");
+}
+
+// ── App lifecycle ─────────────────────────────────────────────────────────────
+
+/** Mirror the frontend unsaved-changes flag into native state (guards Cmd+Q / quit). */
+export async function setDirty(dirty: boolean): Promise<void> {
+  return invoke("set_dirty", { dirty });
+}
+
+/** Quit the app (after the user confirms discarding unsaved work). */
+export async function exitApp(): Promise<void> {
+  return invoke("exit_app");
 }

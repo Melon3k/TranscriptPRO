@@ -8,13 +8,18 @@ import {
   importSrt as importSrtCmd,
   extractAudio,
 } from "./tauri-commands";
-import { formatError } from "./error-format";
+import { formatError, isCancellation } from "./error-format";
 import type { Subtitle } from "../types/subtitle";
 
 export const MEDIA_EXTENSIONS = [
   "mp4", "mkv", "avi", "mov", "webm", "m4v",
   "mp3", "wav", "flac", "ogg", "m4a", "aac",
 ] as const;
+
+// The backend audio-extraction state is a single slot (one ffmpeg child, one cancel flag),
+// so two overlapping extractions would corrupt each other. This module-level guard makes
+// media opens serial across every entry point (drag-drop, toolbar, recent files).
+let mediaExtractionInFlight = false;
 
 export const SRT_EXTENSIONS = ["srt"] as const;
 
@@ -51,15 +56,29 @@ export async function routeFile(
   const kind = classifyFile(path);
 
   if (kind === "media") {
+    // Ignore overlapping media opens while an extraction is already running.
+    if (mediaExtractionInFlight) return true;
+    mediaExtractionInFlight = true;
     cb.setFilePath(path);
-    await cb.setProjectKey(path);
+    // Deriving/loading the version-history key must never block or abort the
+    // transcription pipeline — treat any failure here as "history unavailable".
+    try {
+      await cb.setProjectKey(path);
+    } catch {
+      /* non-fatal */
+    }
     cb.onRecordFile?.(path, "media");
     cb.onStartAudioExtraction?.();
     try {
       const audioPath = await extractAudio(path);
       cb.onStartTranscription(audioPath);
     } catch (e) {
-      cb.onError(formatError(i18n.t, e));
+      // A user-cancelled extraction isn't an error — the UI already reset its state.
+      if (!isCancellation(e)) {
+        cb.onError(formatError(i18n.t, e));
+      }
+    } finally {
+      mediaExtractionInFlight = false;
     }
     return true;
   }

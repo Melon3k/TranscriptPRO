@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, memo } from "react";
 import { Scissors, ChevronUp, ChevronDown, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Subtitle } from "../../types/subtitle";
@@ -28,7 +28,7 @@ interface SubtitleRowProps {
   isLast: boolean;
 }
 
-export default function SubtitleRow({
+function SubtitleRow({
   subtitle,
   isActive,
   activeWordIndex,
@@ -66,9 +66,12 @@ export default function SubtitleRow({
 
   const handleTimeChange = (field: "startTime" | "endTime", value: string) => {
     const ms = parseTimestamp(value);
-    if (ms !== null) {
-      onUpdate(subtitle.id, { [field]: ms });
-    }
+    // Accept any parseable, non-negative time. We deliberately do NOT block start>=end
+    // here: users routinely move a segment later by editing start first (transiently
+    // inverting it) then fixing end — blocking that mid-edit is worse than a transient
+    // inversion the user will resolve. (Inverted-time highlighting is a separate concern.)
+    if (ms === null || ms < 0) return;
+    onUpdate(subtitle.id, { [field]: ms });
   };
 
   const hasWords = subtitle.words && subtitle.words.length > 0;
@@ -456,3 +459,8 @@ function SpeakerBadge({ speaker }: { speaker: string }) {
     </span>
   );
 }
+
+// Memoized so a playback tick (which only changes `isActive`/`activeWordIndex` on two
+// rows) re-renders just those rows, not the whole list. All other props are stable
+// (store actions, useCallback handlers), so the memo comparison bails out for them.
+export default memo(SubtitleRow);

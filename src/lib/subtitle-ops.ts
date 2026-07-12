@@ -33,8 +33,15 @@ export function splitSegment(subtitles: Subtitle[], id: string): Subtitle[] {
 
   const seg = subtitles[idx];
 
+  // If the text was edited after transcription, the word list is stale and rebuilding
+  // the text from `words` would silently revert that edit. Detect divergence and fall
+  // through to the text-based split, which preserves the user's actual text.
+  const wordsMatchText =
+    seg.words.length >= 2 &&
+    normalizeWs(wordsToText(seg.words)) === normalizeWs(seg.text);
+
   // ── Word-level split (precise) ──────────────────────────────────────
-  if (seg.words.length >= 2) {
+  if (wordsMatchText) {
     const midWordIdx = Math.ceil(seg.words.length / 2);
     const firstWords = seg.words.slice(0, midWordIdx);
     const secondWords = seg.words.slice(midWordIdx);
@@ -52,6 +59,7 @@ export function splitSegment(subtitles: Subtitle[], id: string): Subtitle[] {
       endTime: splitTime,
       text: wordsToText(firstWords),
       words: firstWords,
+      speaker: seg.speaker,
     };
 
     const second: Subtitle = {
@@ -61,6 +69,7 @@ export function splitSegment(subtitles: Subtitle[], id: string): Subtitle[] {
       endTime: seg.endTime,
       text: wordsToText(secondWords),
       words: secondWords,
+      speaker: seg.speaker,
     };
 
     return reindex([
@@ -96,6 +105,7 @@ export function splitSegment(subtitles: Subtitle[], id: string): Subtitle[] {
     endTime: splitTime,
     text: firstText,
     words: [],
+    speaker: seg.speaker,
   };
 
   const second: Subtitle = {
@@ -105,6 +115,7 @@ export function splitSegment(subtitles: Subtitle[], id: string): Subtitle[] {
     endTime: seg.endTime,
     text: secondText,
     words: [],
+    speaker: seg.speaker,
   };
 
   return reindex([
@@ -141,6 +152,7 @@ export function mergeSegments(
     endTime: second.endTime,
     text: `${first.text} ${second.text}`.trim(),
     words: [...first.words, ...second.words],
+    speaker: first.speaker ?? second.speaker,
   };
 
   const minIdx = Math.min(idx, targetIdx);
@@ -180,4 +192,9 @@ export function wordsToText(words: Word[]): string {
     .map((w) => w.text)
     .join(" ")
     .trim();
+}
+
+/** Collapse runs of whitespace to a single space and trim — for tolerant text comparison. */
+function normalizeWs(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
 }

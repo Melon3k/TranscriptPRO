@@ -15,5 +15,6 @@
   "hideLogs": "Hide logs",
   "lightMode": "Light mode",
   "darkMode": "Dark mode",
-  "settings": "Settings"
+  "settings": "Settings",
+  "exportSuccess": "Exported to {{name}}"
 }

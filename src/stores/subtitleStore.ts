@@ -8,12 +8,16 @@ interface SubtitleState {
   past: Subtitle[][];
   future: Subtitle[][];
 
+  // True when there are edits not yet written to a file (guards against data loss
+  // on window close / app relaunch). Set by granular edits, cleared on load/export.
+  dirty: boolean;
+
   // Comparison mode (original vs translated)
   originalSubtitles: Subtitle[] | null;
   comparisonMode: boolean;
 
   // Actions
-  setSubtitles: (subtitles: Subtitle[]) => void;
+  setSubtitles: (subtitles: Subtitle[], options?: { dirty?: boolean }) => void;
   updateSubtitle: (id: string, changes: Partial<Subtitle>) => void;
   splitSegment: (id: string) => void;
   mergeUp: (id: string) => void;
@@ -24,6 +28,8 @@ interface SubtitleState {
   redo: () => void;
   canUndo: () => boolean;
   canRedo: () => boolean;
+  /** Mark the current subtitles as persisted (called after a successful export). */
+  markSaved: () => void;
 
   // Comparison actions
   setOriginalSubtitles: (subs: Subtitle[]) => void;
@@ -45,14 +51,19 @@ export const useSubtitleStore = create<SubtitleState>((set, get) => ({
   subtitles: [],
   past: [],
   future: [],
+  dirty: false,
   originalSubtitles: null,
   comparisonMode: false,
 
-  setSubtitles: (subtitles) => {
+  setSubtitles: (subtitles, options) => {
+    // A bulk replace establishes a fresh baseline. Loads from a file or version history
+    // are clean; generated content (transcription/translation) that wasn't auto-saved to
+    // history is "dirty" — it lives only in memory and would be lost on close.
     set({
       subtitles: reindex(subtitles),
       past: pushHistory(get().past, get().subtitles),
       future: [],
+      dirty: options?.dirty ?? false,
     });
   },
 
@@ -60,6 +71,7 @@ export const useSubtitleStore = create<SubtitleState>((set, get) => ({
     set((state) => ({
       past: pushHistory(state.past, state.subtitles),
       future: [],
+      dirty: true,
       subtitles: state.subtitles.map((s) =>
         s.id === id ? { ...s, ...changes } : s
       ),
@@ -70,6 +82,7 @@ export const useSubtitleStore = create<SubtitleState>((set, get) => ({
     set((state) => ({
       past: pushHistory(state.past, state.subtitles),
       future: [],
+      dirty: true,
       subtitles: splitSegment(state.subtitles, id),
     }));
   },
@@ -78,6 +91,7 @@ export const useSubtitleStore = create<SubtitleState>((set, get) => ({
     set((state) => ({
       past: pushHistory(state.past, state.subtitles),
       future: [],
+      dirty: true,
       subtitles: mergeSegments(state.subtitles, id, "up"),
     }));
   },
@@ -86,6 +100,7 @@ export const useSubtitleStore = create<SubtitleState>((set, get) => ({
     set((state) => ({
       past: pushHistory(state.past, state.subtitles),
       future: [],
+      dirty: true,
       subtitles: mergeSegments(state.subtitles, id, "down"),
     }));
   },
@@ -94,6 +109,7 @@ export const useSubtitleStore = create<SubtitleState>((set, get) => ({
     set((state) => ({
       past: pushHistory(state.past, state.subtitles),
       future: [],
+      dirty: true,
       subtitles: reindex(state.subtitles.filter((s) => s.id !== id)),
     }));
   },
@@ -153,6 +169,7 @@ export const useSubtitleStore = create<SubtitleState>((set, get) => ({
       return {
         past: pushHistory(state.past, state.subtitles),
         future: [],
+        dirty: true,
         subtitles: reindex(newSubs),
       };
     });
@@ -166,6 +183,7 @@ export const useSubtitleStore = create<SubtitleState>((set, get) => ({
       subtitles: previous,
       past: past.slice(0, -1),
       future: [subtitles, ...get().future].slice(0, HISTORY_LIMIT),
+      dirty: true,
     });
   },
 
@@ -177,11 +195,13 @@ export const useSubtitleStore = create<SubtitleState>((set, get) => ({
       subtitles: next,
       past: pushHistory(get().past, subtitles),
       future: future.slice(1),
+      dirty: true,
     });
   },
 
   canUndo: () => get().past.length > 0,
   canRedo: () => get().future.length > 0,
+  markSaved: () => set({ dirty: false }),
 
   // Comparison
   setOriginalSubtitles: (subs) => set({ originalSubtitles: subs }),

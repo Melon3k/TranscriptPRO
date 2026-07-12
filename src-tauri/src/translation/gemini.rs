@@ -1,6 +1,8 @@
-use crate::subtitle::types::AppError;
+use crate::subtitle::types::{AppError, TranslationProgress};
 use serde::Deserialize;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
+use tauri::ipc::Channel;
 
 #[derive(Debug, Deserialize)]
 struct GeminiResponse {
@@ -50,22 +52,35 @@ fn parse_retry_delay(s: &str) -> Option<Duration> {
 
 /// Translate a batch of texts using the Gemini API (Google AI).
 /// Automatically retries on 429 using the retryDelay from the response.
+#[allow(clippy::too_many_arguments)]
 pub async fn translate(
     texts: &[String],
     target_lang: &str,
     source_lang: Option<&str>,
     api_key: &str,
     model: &str,
+    cancel: &AtomicBool,
+    on_progress: &Channel<TranslationProgress>,
 ) -> Result<Vec<String>, AppError> {
     if texts.is_empty() {
         return Ok(Vec::new());
     }
 
     let model = if model.is_empty() { DEFAULT_MODEL } else { model };
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(30))
+        .timeout(Duration::from_secs(120))
+        .build()
+        .map_err(|e: reqwest::Error| {
+            AppError::TranslationApiError(format!("HTTP client error: {}", e))
+        })?;
     let mut all_translated = Vec::with_capacity(texts.len());
 
     for chunk in texts.chunks(50) {
+        // Cancelled — return what's translated so far (partial) instead of discarding it.
+        if cancel.load(Ordering::Relaxed) {
+            break;
+        }
         let source_info = match source_lang {
             Some(lang) => format!(" from {} ", lang),
             None => " ".to_string(),
@@ -133,6 +148,10 @@ pub async fn translate(
                     .next()
                     .unwrap_or(Duration::from_secs(60));
 
+                // Don't sit through a (possibly 60s) backoff if the user cancelled.
+                if cancel.load(Ordering::Relaxed) {
+                    return Ok(all_translated);
+                }
                 tokio::time::sleep(delay).await;
                 continue;
             }
@@ -164,22 +183,23 @@ pub async fn translate(
                 AppError::TranslationApiError("Gemini returned empty response".into())
             })?;
 
-        // Strip markdown code fences if present
-        let cleaned = text
-            .trim()
-            .strip_prefix("```json")
-            .unwrap_or(text.trim())
-            .strip_prefix("```")
-            .unwrap_or(text.trim())
-            .strip_suffix("```")
-            .unwrap_or(text.trim())
-            .trim();
+        // Strip a leading ```json or ``` fence and a trailing ``` fence, if present.
+        // (The old chained `.unwrap_or(text.trim())` reset to the full original whenever
+        // a strip didn't match, leaving the fence in place — serde then failed at col 1.)
+        let cleaned = {
+            let t = text.trim();
+            let t = t
+                .strip_prefix("```json")
+                .or_else(|| t.strip_prefix("```"))
+                .unwrap_or(t);
+            t.strip_suffix("```").unwrap_or(t).trim()
+        };
 
         let translated: Vec<String> = serde_json::from_str(cleaned).map_err(|e| {
             AppError::TranslationApiError(format!(
                 "Failed to parse Gemini result: {}. Raw: {}",
                 e,
-                &text[..text.len().min(200)]
+                crate::translation::truncate_chars(&text, 200)
             ))
         })?;
 
@@ -192,6 +212,10 @@ pub async fn translate(
         }
 
         all_translated.extend(translated);
+        let _ = on_progress.send(TranslationProgress {
+            done: all_translated.len() as u32,
+            total: texts.len() as u32,
+        });
     }
 
     Ok(all_translated)

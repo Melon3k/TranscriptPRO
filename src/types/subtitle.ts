@@ -47,6 +47,11 @@ export interface WhisperModelInfo {
   bundled: boolean;
 }
 
+export interface TranslationProgress {
+  done: number;
+  total: number;
+}
+
 export type TranslationProvider = "gemini" | "claude" | "libretranslate";
 
 export interface TranslationConfig {
