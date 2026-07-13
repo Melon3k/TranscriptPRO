@@ -27,13 +27,17 @@ pub struct AudioExtraction {
 /// handlers (notably macOS Cmd+Q, which does not emit a per-window close event) guard it.
 pub struct DirtyState(pub AtomicBool);
 
-/// The llama-server sidecar powering local translation, plus the port it listens on.
-/// Kept warm across translations (the model stays loaded); killed on app exit.
-/// `startup` serializes ensure_server: without it, two concurrent translations both
-/// see "no server" and each spawn one (the loser leaks as an orphan process).
+/// The llama-server sidecar powering local translation, plus the port it listens on
+/// and a per-run bearer token. Kept warm across translations (the model stays
+/// loaded) but shut down after a spell of inactivity to free ~2.5 GB RAM, and
+/// killed on app exit. `startup` serializes ensure_server: without it, two
+/// concurrent translations both see "no server" and each spawn one (the loser
+/// leaks as an orphan process).
 pub struct LocalLlm {
     pub child: Mutex<Option<CommandChild>>,
     pub port: Mutex<Option<u16>>,
+    pub token: Mutex<Option<String>>,
+    pub last_used: Mutex<Option<std::time::Instant>>,
     pub startup: tokio::sync::Mutex<()>,
 }
 
@@ -110,6 +114,8 @@ pub fn run() {
         .manage(LocalLlm {
             child: Mutex::new(None),
             port: Mutex::new(None),
+            token: Mutex::new(None),
+            last_used: Mutex::new(None),
             startup: tokio::sync::Mutex::new(()),
         })
         .manage(whisper_cache)

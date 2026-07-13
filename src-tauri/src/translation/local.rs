@@ -1,10 +1,12 @@
 use crate::logger;
 use crate::subtitle::types::{AppError, TranslationProgress};
+use crate::translation::TranslateOutcome;
 use crate::LocalLlm;
+use aes_gcm::aead::rand_core::RngCore;
 use serde::Deserialize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_shell::process::CommandEvent;
@@ -26,6 +28,26 @@ pub const MODEL_SHA256: &str = "81200d03e843d2ec1ece6eeafe7d13cb6e5211e1fcd336ad
 const CTX_SIZE: &str = "2048";
 /// How long to wait for llama-server to load the model before giving up.
 const STARTUP_TIMEOUT_SECS: u64 = 120;
+/// Shut the warm server down after this long with no translation, to free the
+/// ~2.5 GB the loaded model holds. A new translation just restarts it.
+const IDLE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+
+/// Random bearer token, regenerated per server start. llama-server binds only
+/// 127.0.0.1, but with no auth any other local process (or a malicious page in
+/// the user's browser POSTing to the port) could drive the model; the token
+/// closes that. Passed via the LLAMA_API_KEY env var, not argv, so it doesn't
+/// show up in `ps`.
+fn gen_token() -> String {
+    let mut b = [0u8; 24];
+    aes_gcm::aead::OsRng.fill_bytes(&mut b);
+    hex::encode(b)
+}
+
+fn touch_last_used(llm: &LocalLlm) {
+    if let Ok(mut g) = llm.last_used.lock() {
+        *g = Some(Instant::now());
+    }
+}
 
 pub fn model_path(app: &AppHandle) -> Result<std::path::PathBuf, AppError> {
     Ok(app
@@ -69,9 +91,10 @@ fn free_port() -> Result<u16, AppError> {
         .map_err(|e| AppError::TranslationApiError(format!("No free local port: {}", e)))
 }
 
-async fn health_ok(client: &reqwest::Client, port: u16) -> bool {
+async fn health_ok(client: &reqwest::Client, port: u16, token: &str) -> bool {
     client
         .get(format!("http://127.0.0.1:{}/health", port))
+        .bearer_auth(token)
         .timeout(Duration::from_secs(2))
         .send()
         .await
@@ -79,21 +102,63 @@ async fn health_ok(client: &reqwest::Client, port: u16) -> bool {
         .unwrap_or(false)
 }
 
-/// Return the port of a healthy llama-server, starting one if needed. The server is
-/// kept warm across translations (model stays loaded) and killed on app exit.
+/// Background task: once the warm server has sat unused past IDLE_TIMEOUT, kill it
+/// and free the model. Exits early if the server it was watching was already
+/// replaced (port changed) or gone.
+fn spawn_idle_watchdog(app: &AppHandle, port: u16) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            let Some(llm) = app.try_state::<LocalLlm>() else { return };
+            // Superseded by a newer server (or already shut down) — stop watching.
+            if llm.port.lock().ok().and_then(|g| *g) != Some(port) {
+                return;
+            }
+            let idle = llm
+                .last_used
+                .lock()
+                .ok()
+                .and_then(|g| *g)
+                .map(|t| t.elapsed())
+                .unwrap_or(Duration::ZERO);
+            if idle >= IDLE_TIMEOUT {
+                if let Ok(mut g) = llm.child.lock() {
+                    if let Some(child) = g.take() {
+                        let _ = child.kill();
+                    }
+                }
+                if let Ok(mut g) = llm.port.lock() {
+                    *g = None;
+                }
+                if let Ok(mut g) = llm.token.lock() {
+                    *g = None;
+                }
+                logger::info(&app, "translate", "Local translation server shut down (idle)");
+                return;
+            }
+        }
+    });
+}
+
+/// Return the (port, token) of a healthy llama-server, starting one if needed. The
+/// server is kept warm across translations (model stays loaded), shut down when
+/// idle, and killed on app exit.
 async fn ensure_server(
     app: &AppHandle,
     llm: &LocalLlm,
     client: &reqwest::Client,
-) -> Result<u16, AppError> {
+    cancel: &AtomicBool,
+) -> Result<(u16, String), AppError> {
     // One startup at a time — a concurrent caller waits here, then finds the
     // healthy server on the fast path instead of spawning a duplicate.
     let _startup = llm.startup.lock().await;
 
     let existing = llm.port.lock().ok().and_then(|g| *g);
-    if let Some(port) = existing {
-        if health_ok(client, port).await {
-            return Ok(port);
+    let existing_token = llm.token.lock().ok().and_then(|g| g.clone());
+    if let (Some(port), Some(token)) = (existing, existing_token) {
+        if health_ok(client, port, &token).await {
+            return Ok((port, token));
         }
         // Server died or got stuck — clear it and start fresh.
         if let Ok(mut g) = llm.child.lock() {
@@ -104,6 +169,9 @@ async fn ensure_server(
         if let Ok(mut g) = llm.port.lock() {
             *g = None;
         }
+        if let Ok(mut g) = llm.token.lock() {
+            *g = None;
+        }
     }
 
     let model = model_path(app)?;
@@ -112,15 +180,22 @@ async fn ensure_server(
     }
 
     let port = free_port()?;
+    let token = gen_token();
     logger::info(
         app,
         "translate",
         format!("Starting local translation server (port {})", port),
     );
 
-    let sidecar = app.shell().sidecar("llama-server").map_err(|e| {
-        AppError::TranslationApiError(format!("llama-server sidecar unavailable: {}", e))
-    })?;
+    let sidecar = app
+        .shell()
+        .sidecar("llama-server")
+        .map_err(|e| {
+            AppError::TranslationApiError(format!("llama-server sidecar unavailable: {}", e))
+        })?
+        // Token via env, not argv, so it isn't visible in `ps`. llama-server reads
+        // LLAMA_API_KEY and requires it on /completion.
+        .env("LLAMA_API_KEY", &token);
     let (mut rx, child) = sidecar
         .args([
             "-m",
@@ -150,6 +225,10 @@ async fn ensure_server(
     if let Ok(mut g) = llm.port.lock() {
         *g = Some(port);
     }
+    if let Ok(mut g) = llm.token.lock() {
+        *g = Some(token.clone());
+    }
+    touch_last_used(llm);
 
     // Drain server output so the event channel never backs up (llama-server logs
     // every request). Keep a stderr tail + died flag for a useful startup error.
@@ -177,16 +256,22 @@ async fn ensure_server(
         });
     }
 
-    let deadline = std::time::Instant::now() + Duration::from_secs(STARTUP_TIMEOUT_SECS);
-    while std::time::Instant::now() < deadline && !died.load(Ordering::Relaxed) {
-        if health_ok(client, port).await {
+    let deadline = Instant::now() + Duration::from_secs(STARTUP_TIMEOUT_SECS);
+    while Instant::now() < deadline && !died.load(Ordering::Relaxed) {
+        // Let the user abort a slow model load instead of waiting out the deadline.
+        if cancel.load(Ordering::Relaxed) {
+            break;
+        }
+        if health_ok(client, port, &token).await {
             logger::info(app, "translate", "Local translation server ready");
-            return Ok(port);
+            touch_last_used(llm);
+            spawn_idle_watchdog(app, port);
+            return Ok((port, token));
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
 
-    // Startup failed — clean up and surface the tail of the server log.
+    // Startup failed (or was cancelled) — clean up and surface the tail of the log.
     if let Ok(mut g) = llm.child.lock() {
         if let Some(child) = g.take() {
             let _ = child.kill();
@@ -194,6 +279,12 @@ async fn ensure_server(
     }
     if let Ok(mut g) = llm.port.lock() {
         *g = None;
+    }
+    if let Ok(mut g) = llm.token.lock() {
+        *g = None;
+    }
+    if cancel.load(Ordering::Relaxed) {
+        return Err(AppError::Cancelled);
     }
     let tail = stderr_tail.lock().map(|t| t.clone()).unwrap_or_default();
     logger::error(app, "translate", format!("llama-server failed to start: {}", tail));
@@ -220,11 +311,12 @@ pub async fn translate(
     source_lang: Option<&str>,
     cancel: &AtomicBool,
     on_progress: &Channel<TranslationProgress>,
-) -> Result<Vec<String>, AppError> {
+) -> Result<TranslateOutcome, AppError> {
     if texts.is_empty() {
-        return Ok(Vec::new());
+        return Ok(TranslateOutcome::complete(Vec::new()));
     }
 
+    // Pre-flight failures (bad source language, no server) are fatal → Err.
     let src = source_lang.ok_or_else(|| {
         AppError::TranslationApiError(
             "Source language is required for local translation (TranslateGemma has no auto-detect)"
@@ -243,10 +335,13 @@ pub async fn translate(
             AppError::TranslationApiError(format!("HTTP client error: {}", e))
         })?;
 
-    let port = ensure_server(app, llm, &client).await?;
+    let (port, token) = ensure_server(app, llm, &client, cancel).await?;
     let url = format!("http://127.0.0.1:{}/completion", port);
 
+    // Once the server is up, a mid-run failure is NON-fatal: keep the cues done
+    // so far (hours of CPU work) and report the error via the outcome.
     let mut out: Vec<String> = Vec::with_capacity(texts.len());
+    let mut run_error: Option<String> = None;
     for text in texts {
         // Cancelled — return what's translated so far (partial), like the cloud providers.
         if cancel.load(Ordering::Relaxed) {
@@ -274,32 +369,64 @@ pub async fn translate(
             "stop": ["<end_of_turn>"],
         });
 
-        let response = client.post(&url).json(&body).send().await.map_err(
-            |e: reqwest::Error| {
-                AppError::TranslationApiError(format!("Local translation request failed: {}", e))
-            },
-        )?;
-
-        let status = response.status();
-        if !status.is_success() {
-            let body_text = response.text().await.unwrap_or_default();
-            return Err(AppError::TranslationApiError(format!(
-                "Local translation server error {}: {}",
-                status,
-                crate::translation::truncate_chars(&body_text, 200)
-            )));
+        match translate_one(&client, &url, &token, &body).await {
+            Ok(text) => {
+                out.push(text);
+                touch_last_used(llm);
+                let _ = on_progress.send(TranslationProgress {
+                    done: out.len() as u32,
+                    total: texts.len() as u32,
+                });
+            }
+            Err(e) => {
+                logger::error(app, "translate", format!("Local translation stopped: {}", e));
+                run_error = Some(e.detail().to_string());
+                break;
+            }
         }
-
-        let parsed: CompletionResponse = response.json().await.map_err(|e: reqwest::Error| {
-            AppError::TranslationApiError(format!("Local translation parse error: {}", e))
-        })?;
-
-        out.push(parsed.content.trim().to_string());
-        let _ = on_progress.send(TranslationProgress {
-            done: out.len() as u32,
-            total: texts.len() as u32,
-        });
     }
 
-    Ok(out)
+    touch_last_used(llm);
+    Ok(TranslateOutcome {
+        texts: out,
+        error: run_error,
+    })
+}
+
+/// One /completion request. Errors are returned (not `?`-propagated out of the run)
+/// so the caller can keep partial results.
+async fn translate_one(
+    client: &reqwest::Client,
+    url: &str,
+    token: &str,
+    body: &serde_json::Value,
+) -> Result<String, AppError> {
+    let response = client
+        .post(url)
+        .bearer_auth(token)
+        .json(body)
+        .send()
+        .await
+        .map_err(|e: reqwest::Error| {
+            AppError::TranslationApiError(format!(
+                "Local translation request failed: {}",
+                e.without_url()
+            ))
+        })?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let body_text = response.text().await.unwrap_or_default();
+        return Err(AppError::TranslationApiError(format!(
+            "Local translation server error {}: {}",
+            status,
+            crate::translation::truncate_chars(&body_text, 200)
+        )));
+    }
+
+    let parsed: CompletionResponse = response.json().await.map_err(|e: reqwest::Error| {
+        AppError::TranslationApiError(format!("Local translation parse error: {}", e))
+    })?;
+
+    Ok(parsed.content.trim().to_string())
 }

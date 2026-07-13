@@ -27,6 +27,8 @@
   "translating": "Translating…",
   "cancel": "Cancel",
   "progress": "Translating {{done}} / {{total}}",
+  "partialWarning": "Translation stopped early — {{done}} of {{total}} segments translated. Check the log for details; you can re-run to finish the rest.",
+  "nothingTranslated": "Translation failed before any segment was translated.",
   "translate_one": "Translate ({{count}} segment)",
   "translate_other": "Translate ({{count}} segments)",
   "hideComparison": "Hide comparison",

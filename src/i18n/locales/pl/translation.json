@@ -27,6 +27,8 @@
   "translating": "Tłumaczenie…",
   "cancel": "Anuluj",
   "progress": "Tłumaczenie {{done}} / {{total}}",
+  "partialWarning": "Tłumaczenie przerwane — przetłumaczono {{done}} z {{total}} segmentów. Szczegóły w logach; możesz uruchomić ponownie, by dokończyć resztę.",
+  "nothingTranslated": "Tłumaczenie nie powiodło się — żaden segment nie został przetłumaczony.",
   "translate_one": "Przetłumacz ({{count}} segment)",
   "translate_few": "Przetłumacz ({{count}} segmenty)",
   "translate_many": "Przetłumacz ({{count}} segmentów)",

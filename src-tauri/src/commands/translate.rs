@@ -2,9 +2,22 @@ use crate::logger;
 use crate::subtitle::types::{AppError, Subtitle, TranslationProgress};
 use crate::translation;
 use crate::{LocalLlm, TranslationCancel};
+use serde::Serialize;
 use std::sync::atomic::Ordering;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, State};
+
+/// Outcome of a translate call. `warning` is set when the run stopped early on an
+/// error (not a cancel) — `subtitles` then holds the partial translation and
+/// `translated_count` how many cues were done, so the UI can apply the partial
+/// and warn instead of discarding everything.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranslationResult {
+    pub subtitles: Vec<Subtitle>,
+    pub translated_count: u32,
+    pub warning: Option<String>,
+}
 
 /// Request cancellation of an in-progress translation. Providers check the flag between
 /// chunks and return whatever they've translated so far (partial results).
@@ -36,9 +49,13 @@ pub async fn translate_subtitles(
     source_lang: Option<String>,
     model: Option<String>,
     on_progress: Channel<TranslationProgress>,
-) -> Result<Vec<Subtitle>, AppError> {
+) -> Result<TranslationResult, AppError> {
     if subtitles.is_empty() {
-        return Ok(Vec::new());
+        return Ok(TranslationResult {
+            subtitles: Vec::new(),
+            translated_count: 0,
+            warning: None,
+        });
     }
 
     let api_key = match provider.as_str() {
@@ -76,7 +93,7 @@ pub async fn translate_subtitles(
     );
     let started = std::time::Instant::now();
 
-    let translated_texts = match provider.as_str() {
+    let outcome = match provider.as_str() {
         "gemini" => {
             translation::gemini::translate(
                 &texts,
@@ -120,8 +137,11 @@ pub async fn translate_subtitles(
         }
     };
 
-    // Apply the (possibly partial, if cancelled) translations. Segments beyond what was
-    // translated keep their original text, so cancelling doesn't throw away progress.
+    // Apply the (possibly partial) translations. Segments beyond what was translated
+    // keep their original text, so neither a cancel nor a mid-run error throws away
+    // progress. A mid-run error surfaces as `warning` (not a hard Err) so the UI can
+    // keep the partial result.
+    let translated_texts = outcome.texts;
     let translated_count = translated_texts.len();
     let result: Vec<Subtitle> = subtitles
         .into_iter()
@@ -140,12 +160,17 @@ pub async fn translate_subtitles(
         &app,
         "translate",
         format!(
-            "Translation completed — {}/{} segments in {:.2}s",
+            "Translation {} — {}/{} segments in {:.2}s",
+            if outcome.error.is_some() { "stopped with error" } else { "completed" },
             translated_count,
             result.len(),
             started.elapsed().as_secs_f32()
         ),
     );
 
-    Ok(result)
+    Ok(TranslationResult {
+        subtitles: result,
+        translated_count: translated_count as u32,
+        warning: outcome.error,
+    })
 }

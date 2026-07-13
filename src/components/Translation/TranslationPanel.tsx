@@ -57,6 +57,7 @@ export default function TranslationPanel() {
   const [translating, setTranslating] = useState(false);
   const [progress, setProgress] = useState<TranslationProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   const [translated, setTranslated] = useState(false);
   const [localModel, setLocalModel] = useState<LocalModelInfo | null>(null);
   const [downloadingModel, setDownloadingModel] = useState(false);
@@ -108,6 +109,7 @@ export default function TranslationPanel() {
     if (!canTranslate) return;
     setTranslating(true);
     setError(null);
+    setWarning(null);
     setProgress(null);
     try {
       // Snapshot originals before translation
@@ -121,17 +123,35 @@ export default function TranslationPanel() {
         translationProvider === "gemini" ? geminiModel : undefined,
         (p) => setProgress(p)
       );
+
+      if (result.translatedCount === 0) {
+        // Nothing was translated (error on the very first request) — treat as a
+        // hard failure: surface the message and drop the snapshot.
+        setError(result.warning ?? t("translation:nothingTranslated"));
+        clearOriginalSubtitles();
+        return;
+      }
+
       // Not auto-saved to history → mark dirty so the unsaved translation isn't lost on close.
-      setSubtitles(result, { dirty: !autoSaveOnTranslation });
-      if (autoSaveOnTranslation) {
-        addVersion(result, "translation", {
+      setSubtitles(result.subtitles, { dirty: !autoSaveOnTranslation });
+      setTranslated(true);
+      if (result.warning) {
+        // Partial success: keep what we got + the comparison snapshot, but warn
+        // instead of silently pretending the whole file was translated.
+        setWarning(
+          t("translation:partialWarning", {
+            done: result.translatedCount,
+            total: subtitles.length,
+          })
+        );
+      } else if (autoSaveOnTranslation) {
+        addVersion(result.subtitles, "translation", {
           provider: translationProvider,
           targetLang,
           sourceLang: sourceLang || undefined,
           model: translationProvider === "gemini" ? geminiModel : undefined,
         });
       }
-      setTranslated(true);
     } catch (e) {
       setError(formatError(t, e));
       // Clear snapshot on failure
@@ -349,6 +369,13 @@ export default function TranslationPanel() {
         <p className="text-[10px] text-gray-400 dark:text-gray-500 text-center leading-relaxed">
           {t("translation:localModel.gemmaNotice")}
         </p>
+      )}
+
+      {/* Partial-success warning (kept translation, but the run stopped early) */}
+      {warning && (
+        <div className="rounded bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+          {warning}
+        </div>
       )}
 
       {/* Error */}

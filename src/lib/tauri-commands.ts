@@ -196,6 +196,13 @@ export async function cancelTranscription(): Promise<void> {
 
 // ── Translation ──────────────────────────────────────────────────────────────
 
+export interface TranslationResult {
+  subtitles: Subtitle[];
+  translatedCount: number;
+  /** Set when the run stopped early on an error; subtitles hold the partial result. */
+  warning: string | null;
+}
+
 export async function translateSubtitles(
   subtitles: Subtitle[],
   targetLang: string,
@@ -203,10 +210,10 @@ export async function translateSubtitles(
   sourceLang?: string,
   model?: string,
   onProgress?: (progress: TranslationProgress) => void
-): Promise<Subtitle[]> {
+): Promise<TranslationResult> {
   const channel = new Channel<TranslationProgress>();
   if (onProgress) channel.onmessage = onProgress;
-  return invoke<Subtitle[]>("translate_subtitles", {
+  return invoke<TranslationResult>("translate_subtitles", {
     subtitles,
     targetLang,
     provider,
