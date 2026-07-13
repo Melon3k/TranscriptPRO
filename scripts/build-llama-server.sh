@@ -45,7 +45,11 @@ clone() {
 
 # Common cmake flags: static, server only, no curl (we download models ourselves),
 # no TLS (the server binds 127.0.0.1 only; SSL would drag in a homebrew/system
-# OpenSSL dylib that user machines don't have).
+# OpenSSL dylib that user machines don't have), and no embedded Web UI. We run the
+# server with --no-jinja/--no-webui and only call /health + /completion, so the UI
+# is dead weight — and building it (npm build, else an HF asset download) broke the
+# Windows CI runner (MSB8066 in llama-ui-assets). BUILD_UI=OFF + USE_PREBUILT_UI=OFF
+# makes the asset step emit an empty stub instead.
 COMMON_FLAGS=(
   -DBUILD_SHARED_LIBS=OFF
   -DLLAMA_BUILD_SERVER=ON
@@ -54,6 +58,8 @@ COMMON_FLAGS=(
   -DLLAMA_BUILD_TOOLS=ON
   -DLLAMA_CURL=OFF
   -DLLAMA_SERVER_SSL=OFF
+  -DLLAMA_BUILD_UI=OFF
+  -DLLAMA_USE_PREBUILT_UI=OFF
   -DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=ON
   -DCMAKE_BUILD_TYPE=Release
 )
