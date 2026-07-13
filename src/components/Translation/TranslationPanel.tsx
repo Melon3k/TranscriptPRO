@@ -393,7 +393,9 @@ export default function TranslationPanel() {
           {t("translation:localModel.needsSource")}
         </p>
       )}
-      {isLocal && (
+      {/* Standing attribution once the model is present; before download the
+          consent notice in the download block covers it (avoid showing both). */}
+      {isLocal && localModel?.downloaded && (
         <p className="text-[10px] text-gray-400 dark:text-gray-500 text-center leading-relaxed">
           {t("translation:localModel.gemmaNotice")}
         </p>

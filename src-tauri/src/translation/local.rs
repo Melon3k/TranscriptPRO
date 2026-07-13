@@ -91,22 +91,33 @@ pub fn remove_pidfile(app: &AppHandle) {
     }
 }
 
-/// True if `pid` is a live process whose command line looks like our llama-server.
+/// True if `pid` is a live process that is *our* llama-server, not some other
+/// program that merely happens to hold this PID after reuse. On unix we match the
+/// model-file name in the full command line (`ps -o command=` shows args), which is
+/// app-specific enough to not hit a developer's own llama.cpp. On Windows tasklist
+/// only exposes the image name, so we match the target-triple-suffixed sidecar exe
+/// name (still narrower than a bare "llama-server").
 fn pid_is_llama_server(pid: u32) -> bool {
     #[cfg(unix)]
-    let out = std::process::Command::new("ps")
-        .args(["-p", &pid.to_string(), "-o", "command="])
-        .output();
+    {
+        std::process::Command::new("ps")
+            .args(["-p", &pid.to_string(), "-o", "command="])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).contains(MODEL_FILE))
+            .unwrap_or(false)
+    }
     #[cfg(windows)]
-    let out = std::process::Command::new("tasklist")
-        .args(["/FI", &format!("PID eq {}", pid), "/FO", "CSV", "/NH"])
-        .output();
-    out.map(|o| {
-        String::from_utf8_lossy(&o.stdout)
-            .to_lowercase()
-            .contains("llama-server")
-    })
-    .unwrap_or(false)
+    {
+        std::process::Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {}", pid), "/FO", "CSV", "/NH"])
+            .output()
+            .map(|o| {
+                String::from_utf8_lossy(&o.stdout)
+                    .to_lowercase()
+                    .contains("llama-server-")
+            })
+            .unwrap_or(false)
+    }
 }
 
 /// Reap a llama-server orphaned by a previous hard-killed/crashed session. Runs
@@ -357,6 +368,9 @@ async fn ensure_server(
     if let Ok(mut g) = llm.token.lock() {
         *g = None;
     }
+    // The child was killed above, so its recorded PID is dead — drop the pidfile so
+    // a cancelled/failed start doesn't leave a stale PID for the next launch to chase.
+    remove_pidfile(app);
     if cancel.load(Ordering::Relaxed) {
         return Err(AppError::Cancelled);
     }
@@ -445,10 +459,11 @@ pub async fn translate(
 
         // Race the request against the cancel flag so a hung request (up to the
         // 300 s timeout) doesn't leave Cancel unresponsive. `None` = cancelled.
+        // Not `biased`: if the request already resolved this tick, prefer keeping
+        // its result rather than discarding a cue that actually finished.
         let outcome = tokio::select! {
-            biased;
-            _ = wait_for_cancel(cancel) => None,
             r = translate_one(&client, &url, &token, &body) => Some(r),
+            _ = wait_for_cancel(cancel) => None,
         };
         match outcome {
             None => break, // cancelled mid-request — keep the partial result

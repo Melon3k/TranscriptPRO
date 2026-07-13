@@ -34,6 +34,13 @@ backlog is now cleared:
   chars in the plaintext file was deliberately avoided).
 - ✅ **Onboarding copy** mentions the free offline model.
 
+A review OF this branch (2026-07-13) found follow-up bugs, all fixed in-branch:
+llama-server reap could hit a live server (added single-instance guard, tightened
+PID identity to the model-file/sidecar name, remove pidfile on cancelled start);
+`Unreadable` no longer deletes the key (data-loss on transient master-key loss) —
+dedicated localized error instead; removed the duplicate Gemma notice; download
+cancel is now prompt even on a frozen connection; save-date uses the app locale.
+
 **Still open (deliberately deferred):**
 
 - **Windows llama-server runtime** *(untested)*: CI builds the `.exe`, but nobody has

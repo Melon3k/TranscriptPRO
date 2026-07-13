@@ -24,7 +24,7 @@ export default function ApiKeyField({
   label: string;
   placeholder: string;
 }) {
-  const { t } = useTranslation(["settings"]);
+  const { t, i18n } = useTranslation(["settings"]);
   const present = useSettingsStore((s) =>
     provider === "gemini" ? s.hasGeminiKey : s.hasClaudeKey
   );
@@ -88,7 +88,9 @@ export default function ApiKeyField({
             <KeyRound size={14} className="text-green-600 dark:text-green-400" />
             {savedAt
               ? t("settings:apiKey.savedOn", {
-                  date: new Date(savedAt * 1000).toLocaleDateString(),
+                  date: new Date(savedAt * 1000).toLocaleDateString(
+                    i18n.language
+                  ),
                 })
               : t("settings:apiKey.saved")}
           </span>

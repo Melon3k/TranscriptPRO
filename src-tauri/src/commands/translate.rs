@@ -77,13 +77,12 @@ pub async fn translate_subtitles(
                 ));
             }
             KeyLookup::Unreadable => {
-                // Clear the dead entry so the UI's presence flag flips to "not set".
-                let _ = crate::commands::keys::delete_api_key(app.clone(), provider.clone());
-                return Err(AppError::TranslationApiError(
-                    "Saved API key can't be read (the system key store changed). \
-                     Please enter it again in Settings."
-                        .into(),
-                ));
+                // Do NOT delete the entry: the master key may be only *temporarily*
+                // unavailable (keychain locked, roaming credential not yet synced),
+                // in which case the ciphertext is still recoverable. Surface a
+                // dedicated, localized error instead; the user can remove + re-enter
+                // the key in Settings (which overwrites the entry) if it's truly lost.
+                return Err(AppError::ApiKeyUnreadable(provider.clone()));
             }
             }
         }

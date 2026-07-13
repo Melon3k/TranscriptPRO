@@ -4,6 +4,7 @@
   "AUDIO_EXTRACTION_FAILED": "Failed to extract audio: {{detail}}",
   "TRANSCRIPTION_FAILED": "Transcription failed: {{detail}}",
   "TRANSLATION_API_ERROR": "Translation service error: {{detail}}",
+  "API_KEY_UNREADABLE": "Your saved {{detail}} API key can't be read — the system key store may have changed. Remove the key in Settings and enter it again.",
   "FILE_ERROR": "File error: {{detail}}",
   "INVALID_SRT_FORMAT": "Invalid SRT format: {{detail}}",
   "CANCELLED": "Operation cancelled",

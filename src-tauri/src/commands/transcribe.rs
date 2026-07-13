@@ -176,11 +176,24 @@ pub(crate) async fn download_to_temp(
         if cancel.map(|c| c.load(Ordering::Relaxed)).unwrap_or(false) {
             return Err(AppError::Cancelled);
         }
-        let next = tokio::time::timeout(READ_TIMEOUT, stream.next())
-            .await
-            .map_err(|_| {
+        // Race the read against the cancel flag so cancel is honored within ~250ms
+        // even on a frozen connection (otherwise it waits out READ_TIMEOUT).
+        let read = tokio::time::timeout(READ_TIMEOUT, stream.next());
+        let next = match cancel {
+            Some(c) => tokio::select! {
+                r = read => r.map_err(|_| {
+                    AppError::ModelDownloadFailed("Download stalled (read timeout)".to_string())
+                })?,
+                _ = async {
+                    while !c.load(Ordering::Relaxed) {
+                        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                    }
+                } => return Err(AppError::Cancelled),
+            },
+            None => read.await.map_err(|_| {
                 AppError::ModelDownloadFailed("Download stalled (read timeout)".to_string())
-            })?;
+            })?,
+        };
         let chunk = match next {
             Some(c) => c.map_err(|e: reqwest::Error| {
                 AppError::ModelDownloadFailed(e.to_string())

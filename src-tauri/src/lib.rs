@@ -103,6 +103,15 @@ pub fn run() {
     let whisper_cache: WhisperCache = Arc::new(Mutex::new(None));
 
     tauri::Builder::default()
+        // Must be the first plugin. A 2nd launch focuses the existing window rather
+        // than starting a rival instance (which would reap the 1st instance's live
+        // llama-server at startup).
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_focus();
+                let _ = window.unminimize();
+            }
+        }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())

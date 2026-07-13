@@ -4,6 +4,7 @@
   "AUDIO_EXTRACTION_FAILED": "Nie udało się wydobyć audio: {{detail}}",
   "TRANSCRIPTION_FAILED": "Transkrypcja nieudana: {{detail}}",
   "TRANSLATION_API_ERROR": "Błąd usługi tłumaczenia: {{detail}}",
+  "API_KEY_UNREADABLE": "Nie można odczytać zapisanego klucza API ({{detail}}) — systemowy magazyn kluczy mógł się zmienić. Usuń klucz w Ustawieniach i wpisz go ponownie.",
   "FILE_ERROR": "Błąd pliku: {{detail}}",
   "INVALID_SRT_FORMAT": "Niepoprawny format SRT: {{detail}}",
   "CANCELLED": "Operacja przerwana",
