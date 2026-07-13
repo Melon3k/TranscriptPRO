@@ -58,15 +58,33 @@ pub async fn translate_subtitles(
         });
     }
 
+    use crate::commands::keys::KeyLookup;
     let api_key = match provider.as_str() {
         "gemini" | "claude" => {
-            let key = crate::commands::keys::get_api_key(&app, &provider)?.unwrap_or_default();
-            if key.trim().is_empty() {
+            // Key lookup touches the filesystem and (once per run) the OS keychain,
+            // which can block — keep it off the async runtime thread.
+            let (app_c, provider_c) = (app.clone(), provider.clone());
+            let lookup = tauri::async_runtime::spawn_blocking(move || {
+                crate::commands::keys::get_api_key(&app_c, &provider_c)
+            })
+            .await
+            .map_err(|e| AppError::Other(format!("Key lookup task failed: {}", e)))??;
+            match lookup {
+            KeyLookup::Present(k) if !k.trim().is_empty() => k,
+            KeyLookup::Present(_) | KeyLookup::Missing => {
                 return Err(AppError::TranslationApiError(
                     "API key is required for translation".into(),
                 ));
             }
-            key
+            KeyLookup::Unreadable => {
+                // Do NOT delete the entry: the master key may be only *temporarily*
+                // unavailable (keychain locked, roaming credential not yet synced),
+                // in which case the ciphertext is still recoverable. Surface a
+                // dedicated, localized error instead; the user can remove + re-enter
+                // the key in Settings (which overwrites the entry) if it's truly lost.
+                return Err(AppError::ApiKeyUnreadable(provider.clone()));
+            }
+            }
         }
         _ => String::new(),
     };

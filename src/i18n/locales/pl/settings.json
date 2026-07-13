@@ -5,6 +5,7 @@
   "claudeApiKey": "Klucz API Claude",
   "apiKey": {
     "saved": "Klucz zapisany bezpiecznie",
+    "savedOn": "Klucz zapisany · {{date}}",
     "save": "Zapisz",
     "remove": "Usuń",
     "keychainHint": "Przechowywany w systemowym pęku kluczy, nie w plikach aplikacji"

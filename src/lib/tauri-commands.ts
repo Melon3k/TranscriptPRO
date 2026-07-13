@@ -168,6 +168,10 @@ export async function downloadLocalModel(
   return invoke("download_local_model", { onProgress: channel });
 }
 
+export async function cancelLocalModelDownload(): Promise<void> {
+  return invoke("cancel_local_model_download");
+}
+
 // ── Transcription ────────────────────────────────────────────────────────────
 
 export async function transcribeAudio(
@@ -246,6 +250,13 @@ export async function deleteApiKey(provider: ApiKeyProvider): Promise<void> {
 
 export async function hasApiKey(provider: ApiKeyProvider): Promise<boolean> {
   return invoke<boolean>("has_api_key", { provider });
+}
+
+/** Unix seconds when the key was saved (null if none; 0 if saved pre-timestamp). */
+export async function apiKeySavedAt(
+  provider: ApiKeyProvider
+): Promise<number | null> {
+  return invoke<number | null>("api_key_saved_at", { provider });
 }
 
 // ── Audio extraction cancellation ─────────────────────────────────────────────

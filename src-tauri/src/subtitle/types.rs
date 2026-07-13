@@ -82,6 +82,9 @@ pub enum AppError {
     #[error("Translation API error: {0}")]
     TranslationApiError(String),
 
+    #[error("Saved API key can't be read: {0}")]
+    ApiKeyUnreadable(String),
+
     #[error("File error: {0}")]
     FileError(String),
 
@@ -106,6 +109,7 @@ impl AppError {
             AppError::AudioExtractionFailed(_) => "AUDIO_EXTRACTION_FAILED",
             AppError::TranscriptionFailed(_) => "TRANSCRIPTION_FAILED",
             AppError::TranslationApiError(_) => "TRANSLATION_API_ERROR",
+            AppError::ApiKeyUnreadable(_) => "API_KEY_UNREADABLE",
             AppError::FileError(_) => "FILE_ERROR",
             AppError::InvalidSrtFormat(_) => "INVALID_SRT_FORMAT",
             AppError::ModelDownloadFailed(_) => "MODEL_DOWNLOAD_FAILED",
@@ -121,6 +125,7 @@ impl AppError {
             | AppError::AudioExtractionFailed(s)
             | AppError::TranscriptionFailed(s)
             | AppError::TranslationApiError(s)
+            | AppError::ApiKeyUnreadable(s)
             | AppError::FileError(s)
             | AppError::InvalidSrtFormat(s)
             | AppError::ModelDownloadFailed(s)

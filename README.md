@@ -28,6 +28,9 @@ Aplikacja zbudowana na Tauri 2.0 (Rust backend + React frontend) — natywne okn
 - **Lokalny — TranslateGemma 4B (offline)** — model pobierany na żądanie (~2,3 GB, weryfikacja
   SHA-256), inference przez wbudowany sidecar `llama-server` (Metal na Apple Silicon, CPU na
   Windows); tłumaczenie bez klucza API i bez internetu. Wymaga wskazania języka źródłowego.
+  Model TranslateGemma jest udostępniany przez Google na warunkach
+  [Gemma Terms of Use](https://ai.google.dev/gemma/terms) — pobierając go w aplikacji,
+  akceptujesz te warunki.
 
 ### Import / Export
 - **Import** SRT z dowolnego źródła

@@ -49,6 +49,14 @@ fn touch_last_used(llm: &LocalLlm) {
     }
 }
 
+/// Resolves as soon as the cancel flag is set. Used to race against an in-flight
+/// request so Cancel takes effect promptly instead of waiting out the 300 s timeout.
+async fn wait_for_cancel(cancel: &AtomicBool) {
+    while !cancel.load(Ordering::Relaxed) {
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+}
+
 pub fn model_path(app: &AppHandle) -> Result<std::path::PathBuf, AppError> {
     Ok(app
         .path()
@@ -56,6 +64,81 @@ pub fn model_path(app: &AppHandle) -> Result<std::path::PathBuf, AppError> {
         .map_err(|e: tauri::Error| AppError::Other(e.to_string()))?
         .join("models")
         .join(MODEL_FILE))
+}
+
+// ── Crash-orphan reaping ──────────────────────────────────────────────────────
+// Graceful quit kills the sidecar via kill_local_llm; a hard kill / crash of the
+// app orphans the ~2.5 GB server. We record the server's PID in a file on spawn
+// and reap it at next startup — but only after confirming the PID still belongs
+// to a llama-server (guard against PID reuse handing us an unrelated process).
+
+fn pidfile_path(app: &AppHandle) -> Option<std::path::PathBuf> {
+    app.path().app_data_dir().ok().map(|d| d.join("llama-server.pid"))
+}
+
+fn write_pidfile(app: &AppHandle, pid: u32) {
+    if let Some(p) = pidfile_path(app) {
+        if let Some(dir) = p.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(&p, pid.to_string());
+    }
+}
+
+pub fn remove_pidfile(app: &AppHandle) {
+    if let Some(p) = pidfile_path(app) {
+        let _ = std::fs::remove_file(p);
+    }
+}
+
+/// True if `pid` is a live process that is *our* llama-server, not some other
+/// program that merely happens to hold this PID after reuse. On unix we match the
+/// model-file name in the full command line (`ps -o command=` shows args), which is
+/// app-specific enough to not hit a developer's own llama.cpp. On Windows tasklist
+/// only exposes the image name, so we match the target-triple-suffixed sidecar exe
+/// name (still narrower than a bare "llama-server").
+fn pid_is_llama_server(pid: u32) -> bool {
+    #[cfg(unix)]
+    {
+        std::process::Command::new("ps")
+            .args(["-p", &pid.to_string(), "-o", "command="])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).contains(MODEL_FILE))
+            .unwrap_or(false)
+    }
+    #[cfg(windows)]
+    {
+        std::process::Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {}", pid), "/FO", "CSV", "/NH"])
+            .output()
+            .map(|o| {
+                String::from_utf8_lossy(&o.stdout)
+                    .to_lowercase()
+                    .contains("llama-server-")
+            })
+            .unwrap_or(false)
+    }
+}
+
+/// Reap a llama-server orphaned by a previous hard-killed/crashed session. Runs
+/// once at startup (before any translation), so it never races a live server.
+pub fn cleanup_stale_server(app: &AppHandle) {
+    let Some(p) = pidfile_path(app) else { return };
+    let Ok(contents) = std::fs::read_to_string(&p) else { return };
+    let _ = std::fs::remove_file(&p);
+    let Ok(pid) = contents.trim().parse::<u32>() else { return };
+    if !pid_is_llama_server(pid) {
+        return; // dead already, or the PID was recycled by something else
+    }
+    #[cfg(unix)]
+    let _ = std::process::Command::new("kill")
+        .args(["-9", &pid.to_string()])
+        .status();
+    #[cfg(windows)]
+    let _ = std::process::Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/F"])
+        .status();
+    logger::info(app, "translate", "Reaped an orphaned local translation server");
 }
 
 /// App language code → (English name, ISO code) as TranslateGemma's prompt format
@@ -134,6 +217,7 @@ fn spawn_idle_watchdog(app: &AppHandle, port: u16) {
                 if let Ok(mut g) = llm.token.lock() {
                     *g = None;
                 }
+                remove_pidfile(&app);
                 logger::info(&app, "translate", "Local translation server shut down (idle)");
                 return;
             }
@@ -219,6 +303,7 @@ async fn ensure_server(
             AppError::TranslationApiError(format!("Failed to start llama-server: {}", e))
         })?;
 
+    write_pidfile(app, child.pid());
     if let Ok(mut g) = llm.child.lock() {
         *g = Some(child);
     }
@@ -283,6 +368,9 @@ async fn ensure_server(
     if let Ok(mut g) = llm.token.lock() {
         *g = None;
     }
+    // The child was killed above, so its recorded PID is dead — drop the pidfile so
+    // a cancelled/failed start doesn't leave a stale PID for the next launch to chase.
+    remove_pidfile(app);
     if cancel.load(Ordering::Relaxed) {
         return Err(AppError::Cancelled);
     }
@@ -369,8 +457,17 @@ pub async fn translate(
             "stop": ["<end_of_turn>"],
         });
 
-        match translate_one(&client, &url, &token, &body).await {
-            Ok(text) => {
+        // Race the request against the cancel flag so a hung request (up to the
+        // 300 s timeout) doesn't leave Cancel unresponsive. `None` = cancelled.
+        // Not `biased`: if the request already resolved this tick, prefer keeping
+        // its result rather than discarding a cue that actually finished.
+        let outcome = tokio::select! {
+            r = translate_one(&client, &url, &token, &body) => Some(r),
+            _ = wait_for_cancel(cancel) => None,
+        };
+        match outcome {
+            None => break, // cancelled mid-request — keep the partial result
+            Some(Ok(text)) => {
                 out.push(text);
                 touch_last_used(llm);
                 let _ = on_progress.send(TranslationProgress {
@@ -378,7 +475,7 @@ pub async fn translate(
                     total: texts.len() as u32,
                 });
             }
-            Err(e) => {
+            Some(Err(e)) => {
                 logger::error(app, "translate", format!("Local translation stopped: {}", e));
                 run_error = Some(e.detail().to_string());
                 break;

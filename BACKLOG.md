@@ -11,33 +11,49 @@ Follow-up AI review pass (2026-07-13) fixed: partial-results-on-error for all
 translation providers; universal `lipo` sidecar (release-blocker); Gemini key
 moved to header (no leak into logs); llama-server bearer token + idle shutdown;
 llama-server dropped from the shell capability; download-progress IPC throttle;
-key-migration writes-before-deletes. **Still open from that review:**
+key-migration writes-before-deletes; **Windows CI green** (disabled the server Web
+UI build — `LLAMA_BUILD_UI=OFF`). Merged as PR #19 (merge commit `a341897`).
 
-- **Orphaned llama-server on hard kill / crash.** *(reliability — CONFIRMED live)*
-  Graceful quit (Cmd+Q, window close) kills the sidecar; a SIGKILL/SIGTERM/crash
-  of the app orphans the ~2.5 GB server (idle-watchdog only reaps while the app is
-  alive). Fix: reap stale sidecars at startup — a PID+port file in app-data written
-  on spawn and swept in `.setup()` (like `cleanup_stale_audio`), verifying the PID
-  is actually our llama-server before killing (guard against PID reuse).
-- **Gemma Terms prominence.** *(compliance — MEDIUM)* Move the notice into the
-  model-download confirmation ("by downloading you accept…") + README/About, rather
-  than the 10 px panel footnote. No lawyer reviewed the mirror-vs-gated-repo choice;
-  decision recorded as acceptable good-faith posture for now.
-- **Windows llama-server** *(reliability — untested)*: verify the `.exe` starts on a
-  clean machine (static CRT / VC++ redist) and CPU-only speed on a real box.
-- **Cancel latency** *(MEDIUM)*: a hung single request (≤300 s) still blocks cancel;
-  wrap the per-cue request in a `select!` on the cancel flag.
-- **Model download not cancelable** *(MEDIUM)*; **corrupt keys.enc.json bricks key
-  ops** (quarantine + continue) *(MEDIUM)*; **master-key-lost → misleading "API key
-  required"** (dedicated message + clear dead entry) *(MEDIUM)*.
+Second follow-up pass (2026-07-13, branch `claude/review-followups`) — the review
+backlog is now cleared:
+
+- ✅ **Orphaned llama-server on hard kill / crash** — reaped at startup via a
+  PID file (`llama-server.pid`) written on spawn and swept in `.setup()`, verifying
+  the PID is really a llama-server (ps/tasklist) before killing. **Verified live**:
+  hard-killed the app → orphan survived → relaunch reaped it.
+- ✅ **Gemma Terms prominence** — acceptance notice now shown in the download block
+  ("by downloading you accept…") + README.
+- ✅ **Cancel latency** — per-cue request raced against the cancel flag (`select!`).
+- ✅ **Model download cancelable** — cancel flag + command + X button.
+- ✅ **Corrupt keys.enc.json** — quarantined to `.corrupt-<ts>` and treated as empty
+  (+ `fsync` before rename in `write_store`).
+- ✅ **Master-key-lost** — `KeyLookup::Unreadable` → clear message + dead entry cleared.
+- ✅ **get_api_key** off the async thread (`spawn_blocking`).
+- ✅ **Stale `originalSubtitles`** cleared after re-transcription and version-restore.
+- ✅ **"Which key is saved"** — Settings shows the save date (date only; storing key
+  chars in the plaintext file was deliberately avoided).
+- ✅ **Onboarding copy** mentions the free offline model.
+
+A review OF this branch (2026-07-13) found follow-up bugs, all fixed in-branch:
+llama-server reap could hit a live server (added single-instance guard, tightened
+PID identity to the model-file/sidecar name, remove pidfile on cancelled start);
+`Unreadable` no longer deletes the key (data-loss on transient master-key loss) —
+dedicated localized error instead; removed the duplicate Gemma notice; download
+cancel is now prompt even on a frozen connection; save-date uses the app locale.
+
+**Still open (deliberately deferred):**
+
+- **Windows llama-server runtime** *(untested)*: CI builds the `.exe`, but nobody has
+  run it on a clean machine (static CRT / VC++ redist) or measured CPU-only speed.
+- **Gemma Terms — legal sign-off**: the mirror-vs-gated-repo choice and EULA
+  pass-through are an engineering good-faith posture; a lawyer hasn't reviewed them.
+- **AES-GCM AAD binding provider** *(LOW — won't do now)*: would bind each ciphertext
+  to its provider, but adding it invalidates every existing `keys.enc.json` entry
+  (forces key re-entry) to defend only against someone who can already write to your
+  app-data — poor trade for a local-only app. Revisit only on a future store-format bump.
 - **Sequential per-cue throughput** *(MEDIUM, documented)*: parallel slots (`-np`)
-  only if long-file CPU runs prove too slow — conflicts with the idle/low-RAM
-  profile, so keep 1 slot unless measured otherwise.
-- **CI cache for the sidecar** *(LOW — repo is public, so speed not cost)*:
-  `actions/cache` on `llama-server-*` keyed by llama.cpp tag+platform.
-- LOW: AES-GCM AAD binding provider; `get_api_key` blocking IO off the async thread;
-  stale `originalSubtitles` after re-transcription/version-restore; "which key is
-  saved" hint; onboarding copy mentioning the free local model.
+  only if long-file CPU runs prove too slow — conflicts with the idle/low-RAM profile.
+- **CI cache for the sidecar** *(LOW — repo is public, so speed not cost)*.
 
 ## Local / offline translation — SHIPPED (TranslateGemma 4B), follow-ups below
 

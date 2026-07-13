@@ -22,6 +22,10 @@ tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+# Single-instance guard: a 2nd launch focuses the running window instead of
+# starting a rival process (which would otherwise reap the 1st instance's live
+# llama-server via the startup sweep).
+tauri-plugin-single-instance = "2"
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

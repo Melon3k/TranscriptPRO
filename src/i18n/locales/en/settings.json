@@ -5,6 +5,7 @@
   "claudeApiKey": "Claude API Key",
   "apiKey": {
     "saved": "Key saved securely",
+    "savedOn": "Key saved · {{date}}",
     "save": "Save",
     "remove": "Remove",
     "keychainHint": "Stored in the system keychain, not in app files"
