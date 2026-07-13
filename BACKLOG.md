@@ -7,6 +7,38 @@ Done in the 2026-07-12 pass (branch `claude/project-backlog-review-b93e6c`):
 removed entirely (public server went fully paid), **local translation provider
 shipped** (TranslateGemma 4B via static llama-server sidecar — see below).
 
+Follow-up AI review pass (2026-07-13) fixed: partial-results-on-error for all
+translation providers; universal `lipo` sidecar (release-blocker); Gemini key
+moved to header (no leak into logs); llama-server bearer token + idle shutdown;
+llama-server dropped from the shell capability; download-progress IPC throttle;
+key-migration writes-before-deletes. **Still open from that review:**
+
+- **Orphaned llama-server on hard kill / crash.** *(reliability — CONFIRMED live)*
+  Graceful quit (Cmd+Q, window close) kills the sidecar; a SIGKILL/SIGTERM/crash
+  of the app orphans the ~2.5 GB server (idle-watchdog only reaps while the app is
+  alive). Fix: reap stale sidecars at startup — a PID+port file in app-data written
+  on spawn and swept in `.setup()` (like `cleanup_stale_audio`), verifying the PID
+  is actually our llama-server before killing (guard against PID reuse).
+- **Gemma Terms prominence.** *(compliance — MEDIUM)* Move the notice into the
+  model-download confirmation ("by downloading you accept…") + README/About, rather
+  than the 10 px panel footnote. No lawyer reviewed the mirror-vs-gated-repo choice;
+  decision recorded as acceptable good-faith posture for now.
+- **Windows llama-server** *(reliability — untested)*: verify the `.exe` starts on a
+  clean machine (static CRT / VC++ redist) and CPU-only speed on a real box.
+- **Cancel latency** *(MEDIUM)*: a hung single request (≤300 s) still blocks cancel;
+  wrap the per-cue request in a `select!` on the cancel flag.
+- **Model download not cancelable** *(MEDIUM)*; **corrupt keys.enc.json bricks key
+  ops** (quarantine + continue) *(MEDIUM)*; **master-key-lost → misleading "API key
+  required"** (dedicated message + clear dead entry) *(MEDIUM)*.
+- **Sequential per-cue throughput** *(MEDIUM, documented)*: parallel slots (`-np`)
+  only if long-file CPU runs prove too slow — conflicts with the idle/low-RAM
+  profile, so keep 1 slot unless measured otherwise.
+- **CI cache for the sidecar** *(LOW — repo is public, so speed not cost)*:
+  `actions/cache` on `llama-server-*` keyed by llama.cpp tag+platform.
+- LOW: AES-GCM AAD binding provider; `get_api_key` blocking IO off the async thread;
+  stale `originalSubtitles` after re-transcription/version-restore; "which key is
+  saved" hint; onboarding copy mentioning the free local model.
+
 ## Local / offline translation — SHIPPED (TranslateGemma 4B), follow-ups below
 
 Decision (2026-07-12, user call): **TranslateGemma 4B**, implemented on branch
