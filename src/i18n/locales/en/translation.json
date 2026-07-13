@@ -44,6 +44,7 @@
     "download": "Download model ({{size}} GB)",
     "downloading": "Downloading model… {{percent}}%",
     "needsSource": "The local model requires a source language (it has no auto-detect)",
+    "gemmaConsent": "The offline model is Google's TranslateGemma. By downloading it you accept the Gemma Terms of Use (ai.google.dev/gemma/terms).",
     "gemmaNotice": "Gemma is provided under and subject to the Gemma Terms of Use found at ai.google.dev/gemma/terms"
   }
 }

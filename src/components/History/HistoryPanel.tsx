@@ -226,7 +226,7 @@ export default function HistoryPanel() {
   const { t } = useTranslation(["history", "common"]);
   const locale = useSettingsStore((s) => s.language);
   const { versions, addVersion, restoreVersion } = useVersionStore();
-  const { subtitles, setSubtitles } = useSubtitleStore();
+  const { subtitles, setSubtitles, clearOriginalSubtitles } = useSubtitleStore();
   const [previewId, setPreviewId] = useState<string | null>(null);
 
   const handleManualSave = () => {
@@ -239,6 +239,9 @@ export default function HistoryPanel() {
   };
 
   const handleRestore = (id: string) => {
+    // Restoring a version replaces the document — clear the pre-translation
+    // snapshot so the comparison/restore-original affordance isn't stale.
+    clearOriginalSubtitles();
     restoreVersion(id, setSubtitles);
   };
 

@@ -1,8 +1,13 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Eye, EyeOff, KeyRound, Loader2, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useSettingsStore } from "../../stores/settingsStore";
-import { setApiKey, deleteApiKey, type ApiKeyProvider } from "../../lib/tauri-commands";
+import {
+  setApiKey,
+  deleteApiKey,
+  apiKeySavedAt,
+  type ApiKeyProvider,
+} from "../../lib/tauri-commands";
 import { formatError } from "../../lib/error-format";
 
 /**
@@ -29,6 +34,17 @@ export default function ApiKeyField({
   const [visible, setVisible] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+
+  // Load the save date when a key is present, so the user can confirm which key
+  // is stored (the value itself never leaves the backend).
+  useEffect(() => {
+    if (!present) {
+      setSavedAt(null);
+      return;
+    }
+    apiKeySavedAt(provider).then(setSavedAt).catch(() => setSavedAt(null));
+  }, [present, provider]);
 
   const save = async () => {
     if (!draft.trim() || busy) return;
@@ -70,7 +86,11 @@ export default function ApiKeyField({
         <div className="flex items-center justify-between rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 px-3 py-1.5">
           <span className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
             <KeyRound size={14} className="text-green-600 dark:text-green-400" />
-            {t("settings:apiKey.saved")}
+            {savedAt
+              ? t("settings:apiKey.savedOn", {
+                  date: new Date(savedAt * 1000).toLocaleDateString(),
+                })
+              : t("settings:apiKey.saved")}
           </span>
           <button
             type="button"

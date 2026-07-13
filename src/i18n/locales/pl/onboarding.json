@@ -10,7 +10,7 @@
   },
   "apiKeys": {
     "title": "Klucze API (opcjonalnie)",
-    "subtitle": "Dodaj klucze, aby włączyć tłumaczenie AI. Możesz pominąć ten krok i dodać je później w Ustawieniach.",
+    "subtitle": "Dodaj klucze do tłumaczenia w chmurze (Gemini/Claude) — albo pomiń i użyj darmowego modelu offline (TranslateGemma, jednorazowe pobranie) w panelu Tłumaczenie. Klucze możesz dodać później w Ustawieniach.",
     "skip": "Pomiń — dodam później"
   },
   "done": {

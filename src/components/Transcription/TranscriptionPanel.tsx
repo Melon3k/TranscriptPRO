@@ -43,7 +43,7 @@ export default function TranscriptionPanel({
 }: TranscriptionPanelProps) {
   const { t } = useTranslation(["transcription", "common"]);
   const { whisperModel, setWhisperModel, autoSaveOnTranscription, forceCpu } = useSettingsStore();
-  const { setSubtitles } = useSubtitleStore();
+  const { setSubtitles, clearOriginalSubtitles } = useSubtitleStore();
   const { addVersion } = useVersionStore();
 
   const [models, setModels] = useState<WhisperModelInfo[]>([]);
@@ -98,6 +98,9 @@ export default function TranscriptionPanel({
         forceCpu,
         (p) => setProgress(p)
       );
+      // Fresh transcription replaces the document — drop any stale pre-translation
+      // snapshot so "Restore original"/comparison don't point at the old file.
+      clearOriginalSubtitles();
       // Not auto-saved to history → the result exists only in memory, so mark dirty
       // to guard against losing it on close.
       setSubtitles(subs, { dirty: !autoSaveOnTranscription });

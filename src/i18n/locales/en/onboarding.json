@@ -10,7 +10,7 @@
   },
   "apiKeys": {
     "title": "API keys (optional)",
-    "subtitle": "Add keys to enable AI translation. You can skip this and add them later in Settings.",
+    "subtitle": "Add keys for cloud translation (Gemini/Claude) — or skip and use the free offline model (TranslateGemma, one-time download) from the Translation panel. You can add keys later in Settings.",
     "skip": "Skip — I'll add later"
   },
   "done": {

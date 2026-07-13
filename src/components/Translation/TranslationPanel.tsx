@@ -9,9 +9,10 @@ import {
   cancelTranslation,
   localModelStatus,
   downloadLocalModel,
+  cancelLocalModelDownload,
   type LocalModelInfo,
 } from "../../lib/tauri-commands";
-import { formatError } from "../../lib/error-format";
+import { formatError, isCancellation } from "../../lib/error-format";
 import type { TranslationProgress, TranslationProvider } from "../../types/subtitle";
 
 const PROVIDER_OPTIONS = ["gemini", "claude", "local"] as const;
@@ -88,9 +89,22 @@ export default function TranslationPanel() {
       await downloadLocalModel((p) => setModelProgress(p));
       setLocalModel(await localModelStatus());
     } catch (e) {
-      setError(formatError(t, e));
+      // A user cancel isn't an error — just refresh status (model stays not-downloaded).
+      if (isCancellation(e)) {
+        setLocalModel(await localModelStatus().catch(() => null));
+      } else {
+        setError(formatError(t, e));
+      }
     } finally {
       setDownloadingModel(false);
+    }
+  };
+
+  const handleCancelDownload = async () => {
+    try {
+      await cancelLocalModelDownload();
+    } catch (e) {
+      console.error("Cancel model download failed:", e);
     }
   };
 
@@ -232,11 +246,20 @@ export default function TranslationPanel() {
         <div className="space-y-1">
           {downloadingModel ? (
             <>
-              <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-                <Loader2 size={14} className="animate-spin" />
-                {t("translation:localModel.downloading", {
-                  percent: Math.round(modelProgress * 100),
-                })}
+              <div className="flex items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-400">
+                <span className="flex items-center gap-2">
+                  <Loader2 size={14} className="animate-spin" />
+                  {t("translation:localModel.downloading", {
+                    percent: Math.round(modelProgress * 100),
+                  })}
+                </span>
+                <button
+                  onClick={() => void handleCancelDownload()}
+                  className="flex items-center gap-1 text-gray-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
+                >
+                  <X size={13} />
+                  {t("translation:cancel")}
+                </button>
               </div>
               <div className="h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
                 <div
@@ -246,15 +269,20 @@ export default function TranslationPanel() {
               </div>
             </>
           ) : (
-            <button
-              onClick={() => void handleDownloadModel()}
-              className="flex items-center gap-2 w-full justify-center rounded-lg bg-blue-500 hover:bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors"
-            >
-              <Download size={16} />
-              {t("translation:localModel.download", {
-                size: (localModel.sizeMb / 1024).toFixed(1),
-              })}
-            </button>
+            <>
+              <p className="rounded bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700 px-3 py-2 text-xs text-gray-600 dark:text-gray-400 leading-relaxed">
+                {t("translation:localModel.gemmaConsent")}
+              </p>
+              <button
+                onClick={() => void handleDownloadModel()}
+                className="flex items-center gap-2 w-full justify-center rounded-lg bg-blue-500 hover:bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors"
+              >
+                <Download size={16} />
+                {t("translation:localModel.download", {
+                  size: (localModel.sizeMb / 1024).toFixed(1),
+                })}
+              </button>
+            </>
           )}
         </div>
       )}
