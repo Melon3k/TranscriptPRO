@@ -173,6 +173,7 @@ fn load_store_migrating(app: &AppHandle) -> Result<KeyStore, AppError> {
     }
 
     let mut store = KeyStore::new();
+    let mut migrated_entries: Vec<keyring::Entry> = Vec::new();
     for provider in ["gemini", "claude"] {
         let entry = keyring::Entry::new(KEYRING_SERVICE, provider)
             .map_err(|e| AppError::Other(format!("Credential store unavailable: {}", e)))?;
@@ -181,12 +182,7 @@ fn load_store_migrating(app: &AppHandle) -> Result<KeyStore, AppError> {
                 let master = master_key(true)?
                     .ok_or_else(|| AppError::Other("Master key unavailable".into()))?;
                 store.insert(provider.to_string(), encrypt(&master, key.as_bytes())?);
-                let _ = entry.delete_credential();
-                logger::info(
-                    app,
-                    "keys",
-                    format!("{} API key migrated to the encrypted key store", provider),
-                );
+                migrated_entries.push(entry);
             }
             Err(keyring::Error::NoEntry) => {}
             Err(e) => {
@@ -197,7 +193,16 @@ fn load_store_migrating(app: &AppHandle) -> Result<KeyStore, AppError> {
             }
         }
     }
+    // Persist FIRST, then delete the old keychain entries. Deleting before the
+    // write meant a crash in between lost the key entirely (it was gone from the
+    // keychain but never made it to the file).
     write_store(app, &store)?;
+    for entry in migrated_entries {
+        let _ = entry.delete_credential();
+    }
+    if !store.is_empty() {
+        logger::info(app, "keys", "Migrated API key(s) to the encrypted key store");
+    }
     Ok(store)
 }
 

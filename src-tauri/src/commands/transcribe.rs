@@ -162,6 +162,11 @@ pub(crate) async fn download_to_temp(
 
     let mut downloaded: u64 = 0;
     let mut last_logged_decile: u64 = 0;
+    // Throttle progress events: a multi-GB download emits tens of thousands of
+    // chunks, and one IPC message + React setState per chunk floods the webview.
+    // Send only on a >=1pp change or every >=100ms, and always the final 1.0.
+    let mut last_sent_progress: f32 = -1.0;
+    let mut last_sent_at = std::time::Instant::now();
     let mut hasher = expected_sha256.map(|_| sha2::Sha256::new());
     let mut stream = response.bytes_stream();
 
@@ -187,7 +192,13 @@ pub(crate) async fn download_to_temp(
         downloaded += chunk.len() as u64;
         if total_size > 0 {
             let progress = downloaded as f32 / total_size as f32;
-            let _ = on_progress.send(progress);
+            if progress - last_sent_progress >= 0.01
+                || last_sent_at.elapsed() >= std::time::Duration::from_millis(100)
+            {
+                let _ = on_progress.send(progress);
+                last_sent_progress = progress;
+                last_sent_at = std::time::Instant::now();
+            }
 
             let decile = (progress * 10.0) as u64;
             if decile > last_logged_decile {
@@ -200,6 +211,11 @@ pub(crate) async fn download_to_temp(
     file.flush()
         .await
         .map_err(|e: std::io::Error| AppError::FileError(e.to_string()))?;
+
+    // Guarantee the UI sees 100% even if the last chunk didn't cross the throttle.
+    if total_size > 0 {
+        let _ = on_progress.send(1.0);
+    }
 
     // Guard against a silently truncated download reported as success.
     if total_size > 0 && downloaded != total_size {

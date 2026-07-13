@@ -19,8 +19,12 @@
 
 set -euo pipefail
 
-# Pin the llama.cpp build tag — bump deliberately, then re-test local translation.
+# Pin the llama.cpp build to an exact commit — a git tag is a movable ref, so we
+# clone the tag for convenience but then assert HEAD matches this SHA, failing the
+# build if the upstream tag was ever re-pointed. Bump both together, deliberately,
+# and re-test local translation afterwards.
 LLAMA_TAG="b9974"
+LLAMA_COMMIT="3cec3bcd162a410171ded45c11d44725678f0880"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$ROOT/src-tauri/binaries"
@@ -31,6 +35,12 @@ mkdir -p "$OUT"
 
 clone() {
   git clone --depth 1 --branch "$LLAMA_TAG" https://github.com/ggml-org/llama.cpp "$TMP/llama.cpp"
+  local head
+  head="$(git -C "$TMP/llama.cpp" rev-parse HEAD)"
+  if [ "$head" != "$LLAMA_COMMIT" ]; then
+    echo "ERROR: llama.cpp tag $LLAMA_TAG resolved to $head, expected $LLAMA_COMMIT (tag moved?)" >&2
+    exit 1
+  fi
 }
 
 # Common cmake flags: static, server only, no curl (we download models ourselves),
@@ -62,6 +72,22 @@ build_macos() {
   chmod +x "$OUT/llama-server-$triple"
 }
 
+# Tauri's --target universal-apple-darwin expects a single fat binary at
+# binaries/llama-server-universal-apple-darwin (not the two per-arch files),
+# same as the ffmpeg sidecar. Combine the two arch builds with lipo.
+build_macos_universal() {
+  echo ">> llama-server-universal-apple-darwin (lipo)"
+  if ! command -v lipo >/dev/null; then
+    echo "lipo not found (only available on macOS) — skipping universal build" >&2
+    return
+  fi
+  lipo -create \
+    "$OUT/llama-server-aarch64-apple-darwin" \
+    "$OUT/llama-server-x86_64-apple-darwin" \
+    -output "$OUT/llama-server-universal-apple-darwin"
+  chmod +x "$OUT/llama-server-universal-apple-darwin"
+}
+
 build_windows() {
   echo ">> llama-server-x86_64-pc-windows-msvc.exe (static CPU)"
   cmake -S "$TMP/llama.cpp" -B "$TMP/build-win" \
@@ -87,7 +113,8 @@ fi
 clone
 case "$TARGET" in
   macos)     build_macos arm64 aarch64-apple-darwin
-             build_macos x86_64 x86_64-apple-darwin ;;
+             build_macos x86_64 x86_64-apple-darwin
+             build_macos_universal ;;
   macos-arm) build_macos arm64 aarch64-apple-darwin ;;
   macos-x64) build_macos x86_64 x86_64-apple-darwin ;;
   windows)   build_windows ;;
