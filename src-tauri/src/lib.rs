@@ -16,6 +16,9 @@ pub struct TranscriptionCancel(pub Arc<AtomicBool>);
 /// Shared cancellation flag for an in-progress translation.
 pub struct TranslationCancel(pub Arc<AtomicBool>);
 
+/// Shared cancellation flag for an in-progress local-model download.
+pub struct ModelDownloadCancel(pub Arc<AtomicBool>);
+
 /// Handle to the running ffmpeg child plus a cancellation flag, so audio extraction can be
 /// killed on demand and never lingers as a zombie after the app quits.
 pub struct AudioExtraction {
@@ -78,6 +81,7 @@ fn kill_local_llm(app: &tauri::AppHandle) {
             *guard = None;
         }
     }
+    translation::local::remove_pidfile(app);
 }
 
 /// Remove extraction WAVs left over from previous sessions (each can be hundreds of MB).
@@ -106,6 +110,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .manage(TranscriptionCancel(Arc::new(AtomicBool::new(false))))
         .manage(TranslationCancel(Arc::new(AtomicBool::new(false))))
+        .manage(ModelDownloadCancel(Arc::new(AtomicBool::new(false))))
         .manage(AudioExtraction {
             child: Mutex::new(None),
             cancelled: AtomicBool::new(false),
@@ -121,6 +126,8 @@ pub fn run() {
         .manage(whisper_cache)
         .setup(|app| {
             cleanup_stale_audio();
+            // Reap a llama-server orphaned by a previous hard kill / crash.
+            translation::local::cleanup_stale_server(&app.handle().clone());
 
             // Custom menu so Cmd+Q routes through on_menu_event and can be guarded — the
             // default macOS Quit item bypasses RunEvent::ExitRequested (confirmed at runtime).
@@ -199,6 +206,7 @@ pub fn run() {
             // Local translation model
             commands::local_model::local_model_status,
             commands::local_model::download_local_model,
+            commands::local_model::cancel_local_model_download,
             // Translation
             commands::translate::translate_subtitles,
             commands::translate::cancel_translation,
@@ -206,6 +214,7 @@ pub fn run() {
             commands::keys::set_api_key,
             commands::keys::delete_api_key,
             commands::keys::has_api_key,
+            commands::keys::api_key_saved_at,
             // App lifecycle
             set_dirty,
             exit_app,

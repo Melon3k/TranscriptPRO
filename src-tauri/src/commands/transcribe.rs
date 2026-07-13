@@ -1,7 +1,7 @@
 use crate::logger;
 use crate::subtitle::types::{AppError, TranscriptionProgress, WhisperModelInfo};
 use crate::{TranscriptionCancel, WhisperCache};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
 
@@ -93,7 +93,7 @@ pub async fn download_model(
 
     // Stream into the temp file; on any failure remove it so a partial download is
     // never mistaken for a complete model by list_models/transcribe_audio.
-    match download_to_temp(&app, &url, &temp_path, None, &on_progress).await {
+    match download_to_temp(&app, &url, &temp_path, None, None, &on_progress).await {
         Ok(()) => {
             // Replace any existing (possibly corrupt) file, then move the fresh one in.
             if output_path.exists() {
@@ -123,6 +123,7 @@ pub(crate) async fn download_to_temp(
     url: &str,
     temp_path: &std::path::Path,
     expected_sha256: Option<&str>,
+    cancel: Option<&AtomicBool>,
     on_progress: &Channel<f32>,
 ) -> Result<(), AppError> {
     use futures_util::StreamExt;
@@ -171,6 +172,10 @@ pub(crate) async fn download_to_temp(
     let mut stream = response.bytes_stream();
 
     loop {
+        // User asked to cancel — abort; the caller removes the .part file.
+        if cancel.map(|c| c.load(Ordering::Relaxed)).unwrap_or(false) {
+            return Err(AppError::Cancelled);
+        }
         let next = tokio::time::timeout(READ_TIMEOUT, stream.next())
             .await
             .map_err(|_| {

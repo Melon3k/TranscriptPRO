@@ -1,8 +1,10 @@
 use crate::logger;
 use crate::subtitle::types::AppError;
 use crate::translation::local::{model_path, MODEL_FILE, MODEL_SHA256, MODEL_SIZE_BYTES, MODEL_URL};
+use crate::ModelDownloadCancel;
+use std::sync::atomic::Ordering;
 use tauri::ipc::Channel;
-use tauri::AppHandle;
+use tauri::{AppHandle, State};
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -31,8 +33,12 @@ pub async fn local_model_status(app: AppHandle) -> Result<LocalModelInfo, AppErr
 #[tauri::command]
 pub async fn download_local_model(
     app: AppHandle,
+    cancel: State<'_, ModelDownloadCancel>,
     on_progress: Channel<f32>,
 ) -> Result<(), AppError> {
+    // Fresh run — clear any leftover cancel from a previous download.
+    cancel.0.store(false, Ordering::Relaxed);
+    let cancel_flag = cancel.0.clone();
     let output_path = model_path(&app)?;
     if let Some(dir) = output_path.parent() {
         std::fs::create_dir_all(dir)
@@ -51,6 +57,7 @@ pub async fn download_local_model(
         MODEL_URL,
         &temp_path,
         Some(MODEL_SHA256),
+        Some(&cancel_flag),
         &on_progress,
     )
     .await
@@ -69,8 +76,20 @@ pub async fn download_local_model(
         }
         Err(e) => {
             let _ = tokio::fs::remove_file(&temp_path).await;
-            logger::error(&app, "model", format!("Download failed: {}", e));
+            if matches!(e, AppError::Cancelled) {
+                logger::info(&app, "model", "Local model download cancelled");
+            } else {
+                logger::error(&app, "model", format!("Download failed: {}", e));
+            }
             Err(e)
         }
     }
+}
+
+/// Request cancellation of an in-progress local-model download. The download loop
+/// checks the flag between chunks, aborts, and removes the partial file.
+#[tauri::command]
+pub fn cancel_local_model_download(app: AppHandle, cancel: State<'_, ModelDownloadCancel>) {
+    cancel.0.store(true, Ordering::Relaxed);
+    logger::info(&app, "model", "Local model download cancellation requested");
 }

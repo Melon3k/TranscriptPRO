@@ -58,15 +58,34 @@ pub async fn translate_subtitles(
         });
     }
 
+    use crate::commands::keys::KeyLookup;
     let api_key = match provider.as_str() {
         "gemini" | "claude" => {
-            let key = crate::commands::keys::get_api_key(&app, &provider)?.unwrap_or_default();
-            if key.trim().is_empty() {
+            // Key lookup touches the filesystem and (once per run) the OS keychain,
+            // which can block — keep it off the async runtime thread.
+            let (app_c, provider_c) = (app.clone(), provider.clone());
+            let lookup = tauri::async_runtime::spawn_blocking(move || {
+                crate::commands::keys::get_api_key(&app_c, &provider_c)
+            })
+            .await
+            .map_err(|e| AppError::Other(format!("Key lookup task failed: {}", e)))??;
+            match lookup {
+            KeyLookup::Present(k) if !k.trim().is_empty() => k,
+            KeyLookup::Present(_) | KeyLookup::Missing => {
                 return Err(AppError::TranslationApiError(
                     "API key is required for translation".into(),
                 ));
             }
-            key
+            KeyLookup::Unreadable => {
+                // Clear the dead entry so the UI's presence flag flips to "not set".
+                let _ = crate::commands::keys::delete_api_key(app.clone(), provider.clone());
+                return Err(AppError::TranslationApiError(
+                    "Saved API key can't be read (the system key store changed). \
+                     Please enter it again in Settings."
+                        .into(),
+                ));
+            }
+            }
         }
         _ => String::new(),
     };

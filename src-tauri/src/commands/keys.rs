@@ -53,6 +53,11 @@ fn validate_provider(provider: &str) -> Result<(), AppError> {
 struct EncEntry {
     nonce: String, // hex, 12 bytes
     data: String,  // hex, AES-256-GCM ciphertext+tag
+    // Unix seconds when the key was saved. Non-secret; lets the UI show "saved on
+    // <date>" so the user can confirm which key is stored without exposing it.
+    // Defaults to 0 for entries written before this field existed.
+    #[serde(default)]
+    saved_at: u64,
 }
 
 type KeyStore = BTreeMap<String, EncEntry>;
@@ -66,26 +71,51 @@ fn store_path(app: &AppHandle) -> Result<std::path::PathBuf, AppError> {
 }
 
 fn write_store(app: &AppHandle, store: &KeyStore) -> Result<(), AppError> {
+    use std::io::Write;
     let path = store_path(app)?;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| AppError::FileError(e.to_string()))?;
     }
     let json = serde_json::to_string_pretty(store)
         .map_err(|e| AppError::Other(format!("Key store serialize error: {}", e)))?;
-    // Atomic: write sidecar, then rename over the target.
+    // Atomic + durable: write the sidecar, fsync it so the bytes hit disk before the
+    // rename, then rename over the target. Without the fsync a crash right after the
+    // rename could leave an empty/torn file that later parses as "no keys".
     let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, json).map_err(|e| AppError::FileError(e.to_string()))?;
+    {
+        let mut f = std::fs::File::create(&tmp).map_err(|e| AppError::FileError(e.to_string()))?;
+        f.write_all(json.as_bytes())
+            .map_err(|e| AppError::FileError(e.to_string()))?;
+        f.sync_all().map_err(|e| AppError::FileError(e.to_string()))?;
+    }
     std::fs::rename(&tmp, &path).map_err(|e| AppError::FileError(e.to_string()))
 }
 
 /// Load the store; `None` means the file doesn't exist yet (pre-envelope install
-/// or fresh install) — callers use that to trigger the one-time migration.
+/// or fresh install) — callers use that to trigger the one-time migration. A file
+/// that exists but doesn't parse (torn write, manual edit) is quarantined and
+/// treated as absent, so a corrupt store never bricks all key operations — the
+/// user can just re-enter their keys.
 fn read_store(app: &AppHandle) -> Result<Option<KeyStore>, AppError> {
     let path = store_path(app)?;
     match std::fs::read_to_string(&path) {
-        Ok(json) => serde_json::from_str(&json)
-            .map(Some)
-            .map_err(|e| AppError::Other(format!("Key store parse error: {}", e))),
+        Ok(json) => match serde_json::from_str(&json) {
+            Ok(store) => Ok(Some(store)),
+            Err(e) => {
+                let stamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                let quarantine = path.with_extension(format!("json.corrupt-{}", stamp));
+                let _ = std::fs::rename(&path, &quarantine);
+                logger::error(
+                    app,
+                    "keys",
+                    format!("Key store unreadable ({}) — quarantined to {:?}", e, quarantine),
+                );
+                Ok(None)
+            }
+        },
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(AppError::FileError(e.to_string())),
     }
@@ -146,7 +176,15 @@ fn encrypt(key: &[u8; 32], plaintext: &[u8]) -> Result<EncEntry, AppError> {
     Ok(EncEntry {
         nonce: hex::encode(nonce),
         data: hex::encode(data),
+        saved_at: 0,
     })
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 fn decrypt(key: &[u8; 32], entry: &EncEntry) -> Result<Vec<u8>, AppError> {
@@ -208,24 +246,39 @@ fn load_store_migrating(app: &AppHandle) -> Result<KeyStore, AppError> {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
+/// Result of looking up a stored API key.
+pub enum KeyLookup {
+    /// No key stored for this provider.
+    Missing,
+    /// Key present and decrypted.
+    Present(String),
+    /// An entry exists but can't be decrypted — the master key was wiped/rotated
+    /// (new machine, reset keychain). The ciphertext is unrecoverable; the user
+    /// must re-enter the key. Distinguished from Missing so the UI can say so.
+    Unreadable,
+}
+
 /// Read a provider's API key. Deliberately not a Tauri command — the key is
 /// consumed backend-side (translation) and never crosses IPC back to the webview.
-pub fn get_api_key(app: &AppHandle, provider: &str) -> Result<Option<String>, AppError> {
+pub fn get_api_key(app: &AppHandle, provider: &str) -> Result<KeyLookup, AppError> {
     validate_provider(provider)?;
     let _lock = store_lock()?;
     let store = load_store_migrating(app)?;
     let Some(entry) = store.get(provider) else {
-        return Ok(None);
+        return Ok(KeyLookup::Missing);
     };
     let Some(master) = master_key(false)? else {
-        // Entries exist but the master key is gone (keychain wiped) — the
-        // ciphertexts are unrecoverable; the user has to re-enter the key.
-        return Ok(None);
+        return Ok(KeyLookup::Unreadable);
     };
-    let plaintext = decrypt(&master, entry)?;
-    String::from_utf8(plaintext)
-        .map(Some)
-        .map_err(|e| AppError::Other(format!("Key store corrupt: {}", e)))
+    match decrypt(&master, entry).and_then(|p| {
+        String::from_utf8(p).map_err(|e| AppError::Other(format!("Key store corrupt: {}", e)))
+    }) {
+        Ok(key) => Ok(KeyLookup::Present(key)),
+        Err(e) => {
+            logger::error(app, "keys", format!("{} key present but undecryptable: {}", provider, e));
+            Ok(KeyLookup::Unreadable)
+        }
+    }
 }
 
 /// Store (or overwrite) a provider's API key. An empty key removes the entry.
@@ -242,7 +295,9 @@ pub fn set_api_key(app: AppHandle, provider: String, key: String) -> Result<(), 
     let mut store = load_store_migrating(&app)?;
     let master = master_key(true)?
         .ok_or_else(|| AppError::Other("Master key unavailable".into()))?;
-    store.insert(provider.clone(), encrypt(&master, key.as_bytes())?);
+    let mut entry = encrypt(&master, key.as_bytes())?;
+    entry.saved_at = now_secs();
+    store.insert(provider.clone(), entry);
     write_store(&app, &store)?;
     logger::info(
         &app,
@@ -281,6 +336,18 @@ pub fn has_api_key(app: AppHandle, provider: String) -> Result<bool, AppError> {
     validate_provider(&provider)?;
     let _lock = store_lock()?;
     Ok(load_store_migrating(&app)?.contains_key(&provider))
+}
+
+/// Unix-seconds timestamp of when the stored key was saved (None if no key, or 0
+/// for keys saved before the timestamp existed). Non-secret — the key never leaves
+/// the backend; this just lets the UI show "saved on <date>".
+#[tauri::command]
+pub fn api_key_saved_at(app: AppHandle, provider: String) -> Result<Option<u64>, AppError> {
+    validate_provider(&provider)?;
+    let _lock = store_lock()?;
+    Ok(load_store_migrating(&app)?
+        .get(&provider)
+        .map(|e| e.saved_at))
 }
 
 #[cfg(test)]
