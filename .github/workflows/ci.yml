@@ -66,6 +66,14 @@ jobs:
           if (-not $exe) { throw "ffmpeg.exe not found in archive" }
           Copy-Item -Path $exe.FullName -Destination "src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe"
 
+      - name: Build llama-server sidecar (macOS)
+        if: matrix.platform == 'macos-latest'
+        run: bash scripts/build-llama-server.sh macos
+
+      - name: Build llama-server sidecar (Windows)
+        if: matrix.platform == 'windows-latest'
+        run: bash scripts/build-llama-server.sh windows
+
       # tauri-action with no tagName performs build+bundle without publishing.
       # We re-use the exact same action + args + signing env as release.yml so
       # this CI is a high-fidelity dry run of the public release path. Signing

@@ -3,11 +3,11 @@
   "geminiApiKey": "Klucz API Gemini",
   "geminiModel": "Model Gemini",
   "claudeApiKey": "Klucz API Claude",
-  "libreTranslate": {
-    "section": "LibreTranslate (darmowy)",
-    "serverUrl": "URL serwera",
-    "apiKey": "Klucz API (opcjonalnie)",
-    "apiKeyPlaceholder": "Zostaw puste dla publicznego serwera"
+  "apiKey": {
+    "saved": "Klucz zapisany bezpiecznie",
+    "save": "Zapisz",
+    "remove": "Usuń",
+    "keychainHint": "Przechowywany w systemowym pęku kluczy, nie w plikach aplikacji"
   },
   "transcription": {
     "section": "Transkrypcja",

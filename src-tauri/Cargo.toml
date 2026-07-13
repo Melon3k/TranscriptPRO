@@ -30,8 +30,16 @@ tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 
 reqwest = { version = "0.12", features = ["json", "stream"] }
+# API keys: one random master key lives in the OS credential store (macOS Keychain /
+# Windows Credential Manager / Linux Secret Service); the keys themselves are stored
+# AES-GCM-encrypted in app-data. One keychain item → at most one macOS ACL prompt.
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+aes-gcm = "0.10"
+hex = "0.4"
 futures-util = "0.3"
 uuid = { version = "1", features = ["v4"] }
+# Integrity check for models downloaded from community mirrors.
+sha2 = "0.10"
 thiserror = "2"
 regex = "1"
 # Decode legacy-encoded subtitle files (e.g. Windows-1250 Polish SRTs) on import.

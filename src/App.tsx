@@ -4,6 +4,7 @@ import { useSettingsStore } from "./stores/settingsStore";
 import MainLayout from "./components/Layout/MainLayout";
 import UpdateToast from "./components/UpdateToast";
 import { startUpdateScheduler } from "./lib/update-scheduler";
+import { initApiKeys } from "./lib/api-keys";
 
 function App() {
   const { darkMode, language } = useSettingsStore();
@@ -24,6 +25,9 @@ function App() {
 
   useEffect(() => {
     startUpdateScheduler();
+    // Migrate legacy plaintext keys into the OS credential store and load
+    // key-presence flags for the UI.
+    void initApiKeys();
   }, []);
 
   return (

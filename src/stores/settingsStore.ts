@@ -7,11 +7,12 @@ export type UiLanguage = "pl" | "en";
 interface SettingsState {
   whisperModel: string;
   translationProvider: TranslationProvider;
-  geminiApiKey: string;
-  claudeApiKey: string;
+  // Presence of API keys in the OS credential store. Not persisted — loaded at
+  // startup and updated when a key is saved/removed; the keys themselves never
+  // reach the frontend.
+  hasGeminiKey: boolean;
+  hasClaudeKey: boolean;
   geminiModel: string;
-  libreTranslateUrl: string;
-  libreTranslateApiKey: string;
   darkMode: boolean;
   autoSaveOnTranscription: boolean;
   autoSaveOnTranslation: boolean;
@@ -22,11 +23,8 @@ interface SettingsState {
 
   setWhisperModel: (model: string) => void;
   setTranslationProvider: (provider: TranslationProvider) => void;
-  setGeminiApiKey: (key: string) => void;
-  setClaudeApiKey: (key: string) => void;
+  setKeyPresence: (provider: "gemini" | "claude", present: boolean) => void;
   setGeminiModel: (model: string) => void;
-  setLibreTranslateUrl: (url: string) => void;
-  setLibreTranslateApiKey: (key: string) => void;
   toggleDarkMode: () => void;
   setAutoSaveOnTranscription: (v: boolean) => void;
   setAutoSaveOnTranslation: (v: boolean) => void;
@@ -44,16 +42,23 @@ function detectInitialLanguage(): UiLanguage {
   return navigator.language?.toLowerCase().startsWith("pl") ? "pl" : "en";
 }
 
+/// Plaintext API keys found in localStorage during store migration, waiting to be
+/// pushed into the OS credential store by initApiKeys(). Migration must extract
+/// them synchronously: right after `migrate` returns, persist rewrites localStorage
+/// through `partialize`, which scrubs the legacy plaintext fields.
+export const pendingKeyMigrations: {
+  provider: "gemini" | "claude";
+  key: string;
+}[] = [];
+
 export const useSettingsStore = create<SettingsState>()(
   persist(
     (set) => ({
       whisperModel: "small",
       translationProvider: "gemini",
-      geminiApiKey: "",
-      claudeApiKey: "",
-      geminiModel: "gemini-2.0-flash-lite",
-      libreTranslateUrl: "https://libretranslate.com",
-      libreTranslateApiKey: "",
+      hasGeminiKey: false,
+      hasClaudeKey: false,
+      geminiModel: "gemini-3.1-flash-lite",
       darkMode: false,
       autoSaveOnTranscription: true,
       autoSaveOnTranslation: true,
@@ -65,11 +70,9 @@ export const useSettingsStore = create<SettingsState>()(
       setWhisperModel: (model) => set({ whisperModel: model }),
       setTranslationProvider: (provider) =>
         set({ translationProvider: provider }),
-      setGeminiApiKey: (key) => set({ geminiApiKey: key }),
-      setClaudeApiKey: (key) => set({ claudeApiKey: key }),
+      setKeyPresence: (provider, present) =>
+        set(provider === "gemini" ? { hasGeminiKey: present } : { hasClaudeKey: present }),
       setGeminiModel: (model) => set({ geminiModel: model }),
-      setLibreTranslateUrl: (url) => set({ libreTranslateUrl: url }),
-      setLibreTranslateApiKey: (key) => set({ libreTranslateApiKey: key }),
       toggleDarkMode: () => set((s) => ({ darkMode: !s.darkMode })),
       setAutoSaveOnTranscription: (v) => set({ autoSaveOnTranscription: v }),
       setAutoSaveOnTranslation: (v) => set({ autoSaveOnTranslation: v }),
@@ -80,6 +83,56 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: "transcriptpro-settings",
+      version: 4,
+      migrate: (persisted) => {
+        const state = persisted as Record<string, unknown>;
+        // v0 → v1: LibreTranslate was dropped as a provider (public server went paid).
+        if (state.translationProvider === "libretranslate") {
+          state.translationProvider = "gemini";
+        }
+        // v1 → v2: API keys moved from localStorage to the OS credential store.
+        // Tauri commands are async and can't be awaited here, so stash the keys
+        // for initApiKeys() to push right after startup.
+        for (const [provider, field] of [
+          ["gemini", "geminiApiKey"],
+          ["claude", "claudeApiKey"],
+        ] as const) {
+          const key = state[field];
+          if (typeof key === "string" && key.trim()) {
+            pendingKeyMigrations.push({ provider, key: key.trim() });
+          }
+        }
+        // v2 → v4: Google retired the 1.5/2.0 Gemini models (404 / free-tier
+        // limit 0) and closed the 2.5-flash tier to new API users ("no longer
+        // available to new users") — reset any stale choice to the current default.
+        const validGeminiModels = [
+          "gemini-3.1-flash-lite",
+          "gemini-3.5-flash",
+          "gemini-2.5-pro",
+        ];
+        if (
+          typeof state.geminiModel !== "string" ||
+          !validGeminiModels.includes(state.geminiModel)
+        ) {
+          state.geminiModel = "gemini-3.1-flash-lite";
+        }
+        return state;
+      },
+      partialize: (state) => {
+        // Key-presence flags mirror the OS credential store, so they must not be
+        // persisted. Destructuring the legacy fields out also scrubs plaintext
+        // API keys that pre-keychain installs merged in from localStorage.
+        const {
+          hasGeminiKey: _presenceGemini,
+          hasClaudeKey: _presenceClaude,
+          geminiApiKey: _legacyGemini,
+          claudeApiKey: _legacyClaude,
+          libreTranslateApiKey: _legacyLibreKey,
+          libreTranslateUrl: _legacyLibreUrl,
+          ...rest
+        } = state as SettingsState & Record<string, unknown>;
+        return rest;
+      },
     }
   )
 );

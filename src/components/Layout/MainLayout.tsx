@@ -28,7 +28,8 @@ type SidePanel = "transcription" | "translation" | "history";
 
 export default function MainLayout() {
   const { t } = useTranslation("common");
-  const { undo, redo, canUndo, canRedo, setSubtitles } = useSubtitleStore();
+  const { undo, redo, canUndo, canRedo, setSubtitles, clearOriginalSubtitles } =
+    useSubtitleStore();
   const { setFilePath } = usePlayerStore();
   const { setProjectKey, addVersion } = useVersionStore();
   const autoSaveOnImport = useSettingsStore((s) => s.autoSaveOnImport);
@@ -89,6 +90,7 @@ export default function MainLayout() {
         setFilePath,
         setProjectKey,
         setSubtitles,
+        clearTranslationState: clearOriginalSubtitles,
         addVersion,
         autoSaveOnImport,
         onStartAudioExtraction: handleStartExtraction,
@@ -105,6 +107,7 @@ export default function MainLayout() {
       setFilePath,
       setProjectKey,
       setSubtitles,
+      clearOriginalSubtitles,
       addVersion,
       autoSaveOnImport,
       record,

@@ -1,10 +1,23 @@
 use crate::logger;
 use crate::subtitle::types::{AppError, Subtitle, TranslationProgress};
 use crate::translation;
-use crate::TranslationCancel;
+use crate::{LocalLlm, TranslationCancel};
+use serde::Serialize;
 use std::sync::atomic::Ordering;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, State};
+
+/// Outcome of a translate call. `warning` is set when the run stopped early on an
+/// error (not a cancel) — `subtitles` then holds the partial translation and
+/// `translated_count` how many cues were done, so the UI can apply the partial
+/// and warn instead of discarding everything.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranslationResult {
+    pub subtitles: Vec<Subtitle>,
+    pub translated_count: u32,
+    pub warning: Option<String>,
+}
 
 /// Request cancellation of an in-progress translation. Providers check the flag between
 /// chunks and return whatever they've translated so far (partial results).
@@ -18,33 +31,45 @@ pub async fn cancel_translation(
     Ok(())
 }
 
-/// Translate subtitle texts using Gemini / Claude / LibreTranslate.
+/// Translate subtitle texts using Gemini / Claude (cloud) or the local
+/// TranslateGemma model.
 /// Preserves timestamps and clears word-level data (invalid after translation).
 /// Streams progress via Channel and supports cancellation with partial results.
+/// Cloud providers read their API key from the OS credential store — it never
+/// crosses IPC from the webview; the local provider needs no key.
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn translate_subtitles(
     app: AppHandle,
     cancel: State<'_, TranslationCancel>,
+    llm: State<'_, LocalLlm>,
     subtitles: Vec<Subtitle>,
     target_lang: String,
     provider: String,
-    api_key: String,
     source_lang: Option<String>,
     model: Option<String>,
-    server_url: Option<String>,
     on_progress: Channel<TranslationProgress>,
-) -> Result<Vec<Subtitle>, AppError> {
+) -> Result<TranslationResult, AppError> {
     if subtitles.is_empty() {
-        return Ok(Vec::new());
+        return Ok(TranslationResult {
+            subtitles: Vec::new(),
+            translated_count: 0,
+            warning: None,
+        });
     }
 
-    // LibreTranslate does not require an API key
-    if api_key.trim().is_empty() && provider != "libretranslate" {
-        return Err(AppError::TranslationApiError(
-            "API key is required for translation".into(),
-        ));
-    }
+    let api_key = match provider.as_str() {
+        "gemini" | "claude" => {
+            let key = crate::commands::keys::get_api_key(&app, &provider)?.unwrap_or_default();
+            if key.trim().is_empty() {
+                return Err(AppError::TranslationApiError(
+                    "API key is required for translation".into(),
+                ));
+            }
+            key
+        }
+        _ => String::new(),
+    };
 
     // Reset the cancellation flag at the start of each run.
     cancel.0.store(false, Ordering::Relaxed);
@@ -54,7 +79,6 @@ pub async fn translate_subtitles(
     let src = source_lang.as_deref();
 
     let gemini_model = model.as_deref().unwrap_or("");
-    let libre_url = server_url.as_deref().unwrap_or("https://libretranslate.com");
 
     logger::info(
         &app,
@@ -69,7 +93,7 @@ pub async fn translate_subtitles(
     );
     let started = std::time::Instant::now();
 
-    let translated_texts = match provider.as_str() {
+    let outcome = match provider.as_str() {
         "gemini" => {
             translation::gemini::translate(
                 &texts,
@@ -93,13 +117,13 @@ pub async fn translate_subtitles(
             )
             .await?
         }
-        "libretranslate" => {
-            translation::libretranslate::translate(
+        "local" => {
+            translation::local::translate(
+                &app,
+                llm.inner(),
                 &texts,
                 &target_lang,
                 src,
-                &api_key,
-                libre_url,
                 &cancel_flag,
                 &on_progress,
             )
@@ -107,14 +131,17 @@ pub async fn translate_subtitles(
         }
         other => {
             return Err(AppError::TranslationApiError(format!(
-                "Unknown translation provider: '{}'. Supported: gemini, claude, libretranslate",
+                "Unknown translation provider: '{}'. Supported: gemini, claude, local",
                 other
             )));
         }
     };
 
-    // Apply the (possibly partial, if cancelled) translations. Segments beyond what was
-    // translated keep their original text, so cancelling doesn't throw away progress.
+    // Apply the (possibly partial) translations. Segments beyond what was translated
+    // keep their original text, so neither a cancel nor a mid-run error throws away
+    // progress. A mid-run error surfaces as `warning` (not a hard Err) so the UI can
+    // keep the partial result.
+    let translated_texts = outcome.texts;
     let translated_count = translated_texts.len();
     let result: Vec<Subtitle> = subtitles
         .into_iter()
@@ -133,12 +160,17 @@ pub async fn translate_subtitles(
         &app,
         "translate",
         format!(
-            "Translation completed — {}/{} segments in {:.2}s",
+            "Translation {} — {}/{} segments in {:.2}s",
+            if outcome.error.is_some() { "stopped with error" } else { "completed" },
             translated_count,
             result.len(),
             started.elapsed().as_secs_f32()
         ),
     );
 
-    Ok(result)
+    Ok(TranslationResult {
+        subtitles: result,
+        translated_count: translated_count as u32,
+        warning: outcome.error,
+    })
 }
