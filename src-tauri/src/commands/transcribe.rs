@@ -284,6 +284,21 @@ pub async fn transcribe_audio(
 ) -> Result<Vec<crate::subtitle::types::Subtitle>, AppError> {
     validate_model_name(&model_name)?;
 
+    // Language auto-detection is unreliable (empty/failed transcriptions), so the UI
+    // forces an explicit choice and this command rejects anything else. `language`
+    // stays Option in the IPC signature only to fail gracefully instead of with a
+    // deserialization error.
+    let language = match language.as_deref().map(str::trim) {
+        Some(lang) if !lang.is_empty() && !lang.eq_ignore_ascii_case("auto") => {
+            lang.to_string()
+        }
+        _ => {
+            return Err(AppError::TranscriptionFailed(
+                "no transcription language selected".into(),
+            ))
+        }
+    };
+
     // Reset cancellation flag at the start of each run.
     cancel.0.store(false, Ordering::Relaxed);
     let cancel_flag = cancel.0.clone();
@@ -325,10 +340,7 @@ pub async fn transcribe_audio(
         "transcribe",
         format!(
             "Starting transcription: model={} lang={} diarize={} force_cpu={}",
-            model_name,
-            lang.as_deref().unwrap_or("auto"),
-            diarize,
-            cpu_only,
+            model_name, language, diarize, cpu_only,
         ),
     );
 
@@ -340,7 +352,7 @@ pub async fn transcribe_audio(
             &app_for_whisper,
             &model_path,
             &audio,
-            lang.as_deref(),
+            &lang,
             diarize,
             cpu_only,
             &on_progress,

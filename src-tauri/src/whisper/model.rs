@@ -202,7 +202,7 @@ pub fn transcribe(
     app: &AppHandle,
     model_path: &Path,
     audio_path: &Path,
-    language: Option<&str>,
+    language: &str,
     enable_diarization: bool,
     force_cpu: bool,
     on_progress: &Channel<TranscriptionProgress>,
@@ -289,7 +289,8 @@ pub fn transcribe(
         logger::info(app, "whisper", "Force CPU mode — skipping GPU backend");
     }
 
-    // Fallback chain:
+    // Fallback chain (the language is always explicit — auto-detection was removed
+    // after reliably producing empty or failed transcriptions):
     // - After a GPU encode failure (-6), the Metal context is tainted — a second GPU
     //   attempt will silently return 0 segments in unrealistically short time.
     //   We therefore jump straight to CPU after the first GPU failure.
@@ -297,27 +298,12 @@ pub fn transcribe(
     //   and treat it as a failure requiring the next fallback.
     // - force_cpu skips GPU entirely, which avoids Metal initialisation and the
     //   contamination cascade that follows a -6 error on Apple Silicon.
-    let attempts: Vec<(bool, Option<&str>, &str)> = if force_cpu {
-        if language.is_some() {
-            vec![
-                (false, language, "CPU + requested language"),
-                (false, None,     "CPU + auto-detect (fallback)"),
-            ]
-        } else {
-            vec![
-                (false, language, "CPU + auto"),
-            ]
-        }
-    } else if language.is_some() {
-        vec![
-            (true,  language, "GPU + requested language"),
-            (false, language, "CPU + requested language (fallback)"),
-            (false, None,     "CPU + auto-detect (last resort)"),
-        ]
+    let attempts: Vec<(bool, &str)> = if force_cpu {
+        vec![(false, "CPU + requested language")]
     } else {
         vec![
-            (true,  language, "GPU + auto"),
-            (false, language, "CPU + auto (fallback)"),
+            (true, "GPU + requested language"),
+            (false, "CPU + requested language (fallback)"),
         ]
     };
 
@@ -328,7 +314,7 @@ pub fn transcribe(
 
     let mut subtitles: Option<Vec<Subtitle>> = None;
     let mut last_err: Option<AppError> = None;
-    for (i, (use_gpu, lang, label)) in attempts.iter().enumerate() {
+    for (i, (use_gpu, label)) in attempts.iter().enumerate() {
         if i > 0 {
             logger::emit(
                 app,
@@ -351,7 +337,7 @@ pub fn transcribe(
             app,
             model_path,
             &audio_data,
-            *lang,
+            language,
             on_progress,
             cancel.clone(),
             *use_gpu,
@@ -503,7 +489,7 @@ fn run_inference_pass(
     app: &AppHandle,
     model_path: &Path,
     audio_data: &[f32],
-    language: Option<&str>,
+    language: &str,
     on_progress: &Channel<TranscriptionProgress>,
     cancel: Arc<AtomicBool>,
     use_gpu: bool,
@@ -546,15 +532,9 @@ fn run_inference_pass(
     // ── Configure transcription params ─────────────────────────────────
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
 
-    if let Some(lang) = language {
-        params.set_language(Some(lang));
-        params.set_detect_language(false);
-        logger::info(app, "whisper", format!("Language: {} (forced)", lang));
-    } else {
-        params.set_language(Some("auto"));
-        params.set_detect_language(true);
-        logger::info(app, "whisper", "Language: auto-detect");
-    }
+    params.set_language(Some(language));
+    params.set_detect_language(false);
+    logger::info(app, "whisper", format!("Language: {}", language));
 
     let threads = std::thread::available_parallelism()
         .map(|n| n.get().min(4) as i32)

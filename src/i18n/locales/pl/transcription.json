@@ -4,8 +4,8 @@
   "downloading": "Pobieranie… {{percent}}%",
   "downloadModel": "Pobierz model ({{sizeMb}} MB)",
   "languageLabel": "Język",
+  "languagePlaceholder": "Wybierz język…",
   "language": {
-    "auto": "Wykryj automatycznie",
     "en": "Angielski",
     "pl": "Polski",
     "de": "Niemiecki",
@@ -20,6 +20,7 @@
     "ru": "Rosyjski",
     "uk": "Ukraiński"
   },
+  "selectLanguageHint": "Wybierz język nagrania, aby rozpocząć transkrypcję.",
   "detectSpeakers": "Wykrywaj mówców",
   "segmentLimitLabel": "Długość segmentu",
   "segmentLimit": {

@@ -4,8 +4,8 @@
   "downloading": "Downloading… {{percent}}%",
   "downloadModel": "Download model ({{sizeMb}} MB)",
   "languageLabel": "Language",
+  "languagePlaceholder": "Select language…",
   "language": {
-    "auto": "Auto-detect",
     "en": "English",
     "pl": "Polish",
     "de": "German",
@@ -20,6 +20,7 @@
     "ru": "Russian",
     "uk": "Ukrainian"
   },
+  "selectLanguageHint": "Select the audio language to start transcription.",
   "detectSpeakers": "Detect speakers",
   "segmentLimitLabel": "Segment length",
   "segmentLimit": {

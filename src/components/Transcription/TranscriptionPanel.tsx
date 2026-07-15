@@ -16,8 +16,9 @@ import type { SegmentLimit } from "../../lib/subtitle-ops";
 import { formatError, isCancellation } from "../../lib/error-format";
 import type { WhisperModelInfo, TranscriptionProgress } from "../../types/subtitle";
 
+// Whisper's language auto-detection proved unreliable (empty/failed transcriptions),
+// so there is deliberately no "auto" option — the user must pick a language.
 const LANGUAGE_OPTIONS = [
-  "auto",
   "en",
   "pl",
   "de",
@@ -75,7 +76,7 @@ export default function TranscriptionPanel({
   const [transcribing, setTranscribing] = useState(false);
   const [progress, setProgress] = useState<TranscriptionProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [language, setLanguage] = useState("auto");
+  const [language, setLanguage] = useState("");
   const [detectSpeakers, setDetectSpeakers] = useState(false);
 
   useEffect(() => {
@@ -108,7 +109,7 @@ export default function TranscriptionPanel({
   };
 
   const handleTranscribe = async () => {
-    if (!audioPath) return;
+    if (!audioPath || !language) return;
     setTranscribing(true);
     setProgress(null);
     setError(null);
@@ -116,7 +117,7 @@ export default function TranscriptionPanel({
       let subs = await transcribeAudio(
         audioPath,
         whisperModel,
-        language === "auto" ? null : language,
+        language,
         detectSpeakers,
         forceCpu,
         (p) => setProgress(p)
@@ -134,7 +135,7 @@ export default function TranscriptionPanel({
       if (autoSaveOnTranscription) {
         addVersion(subs, "transcription", {
           whisperModel,
-          language: language === "auto" ? undefined : language,
+          language,
         });
       }
     } catch (e) {
@@ -220,6 +221,9 @@ export default function TranscriptionPanel({
           className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1.5 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
           disabled={transcribing}
         >
+          <option value="" disabled>
+            {t("transcription:languagePlaceholder")}
+          </option>
           {LANGUAGE_OPTIONS.map((code) => (
             <option key={code} value={code}>
               {t(`transcription:language.${code}`)}
@@ -305,14 +309,23 @@ export default function TranscriptionPanel({
           {t("transcription:cancel")}
         </button>
       ) : (
-        <button
-          onClick={handleTranscribe}
-          disabled={!audioPath || (selectedModel && !selectedModel.downloaded)}
-          className="flex items-center gap-2 w-full justify-center rounded-lg bg-blue-500 hover:bg-blue-600 disabled:bg-blue-300 dark:disabled:bg-blue-800 px-4 py-2 text-sm font-medium text-white transition-colors"
-        >
-          <Mic size={16} />
-          {t("transcription:transcribe")}
-        </button>
+        <>
+          <button
+            onClick={handleTranscribe}
+            disabled={
+              !audioPath || !language || (selectedModel && !selectedModel.downloaded)
+            }
+            className="flex items-center gap-2 w-full justify-center rounded-lg bg-blue-500 hover:bg-blue-600 disabled:bg-blue-300 dark:disabled:bg-blue-800 px-4 py-2 text-sm font-medium text-white transition-colors"
+          >
+            <Mic size={16} />
+            {t("transcription:transcribe")}
+          </button>
+          {audioPath && !language && (
+            <p className="text-[11px] leading-snug text-gray-400 dark:text-gray-500 text-center">
+              {t("transcription:selectLanguageHint")}
+            </p>
+          )}
+        </>
       )}
 
       {/* Progress */}

@@ -177,7 +177,7 @@ export async function cancelLocalModelDownload(): Promise<void> {
 export async function transcribeAudio(
   audioPath: string,
   modelName: string,
-  language: string | null,
+  language: string,
   detectSpeakers: boolean,
   forceCpu: boolean,
   onProgress: (progress: TranscriptionProgress) => void
