@@ -1,6 +1,14 @@
 import { create } from "zustand";
 import { Subtitle } from "../types/subtitle";
-import { splitSegment, mergeSegments, reindex, wordsToText, generateId } from "../lib/subtitle-ops";
+import {
+  splitSegment,
+  mergeSegments,
+  reindex,
+  wordsToText,
+  generateId,
+  resegmentByLength,
+  SegmentLimit,
+} from "../lib/subtitle-ops";
 
 interface SubtitleState {
   subtitles: Subtitle[];
@@ -23,6 +31,8 @@ interface SubtitleState {
   mergeUp: (id: string) => void;
   mergeDown: (id: string) => void;
   deleteSegment: (id: string) => void;
+  /** Split all segments longer than the limit at word boundaries (no-op if none exceed it). */
+  resegment: (limit: SegmentLimit) => void;
   moveWords: (sourceSubId: string, wordIndices: number[], targetSubId: string, insertAt?: number) => void;
   undo: () => void;
   redo: () => void;
@@ -112,6 +122,19 @@ export const useSubtitleStore = create<SubtitleState>((set, get) => ({
       dirty: true,
       subtitles: reindex(state.subtitles.filter((s) => s.id !== id)),
     }));
+  },
+
+  resegment: (limit) => {
+    set((state) => {
+      const next = resegmentByLength(state.subtitles, limit);
+      if (next === state.subtitles) return state; // no-op — keep history clean
+      return {
+        past: pushHistory(state.past, state.subtitles),
+        future: [],
+        dirty: true,
+        subtitles: next,
+      };
+    });
   },
 
   moveWords: (sourceSubId, wordIndices, targetSubId, insertAt) => {

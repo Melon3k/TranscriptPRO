@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
-import { Mic, Download, Loader2, CheckCircle2, X } from "lucide-react";
+import { Mic, Download, Loader2, CheckCircle2, X, Scissors } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useSettingsStore } from "../../stores/settingsStore";
+import type { SegmentLimitModeSetting } from "../../stores/settingsStore";
 import { useSubtitleStore } from "../../stores/subtitleStore";
 import { useVersionStore } from "../../stores/versionStore";
 import {
@@ -10,24 +11,28 @@ import {
   transcribeAudio,
   cancelTranscription,
 } from "../../lib/tauri-commands";
+import { resegmentByLength } from "../../lib/subtitle-ops";
+import type { SegmentLimit } from "../../lib/subtitle-ops";
 import { formatError, isCancellation } from "../../lib/error-format";
 import type { WhisperModelInfo, TranscriptionProgress } from "../../types/subtitle";
 
-const LANGUAGE_OPTIONS = [
-  "auto",
-  "en",
-  "pl",
-  "de",
-  "fr",
-  "es",
-  "it",
-  "pt",
-  "nl",
-  "ja",
-  "ko",
-  "zh",
-  "ru",
-  "uk",
+// Whisper's language auto-detection proved unreliable (empty/failed transcriptions),
+// so there is deliberately no "auto" option — the user must pick a language.
+// Single source of truth for the selectable transcription languages in the frontend.
+// keep in sync with backend language whitelist (transcribe.rs)
+// Full official Whisper language set (99 codes). Ordered UX-first: the most common
+// languages, then the remainder alphabetically by code.
+export const LANGUAGE_OPTIONS = [
+  // Most common first
+  "en", "pl", "de", "es", "fr", "it", "pt", "nl", "ru", "uk", "ja", "ko", "zh",
+  // Remainder, alphabetical by code
+  "af", "am", "ar", "as", "az", "ba", "be", "bg", "bn", "bo", "br", "bs", "ca",
+  "cs", "cy", "da", "el", "et", "eu", "fa", "fi", "fo", "gl", "gu", "ha", "haw",
+  "he", "hi", "hr", "ht", "hu", "hy", "id", "is", "ka", "kk", "km", "kn", "la",
+  "lb", "ln", "lo", "lt", "lv", "mg", "mi", "mk", "ml", "mn", "mr", "ms", "mt",
+  "my", "ne", "nn", "no", "oc", "pa", "ps", "ro", "sa", "sd", "si", "sk", "sl",
+  "sn", "so", "sq", "sr", "su", "sv", "sw", "ta", "te", "tg", "th", "tk", "tl",
+  "tr", "tt", "ur", "uz", "vi", "yi", "yo", "yue",
 ] as const;
 
 interface TranscriptionPanelProps {
@@ -42,9 +47,31 @@ export default function TranscriptionPanel({
   onCancelExtraction,
 }: TranscriptionPanelProps) {
   const { t } = useTranslation(["transcription", "common"]);
-  const { whisperModel, setWhisperModel, autoSaveOnTranscription, forceCpu } = useSettingsStore();
-  const { setSubtitles, clearOriginalSubtitles } = useSubtitleStore();
+  const {
+    whisperModel,
+    setWhisperModel,
+    autoSaveOnTranscription,
+    forceCpu,
+    segmentLimitMode,
+    segmentMaxWords,
+    segmentMaxChars,
+    setSegmentLimitMode,
+    setSegmentMaxWords,
+    setSegmentMaxChars,
+    transcriptionLanguage: language,
+    setTranscriptionLanguage: setLanguage,
+  } = useSettingsStore();
+  const { setSubtitles, clearOriginalSubtitles, resegment } = useSubtitleStore();
+  const hasSubtitles = useSubtitleStore((s) => s.subtitles.length > 0);
   const { addVersion } = useVersionStore();
+
+  const segmentLimit: SegmentLimit | null =
+    segmentLimitMode === "off"
+      ? null
+      : {
+          mode: segmentLimitMode,
+          value: segmentLimitMode === "words" ? segmentMaxWords : segmentMaxChars,
+        };
 
   const [models, setModels] = useState<WhisperModelInfo[]>([]);
   const [downloading, setDownloading] = useState(false);
@@ -52,7 +79,6 @@ export default function TranscriptionPanel({
   const [transcribing, setTranscribing] = useState(false);
   const [progress, setProgress] = useState<TranscriptionProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [language, setLanguage] = useState("auto");
   const [detectSpeakers, setDetectSpeakers] = useState(false);
 
   useEffect(() => {
@@ -85,15 +111,15 @@ export default function TranscriptionPanel({
   };
 
   const handleTranscribe = async () => {
-    if (!audioPath) return;
+    if (!audioPath || !language) return;
     setTranscribing(true);
     setProgress(null);
     setError(null);
     try {
-      const subs = await transcribeAudio(
+      let subs = await transcribeAudio(
         audioPath,
         whisperModel,
-        language === "auto" ? null : language,
+        language,
         detectSpeakers,
         forceCpu,
         (p) => setProgress(p)
@@ -101,13 +127,17 @@ export default function TranscriptionPanel({
       // Fresh transcription replaces the document — drop any stale pre-translation
       // snapshot so "Restore original"/comparison don't point at the old file.
       clearOriginalSubtitles();
+      // Optional length-based re-split (word timestamps drive the timing)
+      if (segmentLimit) {
+        subs = resegmentByLength(subs, segmentLimit);
+      }
       // Not auto-saved to history → the result exists only in memory, so mark dirty
       // to guard against losing it on close.
       setSubtitles(subs, { dirty: !autoSaveOnTranscription });
       if (autoSaveOnTranscription) {
         addVersion(subs, "transcription", {
           whisperModel,
-          language: language === "auto" ? undefined : language,
+          language,
         });
       }
     } catch (e) {
@@ -193,12 +223,73 @@ export default function TranscriptionPanel({
           className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1.5 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
           disabled={transcribing}
         >
+          <option value="" disabled>
+            {t("transcription:languagePlaceholder")}
+          </option>
           {LANGUAGE_OPTIONS.map((code) => (
             <option key={code} value={code}>
               {t(`transcription:language.${code}`)}
             </option>
           ))}
         </select>
+      </div>
+
+      {/* Segment length limit */}
+      <div className="space-y-2">
+        <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">
+          {t("transcription:segmentLimitLabel")}
+        </label>
+        <div className="flex gap-2">
+          <select
+            value={segmentLimitMode}
+            onChange={(e) =>
+              setSegmentLimitMode(e.target.value as SegmentLimitModeSetting)
+            }
+            disabled={transcribing}
+            className="flex-1 min-w-0 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1.5 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
+          >
+            <option value="off">{t("transcription:segmentLimit.off")}</option>
+            <option value="words">{t("transcription:segmentLimit.words")}</option>
+            <option value="chars">{t("transcription:segmentLimit.chars")}</option>
+          </select>
+          {segmentLimit && (
+            <input
+              type="number"
+              min={1}
+              max={segmentLimitMode === "words" ? 30 : 200}
+              value={segmentLimit.value}
+              onChange={(e) => {
+                const v = parseInt(e.target.value, 10);
+                if (Number.isNaN(v)) return;
+                if (segmentLimitMode === "words") setSegmentMaxWords(v);
+                else setSegmentMaxChars(v);
+              }}
+              disabled={transcribing}
+              className="w-16 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1.5 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
+            />
+          )}
+        </div>
+        {segmentLimit && (
+          <>
+            <p className="text-[11px] leading-snug text-gray-400 dark:text-gray-500">
+              {t("transcription:segmentLimitHint")}
+            </p>
+            {hasSubtitles && !transcribing && (
+              <>
+                <button
+                  onClick={() => resegment(segmentLimit)}
+                  className="flex items-center gap-1.5 w-full justify-center rounded bg-gray-100 dark:bg-gray-700 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                >
+                  <Scissors size={14} />
+                  {t("transcription:applySegmentLimit")}
+                </button>
+                <p className="text-[11px] leading-snug text-gray-400 dark:text-gray-500">
+                  {t("transcription:resplitDirectionHint")}
+                </p>
+              </>
+            )}
+          </>
+        )}
       </div>
 
       {/* Speaker detection toggle */}
@@ -225,14 +316,23 @@ export default function TranscriptionPanel({
           {t("transcription:cancel")}
         </button>
       ) : (
-        <button
-          onClick={handleTranscribe}
-          disabled={!audioPath || (selectedModel && !selectedModel.downloaded)}
-          className="flex items-center gap-2 w-full justify-center rounded-lg bg-blue-500 hover:bg-blue-600 disabled:bg-blue-300 dark:disabled:bg-blue-800 px-4 py-2 text-sm font-medium text-white transition-colors"
-        >
-          <Mic size={16} />
-          {t("transcription:transcribe")}
-        </button>
+        <>
+          <button
+            onClick={handleTranscribe}
+            disabled={
+              !audioPath || !language || (selectedModel && !selectedModel.downloaded)
+            }
+            className="flex items-center gap-2 w-full justify-center rounded-lg bg-blue-500 hover:bg-blue-600 disabled:bg-blue-300 dark:disabled:bg-blue-800 px-4 py-2 text-sm font-medium text-white transition-colors"
+          >
+            <Mic size={16} />
+            {t("transcription:transcribe")}
+          </button>
+          {audioPath && !language && (
+            <p className="text-[11px] leading-snug text-gray-400 dark:text-gray-500 text-center">
+              {t("transcription:selectLanguageHint")}
+            </p>
+          )}
+        </>
       )}
 
       {/* Progress */}

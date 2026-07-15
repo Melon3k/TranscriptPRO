@@ -63,6 +63,136 @@ pub struct CachedContext {
     ctx: Arc<WhisperContext>,
 }
 
+/// DTW alignment-head preset for a ggml model file (`ggml-<name>.bin`). DTW token
+/// alignment yields word timestamps that track the actual speech far better than the
+/// energy heuristic (t0/t1) alone. Unknown names get `None` → plain context.
+fn dtw_preset_for_path(model_path: &Path) -> Option<whisper_rs::DtwModelPreset> {
+    use whisper_rs::DtwModelPreset as P;
+    let name = model_path
+        .file_stem()?
+        .to_str()?
+        .strip_prefix("ggml-")?;
+    match name {
+        "tiny" => Some(P::Tiny),
+        "tiny.en" => Some(P::TinyEn),
+        "base" => Some(P::Base),
+        "base.en" => Some(P::BaseEn),
+        "small" => Some(P::Small),
+        "small.en" => Some(P::SmallEn),
+        "medium" => Some(P::Medium),
+        "medium.en" => Some(P::MediumEn),
+        "large-v1" => Some(P::LargeV1),
+        "large-v2" => Some(P::LargeV2),
+        "large-v3" => Some(P::LargeV3),
+        "large-v3-turbo" => Some(P::LargeV3Turbo),
+        _ => None,
+    }
+}
+
+/// Create a Whisper context, preferring DTW token alignment (per-model attention-head
+/// preset). Falls back to a plain context when the preset is unknown or DTW init fails,
+/// so this can never make model loading worse than before.
+fn load_context(
+    app: &AppHandle,
+    model_path: &Path,
+    use_gpu: bool,
+) -> Result<WhisperContext, AppError> {
+    use whisper_rs::{DtwMode, DtwParameters};
+
+    let path_str = model_path.to_str().unwrap_or_default();
+
+    if let Some(preset) = dtw_preset_for_path(model_path) {
+        let mut ctx_params = WhisperContextParameters::default();
+        ctx_params.use_gpu(use_gpu);
+        // DTW is enabled unconditionally whenever a preset is known. It raises memory use
+        // and decode time (most noticeable on large-v3) because whisper.cpp keeps the
+        // cross-attention weights for alignment, but word-level timestamps are required by
+        // the re-split feature, so the cost is intentional. When the preset is unknown or
+        // DTW init fails we fall back to the energy heuristic (t0/t1) below, so quality
+        // degrades gracefully rather than failing.
+        ctx_params.dtw_parameters(DtwParameters {
+            mode: DtwMode::ModelPreset {
+                model_preset: preset,
+            },
+            ..Default::default()
+        });
+        match WhisperContext::new_with_params(path_str, ctx_params) {
+            Ok(ctx) => {
+                logger::info(app, "whisper", "DTW token alignment enabled");
+                return Ok(ctx);
+            }
+            Err(e) => {
+                logger::emit(
+                    app,
+                    "warn",
+                    "whisper",
+                    format!("DTW init failed ({}), using heuristic word timestamps", e),
+                );
+            }
+        }
+    }
+
+    let mut ctx_params = WhisperContextParameters::default();
+    ctx_params.use_gpu(use_gpu);
+    WhisperContext::new_with_params(path_str, ctx_params).map_err(|e| {
+        logger::error(app, "whisper", format!("Model load failed: {}", e));
+        AppError::TranscriptionFailed(format!("Failed to load model: {}", e))
+    })
+}
+
+/// Number of `transcribe()` calls currently running. `shutdown_cache` drains this
+/// before dropping the cache: a job that is still *loading* a model has live Metal
+/// buffers that are not yet visible in the cache, so watching the cache alone
+/// would miss them.
+static ACTIVE_JOBS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+struct JobGuard;
+
+impl JobGuard {
+    fn new() -> Self {
+        ACTIVE_JOBS.fetch_add(1, Ordering::SeqCst);
+        JobGuard
+    }
+}
+
+impl Drop for JobGuard {
+    fn drop(&mut self) {
+        ACTIVE_JOBS.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// Drop the cached context before the process exits, waiting (bounded) for any
+/// in-flight transcription to finish first — the caller must already have set the
+/// cancellation flag so an in-flight job aborts instead of running to completion.
+///
+/// ggml's Metal device is a C++ static singleton whose destructor
+/// (`ggml_metal_device_free` → `ggml_metal_rsets_free`) runs during libc `exit()`
+/// and aborts unless every Metal residency set has been released. A cached GPU
+/// context still owns its model buffers — and their residency sets — at that
+/// point, so quitting after a Metal transcription SIGABRTed. Freeing the context
+/// here releases the buffers while the app is still running.
+///
+/// Returns false when a job was still running at the deadline — the exit-time
+/// abort may then still fire (same behavior as before this fix).
+pub fn shutdown_cache(cache: &crate::WhisperCache, timeout: std::time::Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    while ACTIVE_JOBS.load(Ordering::SeqCst) > 0 && Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let drained = ACTIVE_JOBS.load(Ordering::SeqCst) == 0;
+    if !drained {
+        eprintln!(
+            "shutdown_cache: transcription still running at deadline; Metal context not released, exit-time abort possible"
+        );
+    }
+    let cached = {
+        let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+        guard.take()
+    };
+    drop(cached);
+    drained
+}
+
 /// Drop the cached context for a given (model, backend) — used after a failure so a
 /// potentially tainted GPU/Metal context is never reused on a later job.
 fn evict_context(cache: &crate::WhisperCache, model_path: &Path, use_gpu: bool) {
@@ -83,7 +213,7 @@ pub fn transcribe(
     app: &AppHandle,
     model_path: &Path,
     audio_path: &Path,
-    language: Option<&str>,
+    language: &str,
     enable_diarization: bool,
     force_cpu: bool,
     on_progress: &Channel<TranscriptionProgress>,
@@ -91,6 +221,7 @@ pub fn transcribe(
     cache: &crate::WhisperCache,
 ) -> Result<Vec<Subtitle>, AppError> {
     let started = Instant::now();
+    let _job = JobGuard::new();
 
     // ── Load model ──────────────────────────────────────────────────────
     let model_size_mb = std::fs::metadata(model_path).map(|m| m.len() / 1_048_576).unwrap_or(0);
@@ -169,7 +300,8 @@ pub fn transcribe(
         logger::info(app, "whisper", "Force CPU mode — skipping GPU backend");
     }
 
-    // Fallback chain:
+    // Fallback chain (the language is always explicit — auto-detection was removed
+    // after reliably producing empty or failed transcriptions):
     // - After a GPU encode failure (-6), the Metal context is tainted — a second GPU
     //   attempt will silently return 0 segments in unrealistically short time.
     //   We therefore jump straight to CPU after the first GPU failure.
@@ -177,27 +309,12 @@ pub fn transcribe(
     //   and treat it as a failure requiring the next fallback.
     // - force_cpu skips GPU entirely, which avoids Metal initialisation and the
     //   contamination cascade that follows a -6 error on Apple Silicon.
-    let attempts: Vec<(bool, Option<&str>, &str)> = if force_cpu {
-        if language.is_some() {
-            vec![
-                (false, language, "CPU + requested language"),
-                (false, None,     "CPU + auto-detect (fallback)"),
-            ]
-        } else {
-            vec![
-                (false, language, "CPU + auto"),
-            ]
-        }
-    } else if language.is_some() {
-        vec![
-            (true,  language, "GPU + requested language"),
-            (false, language, "CPU + requested language (fallback)"),
-            (false, None,     "CPU + auto-detect (last resort)"),
-        ]
+    let attempts: Vec<(bool, &str)> = if force_cpu {
+        vec![(false, "CPU + requested language")]
     } else {
         vec![
-            (true,  language, "GPU + auto"),
-            (false, language, "CPU + auto (fallback)"),
+            (true, "GPU + requested language"),
+            (false, "CPU + requested language (fallback)"),
         ]
     };
 
@@ -208,7 +325,7 @@ pub fn transcribe(
 
     let mut subtitles: Option<Vec<Subtitle>> = None;
     let mut last_err: Option<AppError> = None;
-    for (i, (use_gpu, lang, label)) in attempts.iter().enumerate() {
+    for (i, (use_gpu, label)) in attempts.iter().enumerate() {
         if i > 0 {
             logger::emit(
                 app,
@@ -231,7 +348,7 @@ pub fn transcribe(
             app,
             model_path,
             &audio_data,
-            *lang,
+            language,
             on_progress,
             cancel.clone(),
             *use_gpu,
@@ -383,7 +500,7 @@ fn run_inference_pass(
     app: &AppHandle,
     model_path: &Path,
     audio_data: &[f32],
-    language: Option<&str>,
+    language: &str,
     on_progress: &Channel<TranscriptionProgress>,
     cancel: Arc<AtomicBool>,
     use_gpu: bool,
@@ -403,17 +520,7 @@ fn run_inference_pass(
             }
             _ => {
                 let load_started = Instant::now();
-                let mut ctx_params = WhisperContextParameters::default();
-                ctx_params.use_gpu(use_gpu);
-                let loaded = WhisperContext::new_with_params(
-                    model_path.to_str().unwrap_or_default(),
-                    ctx_params,
-                )
-                .map_err(|e| {
-                    logger::error(app, "whisper", format!("Model load failed: {}", e));
-                    AppError::TranscriptionFailed(format!("Failed to load model: {}", e))
-                })?;
-                let loaded = Arc::new(loaded);
+                let loaded = Arc::new(load_context(app, model_path, use_gpu)?);
                 *guard = Some(CachedContext {
                     model_path: model_path.to_path_buf(),
                     use_gpu,
@@ -436,15 +543,9 @@ fn run_inference_pass(
     // ── Configure transcription params ─────────────────────────────────
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
 
-    if let Some(lang) = language {
-        params.set_language(Some(lang));
-        params.set_detect_language(false);
-        logger::info(app, "whisper", format!("Language: {} (forced)", lang));
-    } else {
-        params.set_language(Some("auto"));
-        params.set_detect_language(true);
-        logger::info(app, "whisper", "Language: auto-detect");
-    }
+    params.set_language(Some(language));
+    params.set_detect_language(false);
+    logger::info(app, "whisper", format!("Language: {}", language));
 
     let threads = std::thread::available_parallelism()
         .map(|n| n.get().min(4) as i32)
@@ -518,6 +619,9 @@ fn run_inference_pass(
     let num_segments = state.full_n_segments();
     logger::info(app, "whisper", format!("Extracting {} segments", num_segments));
 
+    // First id of the special-token range — anything >= this is not speech text.
+    let token_eot = ctx.token_eot();
+
     let mut subtitles = Vec::new();
 
     for i in 0..num_segments {
@@ -542,46 +646,7 @@ fn run_inference_pass(
         let start_ms = (start_ts as u64) * 10;
         let end_ms = (end_ts as u64) * 10;
 
-        let num_tokens = segment.n_tokens();
-
-        let mut raw_tokens: Vec<(String, u64, u64)> = Vec::new();
-        for t in 0..num_tokens {
-            let token = match segment.get_token(t) {
-                Some(tok) => tok,
-                None => continue,
-            };
-            let token_text = token.to_str_lossy().map(|c| c.into_owned()).unwrap_or_default();
-            let data = token.token_data();
-
-            if token_text.is_empty()
-                || token_text.starts_with('[')
-                || token_text.starts_with("<|")
-            {
-                continue;
-            }
-
-            raw_tokens.push((token_text, (data.t0 as u64) * 10, (data.t1 as u64) * 10));
-        }
-
-        let mut words: Vec<Word> = Vec::new();
-        for (token_text, t0, t1) in &raw_tokens {
-            let starts_new_word = token_text.starts_with(' ') || words.is_empty();
-            let clean = token_text.trim().to_string();
-            if clean.is_empty() {
-                continue;
-            }
-
-            if starts_new_word {
-                words.push(Word {
-                    text: clean,
-                    start_time: *t0,
-                    end_time: *t1,
-                });
-            } else if let Some(last) = words.last_mut() {
-                last.text.push_str(&clean);
-                last.end_time = *t1;
-            }
-        }
+        let words = extract_word_timestamps(&segment, token_eot, start_ts, end_ts);
 
         let preview: String = text.chars().take(80).collect();
         let preview = if text.chars().count() > 80 {
@@ -623,6 +688,113 @@ fn run_inference_pass(
     }
 
     Ok(subtitles)
+}
+
+/// Group BPE tokens into words and return per-word timestamps.
+/// Tokens starting with a space `' '` begin a new word; all other tokens (incl.
+/// punctuation) are continuations of the preceding word.
+///
+/// Timing strategy: the word's *end* comes from DTW alignment (`t_dtw` of its last
+/// token) when the context was created with DTW enabled — DTW tracks the actual
+/// speech far better than the energy heuristic. The word's *start* keeps the
+/// heuristic `t0` (which detects pauses) clamped between the previous word's end and
+/// this word's end. Everything is clamped to the segment bounds and forced monotonic,
+/// so downstream splits can never produce out-of-order or out-of-range times.
+struct RawWord {
+    text: String,
+    t0: i64,    // heuristic start of first token (centiseconds)
+    t1: i64,    // heuristic end of last token (centiseconds)
+    t_dtw: i64, // DTW-aligned end of last token, -1 when unavailable
+}
+
+/// Turn grouped raw tokens into monotonic, in-bounds `Word`s. Split out of
+/// `extract_word_timestamps` so the clamp logic can be unit-tested without a live
+/// `WhisperSegment`.
+///
+/// Whisper occasionally emits a degenerate segment with `seg_t0_cs > seg_t1_cs`. The
+/// upper clamp bound is therefore `seg_t1_cs.max(prev_end_cs)`: in the normal case
+/// (t0 <= t1) it stays `seg_t1_cs`, but it never drops below the lower bound, so
+/// `Ord::clamp` (which asserts min <= max) can't panic. `start_cs` then clamps into
+/// `[prev_end_cs, end_cs]`, which is a valid range because `end_cs >= prev_end_cs`.
+fn words_from_raw(raw: &[RawWord], seg_t0_cs: i64, seg_t1_cs: i64) -> Vec<Word> {
+    let cs_to_ms = |cs: i64| (cs.max(0) * 10) as u64;
+
+    let mut words: Vec<Word> = Vec::with_capacity(raw.len());
+    let mut prev_end_cs = seg_t0_cs;
+    for rw in raw {
+        let end_cs =
+            if rw.t_dtw >= 0 { rw.t_dtw } else { rw.t1 }.clamp(prev_end_cs, seg_t1_cs.max(prev_end_cs));
+        let start_cs = rw.t0.clamp(prev_end_cs, end_cs);
+        words.push(Word {
+            text: rw.text.clone(),
+            start_time: cs_to_ms(start_cs),
+            end_time: cs_to_ms(end_cs),
+        });
+        prev_end_cs = end_cs;
+    }
+
+    words
+}
+
+fn extract_word_timestamps(
+    segment: &whisper_rs::WhisperSegment<'_>,
+    token_eot: whisper_rs::WhisperTokenId,
+    seg_t0_cs: i64,
+    seg_t1_cs: i64,
+) -> Vec<Word> {
+    let num_tokens = segment.n_tokens();
+    let mut raw: Vec<RawWord> = Vec::new();
+    let mut pending_break = false;
+
+    for t in 0..num_tokens {
+        let token = match segment.get_token(t) {
+            Some(tok) => tok,
+            None => continue,
+        };
+
+        // Skip special / control tokens ([_BEG_], [_TT_x], <|pl|>, …) by id —
+        // string matching would also drop legitimate text starting with '[' or '<'.
+        if token.token_id() >= token_eot {
+            continue;
+        }
+
+        let token_text = match token.to_str_lossy() {
+            Ok(c) => c.into_owned(),
+            Err(_) => continue,
+        };
+
+        // Whitespace-only token: contributes no text, but a leading space still marks
+        // a word boundary for the next token. Dropping these entirely used to glue
+        // two words together silently.
+        if token_text.trim().is_empty() {
+            if token_text.starts_with(' ') {
+                pending_break = true;
+            }
+            continue;
+        }
+
+        let data = token.token_data();
+        let starts_word = token_text.starts_with(' ') || pending_break;
+        pending_break = false;
+        let piece = token_text.trim_start();
+
+        if starts_word || raw.is_empty() {
+            raw.push(RawWord {
+                text: piece.to_string(),
+                t0: data.t0,
+                t1: data.t1,
+                t_dtw: data.t_dtw,
+            });
+        } else if let Some(last) = raw.last_mut() {
+            last.text.push_str(piece);
+            last.t1 = data.t1;
+            if data.t_dtw >= 0 {
+                last.t_dtw = data.t_dtw;
+            }
+        }
+    }
+
+    words_from_raw(&raw, seg_t0_cs, seg_t1_cs)
 }
 
 /// Read a 16-bit PCM WAV file and return f32 samples normalized to [-1, 1].
@@ -829,5 +1001,60 @@ pub fn detect_speakers(subtitles: &mut [Subtitle], audio_data: &[f32]) {
     // Assign labels
     for (sub, &speaker_idx) in subtitles.iter_mut().zip(assignments.iter()) {
         sub.speaker = Some(format!("Speaker {}", speaker_idx + 1));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rw(text: &str, t0: i64, t1: i64, t_dtw: i64) -> RawWord {
+        RawWord {
+            text: text.to_string(),
+            t0,
+            t1,
+            t_dtw,
+        }
+    }
+
+    /// REL-1: a degenerate segment (seg_t0_cs > seg_t1_cs, as whisper.cpp sometimes emits)
+    /// must not panic in `Ord::clamp` and must still yield monotonic words with start <= end.
+    #[test]
+    fn degenerate_segment_does_not_panic_and_stays_monotonic() {
+        let raw = vec![rw("a", 500, 400, -1), rw("b", 450, 460, -1)];
+        // seg_t0_cs > seg_t1_cs — prev_end_cs (=seg_t0_cs) would exceed the old upper bound.
+        let words = words_from_raw(&raw, 500, 300);
+
+        assert_eq!(words.len(), 2);
+        let mut prev_end = 0u64;
+        for w in &words {
+            assert!(w.start_time <= w.end_time, "word not monotonic: {:?}", w);
+            assert!(w.start_time >= prev_end, "start regressed: {:?}", w);
+            prev_end = w.end_time;
+        }
+    }
+
+    /// Normal path (t0 <= t1): DTW end is used, timings stay in [seg_t0, seg_t1] and monotonic.
+    #[test]
+    fn normal_segment_uses_dtw_end_within_bounds() {
+        let raw = vec![rw("hello", 10, 40, 45), rw("world", 50, 90, 95)];
+        let words = words_from_raw(&raw, 0, 100);
+
+        assert_eq!(words.len(), 2);
+        assert_eq!(words[0].start_time, 100); // 10 cs -> 100 ms
+        assert_eq!(words[0].end_time, 450); // DTW 45 cs -> 450 ms
+        assert!(words[1].start_time >= words[0].end_time);
+        assert!(words[1].end_time <= 1000); // seg_t1 100 cs -> 1000 ms
+    }
+
+    /// Without DTW (t_dtw < 0) the heuristic t1 provides the end, clamped to segment bounds.
+    #[test]
+    fn falls_back_to_heuristic_end_without_dtw() {
+        let raw = vec![rw("x", 10, 200, -1)];
+        let words = words_from_raw(&raw, 0, 100);
+
+        assert_eq!(words.len(), 1);
+        assert_eq!(words[0].start_time, 100); // 10 cs -> 100 ms
+        assert_eq!(words[0].end_time, 1000); // t1 200 cs clamped to seg_t1 100 cs -> 1000 ms
     }
 }

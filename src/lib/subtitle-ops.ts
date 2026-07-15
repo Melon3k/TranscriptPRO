@@ -21,109 +21,104 @@ export function generateId(): string {
  * Split a subtitle segment into two parts at the midpoint.
  *
  * Rules:
- * - Never split in the middle of a word.
- * - If word-level timestamps are available: split at the nearest word boundary
- *   to the midpoint, using word timestamps for accurate split time.
- * - Fallback: find the nearest space character from the midpoint of the text,
- *   and interpolate the split timestamp proportionally.
+ * - Never split in the middle of a word, and never lose or rewrite text: both
+ *   halves are cut from the segment's *current* text (which may have been
+ *   edited), while `words[]` is used only for timing.
+ * - If words match the text one-to-one, the split lands exactly on the spoken
+ *   word boundary; after a text edit the timings are kept by distributing
+ *   words proportionally instead of dropping them.
  */
 export function splitSegment(subtitles: Subtitle[], id: string): Subtitle[] {
   const idx = subtitles.findIndex((s) => s.id === id);
   if (idx === -1) return subtitles;
 
   const seg = subtitles[idx];
+  const tokens = seg.text.trim().split(/\s+/).filter(Boolean);
+  const halves = splitSegmentText(seg, Math.ceil(tokens.length / 2));
+  if (!halves) return subtitles;
 
-  // If the text was edited after transcription, the word list is stale and rebuilding
-  // the text from `words` would silently revert that edit. Detect divergence and fall
-  // through to the text-based split, which preserves the user's actual text.
-  const wordsMatchText =
-    seg.words.length >= 2 &&
-    normalizeWs(wordsToText(seg.words)) === normalizeWs(seg.text);
+  return reindex([
+    ...subtitles.slice(0, idx),
+    ...halves,
+    ...subtitles.slice(idx + 1),
+  ]);
+}
 
-  // ── Word-level split (precise) ──────────────────────────────────────
-  if (wordsMatchText) {
-    const midWordIdx = Math.ceil(seg.words.length / 2);
-    const firstWords = seg.words.slice(0, midWordIdx);
-    const secondWords = seg.words.slice(midWordIdx);
+/**
+ * Cut a segment in two after `splitTokenIdx` whitespace-separated words.
+ * Returns null when the segment cannot be split (empty / single word / bad index).
+ */
+function splitSegmentText(
+  seg: Subtitle,
+  splitTokenIdx: number
+): [Subtitle, Subtitle] | null {
+  const tokens = seg.text.trim().split(/\s+/).filter(Boolean);
+  if (tokens.length < 2) return null;
+  if (splitTokenIdx <= 0 || splitTokenIdx >= tokens.length) return null;
 
-    if (firstWords.length === 0 || secondWords.length === 0) {
-      return subtitles; // can't split single word
-    }
+  const firstText = tokens.slice(0, splitTokenIdx).join(" ");
+  const secondText = tokens.slice(splitTokenIdx).join(" ");
 
-    const splitTime = secondWords[0].startTime;
+  const aligned = seg.words.length === tokens.length;
+  let firstWords: Word[] = [];
+  let secondWords: Word[] = [];
+  let splitTime: number;
+  let firstEnd: number;
 
-    const first: Subtitle = {
+  if (aligned) {
+    // Word timestamps map 1:1 onto the text — precise cut, and refresh word
+    // texts from the (possibly edited) segment text so they stay in sync.
+    firstWords = seg.words
+      .slice(0, splitTokenIdx)
+      .map((w, i) => ({ ...w, text: tokens[i] }));
+    secondWords = seg.words
+      .slice(splitTokenIdx)
+      .map((w, i) => ({ ...w, text: tokens[splitTokenIdx + i] }));
+    splitTime = secondWords[0].startTime;
+    // End the first half when its last word ends — the gap (if any) is a real
+    // pause in speech, so the subtitle shouldn't linger over it.
+    firstEnd = Math.min(firstWords[firstWords.length - 1].endTime, splitTime);
+  } else if (seg.words.length >= 2) {
+    // Text was edited and no longer matches words[] — keep the timings by
+    // distributing words proportionally instead of dropping them.
+    const wSplit = Math.min(
+      seg.words.length - 1,
+      Math.max(1, Math.round((splitTokenIdx / tokens.length) * seg.words.length))
+    );
+    firstWords = seg.words.slice(0, wSplit);
+    secondWords = seg.words.slice(wSplit);
+    splitTime = secondWords[0].startTime;
+    firstEnd = Math.min(firstWords[firstWords.length - 1].endTime, splitTime);
+  } else {
+    // No word timestamps at all — interpolate proportionally by characters.
+    const ratio = (firstText.length + 1) / (seg.text.trim().length + 1);
+    splitTime = seg.startTime + Math.round((seg.endTime - seg.startTime) * ratio);
+    firstEnd = splitTime;
+  }
+
+  splitTime = clampMs(splitTime, seg.startTime, seg.endTime);
+  firstEnd = clampMs(firstEnd, seg.startTime, splitTime);
+
+  return [
+    {
       id: generateId(),
       index: 0,
       startTime: seg.startTime,
-      endTime: splitTime,
-      text: wordsToText(firstWords),
+      endTime: firstEnd,
+      text: firstText,
       words: firstWords,
       speaker: seg.speaker,
-    };
-
-    const second: Subtitle = {
+    },
+    {
       id: generateId(),
       index: 0,
       startTime: splitTime,
       endTime: seg.endTime,
-      text: wordsToText(secondWords),
+      text: secondText,
       words: secondWords,
       speaker: seg.speaker,
-    };
-
-    return reindex([
-      ...subtitles.slice(0, idx),
-      first,
-      second,
-      ...subtitles.slice(idx + 1),
-    ]);
-  }
-
-  // ── Text-based split (fallback) ──────────────────────────────────────
-  const text = seg.text;
-  if (text.trim().length === 0) return subtitles;
-
-  const midChar = Math.floor(text.length / 2);
-  const splitChar = findNearestWordBoundary(text, midChar);
-
-  if (splitChar <= 0 || splitChar >= text.length) return subtitles;
-
-  const firstText = text.slice(0, splitChar).trimEnd();
-  const secondText = text.slice(splitChar).trimStart();
-
-  if (!firstText || !secondText) return subtitles;
-
-  const ratio = splitChar / text.length;
-  const duration = seg.endTime - seg.startTime;
-  const splitTime = seg.startTime + Math.round(duration * ratio);
-
-  const first: Subtitle = {
-    id: generateId(),
-    index: 0,
-    startTime: seg.startTime,
-    endTime: splitTime,
-    text: firstText,
-    words: [],
-    speaker: seg.speaker,
-  };
-
-  const second: Subtitle = {
-    id: generateId(),
-    index: 0,
-    startTime: splitTime,
-    endTime: seg.endTime,
-    text: secondText,
-    words: [],
-    speaker: seg.speaker,
-  };
-
-  return reindex([
-    ...subtitles.slice(0, idx),
-    first,
-    second,
-    ...subtitles.slice(idx + 1),
-  ]);
+    },
+  ];
 }
 
 /**
@@ -163,28 +158,187 @@ export function mergeSegments(
   ]);
 }
 
-// ── Helpers ─────────────────────────────────────────────────────────────────
+// ── Length-based re-segmentation ─────────────────────────────────────────────
+
+export type SegmentLimitMode = "words" | "chars";
+
+export interface SegmentLimit {
+  mode: SegmentLimitMode;
+  value: number;
+}
 
 /**
- * Find the nearest space character to `pos` in `text`,
- * searching outward from `pos` in both directions.
- * Returns the index of the space (split before it), or -1 if none found.
+ * Re-split segments so that each one stays (approximately) within the given
+ * limit of words or characters. Segments already within the limit are left
+ * untouched; longer ones are cut into balanced pieces at word boundaries,
+ * preferring natural break points (punctuation, pauses in speech).
+ *
+ * Word timestamps are never shifted: each piece starts exactly at its first
+ * word's startTime and ends at its last word's endTime, so subtitles stay in
+ * sync with the audio. Only splits — never merges across Whisper's sentence
+ * boundaries.
+ *
+ * Returns the input array unchanged (same reference) when nothing exceeded the
+ * limit, so callers can cheaply detect a no-op.
  */
-function findNearestWordBoundary(text: string, pos: number): number {
-  let left = pos;
-  let right = pos;
+export function resegmentByLength(
+  subtitles: Subtitle[],
+  limit: SegmentLimit
+): Subtitle[] {
+  if (!Number.isFinite(limit.value) || limit.value < 1) return subtitles;
 
-  while (left > 0 || right < text.length) {
-    if (right < text.length) {
-      if (text[right] === " ") return right;
-      right++;
-    }
-    if (left > 0) {
-      left--;
-      if (text[left] === " ") return left;
+  const out: Subtitle[] = [];
+  let changed = false;
+  for (const seg of subtitles) {
+    const pieces = splitSegmentByLimit(seg, limit);
+    if (pieces.length > 1) changed = true;
+    out.push(...pieces);
+  }
+  if (!changed) return subtitles;
+  return reindex(out);
+}
+
+function splitSegmentByLimit(seg: Subtitle, limit: SegmentLimit): Subtitle[] {
+  const tokens = seg.text.trim().split(/\s+/).filter(Boolean);
+  if (tokens.length < 2) return [seg];
+
+  // Weight per token: 1 in words mode, chars + following space in chars mode
+  const weights = tokens.map((t) => (limit.mode === "words" ? 1 : t.length + 1));
+  const total = weights.reduce((a, b) => a + b, 0);
+  const limitWeight = limit.mode === "words" ? limit.value : limit.value + 1;
+  if (total <= limitWeight) return [seg];
+
+  // Words are usable for timing only when they map 1:1 onto the text tokens
+  // (the text may have been edited after transcription).
+  const aligned = seg.words.length === tokens.length;
+
+  // Pick cut points with dynamic programming instead of a balanced-greedy pass:
+  // the limit is a HARD cap (a group may exceed it only when a single token is
+  // by itself heavier than the limit), and within that we minimise a cost that
+  // (a) dislikes underfull groups, (b) likes cutting after punctuation or an
+  // audible pause, and (c) refuses to strand connectives — short function
+  // words like "i"/"na"/"że" shouldn't end a line, let alone stand alone.
+  const PAUSE_MS = 250;
+  const n = tokens.length;
+  // Sentence-final punctuation is a great cut; a comma is only a mild one —
+  // never worth stranding two half-empty pieces around it.
+  const endsWithStrongPunct = (i: number) => /[.!?…]$/.test(tokens[i]);
+  const endsWithPunct = (i: number) => /[.,!?…;:]$/.test(tokens[i]);
+  // Heuristic: a short bare word ("i", "na", "że", "jak", "and", "the") is a
+  // connective that belongs with what FOLLOWS it, not with what precedes.
+  // Only lowercase, digit-free tokens qualify: capitalised tokens (sentence
+  // starts, names, abbreviations like "USA") and anything with a digit ("3D",
+  // "2x", "42") are content, not function words, so they must not be penalised.
+  const isConnective = (i: number) =>
+    tokens[i].length <= 3 &&
+    !endsWithPunct(i) &&
+    !/[0-9]/.test(tokens[i]) &&
+    !/^\p{Lu}/u.test(tokens[i]);
+  const pauseAfter = (i: number) =>
+    aligned &&
+    i + 1 < n &&
+    seg.words[i + 1].startTime - seg.words[i].endTime >= PAUSE_MS;
+
+  // dp[i] = minimal cost of segmenting tokens[0..i); prevCut[i] = where the
+  // last group before i starts on that optimal path.
+  const dp = new Array<number>(n + 1).fill(Infinity);
+  const prevCut = new Array<number>(n + 1).fill(-1);
+  dp[0] = 0;
+  for (let i = 1; i <= n; i++) {
+    let w = 0;
+    for (let j = i - 1; j >= 0; j--) {
+      w += weights[j];
+      const size = i - j;
+      if (w > limitWeight && size > 1) break; // hard cap (single token exempt)
+      if (dp[j] === Infinity) continue;
+
+      let cost = dp[j];
+      // Underfull groups waste screen time — quadratic penalty on the gap.
+      const fill = Math.min(w, limitWeight) / limitWeight;
+      cost += (1 - fill) * (1 - fill) * 4;
+      // Break quality at this cut (the final boundary is not a real cut)
+      if (i < n) {
+        if (endsWithStrongPunct(i - 1)) cost -= 2;
+        else if (endsWithPunct(i - 1)) cost -= 0.75;
+        else if (pauseAfter(i - 1)) cost -= 1.5;
+        if (isConnective(i - 1)) cost += 2;
+      }
+      // A lone connective as its own subtitle reads terribly — avoid hard.
+      if (size === 1 && isConnective(j)) cost += 4;
+
+      if (cost < dp[i]) {
+        dp[i] = cost;
+        prevCut[i] = j;
+      }
     }
   }
-  return -1;
+
+  // Backtrack the optimal cut positions
+  const snapped: number[] = [];
+  for (let i = prevCut[n]; i > 0; i = prevCut[i]) {
+    snapped.unshift(i);
+  }
+  if (snapped.length === 0) return [seg];
+
+  // Cut into pieces along the snapped boundaries
+  const pieces: Subtitle[] = [];
+  const starts = [0, ...snapped];
+  const ends = [...snapped, tokens.length];
+  let cumWeight = 0;
+
+  for (let g = 0; g < starts.length; g++) {
+    const s = starts[g];
+    const e = ends[g];
+    const pieceTokens = tokens.slice(s, e);
+    const pieceWeight = weights.slice(s, e).reduce((a, b) => a + b, 0);
+
+    let startTime: number;
+    let endTime: number;
+    let words: Word[];
+
+    if (aligned) {
+      // Word timestamps drive the timing — refresh word texts from the
+      // (possibly edited) segment text so they stay in sync.
+      words = seg.words.slice(s, e).map((w, i) => ({ ...w, text: pieceTokens[i] }));
+      startTime = s === 0 ? seg.startTime : words[0].startTime;
+      endTime = e === tokens.length ? seg.endTime : words[words.length - 1].endTime;
+    } else {
+      // Proportional timing by weight share
+      const duration = seg.endTime - seg.startTime;
+      startTime =
+        s === 0
+          ? seg.startTime
+          : seg.startTime + Math.round((duration * cumWeight) / total);
+      endTime =
+        e === tokens.length
+          ? seg.endTime
+          : seg.startTime + Math.round((duration * (cumWeight + pieceWeight)) / total);
+      // Keep any existing (mismatched) word timings with the piece they fall into
+      words = seg.words.filter((w) => {
+        const midMs = (w.startTime + w.endTime) / 2;
+        return midMs >= startTime && (e === tokens.length || midMs < endTime);
+      });
+    }
+
+    pieces.push({
+      id: generateId(),
+      index: 0,
+      startTime: clampMs(startTime, seg.startTime, seg.endTime),
+      endTime: clampMs(Math.max(endTime, startTime), seg.startTime, seg.endTime),
+      text: pieceTokens.join(" "),
+      words,
+      speaker: seg.speaker,
+    });
+    cumWeight += pieceWeight;
+  }
+
+  return pieces;
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+function clampMs(v: number, lo: number, hi: number): number {
+  return Math.min(Math.max(v, lo), hi);
 }
 
 export function wordsToText(words: Word[]): string {
@@ -192,9 +346,4 @@ export function wordsToText(words: Word[]): string {
     .map((w) => w.text)
     .join(" ")
     .trim();
-}
-
-/** Collapse runs of whitespace to a single space and trim — for tolerant text comparison. */
-function normalizeWs(text: string): string {
-  return text.replace(/\s+/g, " ").trim();
 }

@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
@@ -32,5 +33,14 @@ export default defineConfig(async () => ({
       // 3. tell Vite to ignore watching `src-tauri`
       ignored: ["**/src-tauri/**"],
     },
+  },
+
+  // Unit tests (vitest). Pure logic in src/lib runs without a DOM.
+  test: {
+    environment: "node",
+    include: ["src/**/*.test.ts"],
+    // Skip macOS AppleDouble sidecars ("._*") — the exFAT working copy on a
+    // portable drive spawns them next to real files and they match the glob.
+    exclude: ["**/node_modules/**", "**/dist/**", "**/._*"],
   },
 }));

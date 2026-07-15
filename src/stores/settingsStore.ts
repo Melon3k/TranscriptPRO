@@ -4,6 +4,9 @@ import { TranslationProvider } from "../types/subtitle";
 
 export type UiLanguage = "pl" | "en";
 
+/** How to cap subtitle segment length after transcription. */
+export type SegmentLimitModeSetting = "off" | "words" | "chars";
+
 interface SettingsState {
   whisperModel: string;
   translationProvider: TranslationProvider;
@@ -19,7 +22,15 @@ interface SettingsState {
   autoSaveOnImport: boolean;
   autoCheckUpdates: boolean;
   language: UiLanguage;
+  // Language of the audio to transcribe (Whisper). Persisted so the choice
+  // survives restarts. Default "" forces an explicit pick on first run — there
+  // is deliberately no "auto" (Whisper's auto-detect is unreliable).
+  transcriptionLanguage: string;
   forceCpu: boolean;
+  // Segment length limit (for video-friendly subtitles)
+  segmentLimitMode: SegmentLimitModeSetting;
+  segmentMaxWords: number;
+  segmentMaxChars: number;
 
   setWhisperModel: (model: string) => void;
   setTranslationProvider: (provider: TranslationProvider) => void;
@@ -31,7 +42,11 @@ interface SettingsState {
   setAutoSaveOnImport: (v: boolean) => void;
   setAutoCheckUpdates: (v: boolean) => void;
   setLanguage: (lang: UiLanguage) => void;
+  setTranscriptionLanguage: (lang: string) => void;
   setForceCpu: (v: boolean) => void;
+  setSegmentLimitMode: (mode: SegmentLimitModeSetting) => void;
+  setSegmentMaxWords: (value: number) => void;
+  setSegmentMaxChars: (value: number) => void;
 }
 
 function detectInitialLanguage(): UiLanguage {
@@ -65,7 +80,11 @@ export const useSettingsStore = create<SettingsState>()(
       autoSaveOnImport: true,
       autoCheckUpdates: true,
       language: detectInitialLanguage(),
+      transcriptionLanguage: "",
       forceCpu: false,
+      segmentLimitMode: "off",
+      segmentMaxWords: 7,
+      segmentMaxChars: 42,
 
       setWhisperModel: (model) => set({ whisperModel: model }),
       setTranslationProvider: (provider) =>
@@ -79,11 +98,20 @@ export const useSettingsStore = create<SettingsState>()(
       setAutoSaveOnImport: (v) => set({ autoSaveOnImport: v }),
       setAutoCheckUpdates: (v) => set({ autoCheckUpdates: v }),
       setLanguage: (lang) => set({ language: lang }),
+      setTranscriptionLanguage: (lang) =>
+        // Never persist "auto": Whisper's auto-detect is disabled, and an empty
+        // string is the sentinel that forces an explicit pick.
+        set({ transcriptionLanguage: lang === "auto" ? "" : lang }),
       setForceCpu: (v) => set({ forceCpu: v }),
+      setSegmentLimitMode: (mode) => set({ segmentLimitMode: mode }),
+      setSegmentMaxWords: (value) =>
+        set({ segmentMaxWords: Math.max(1, Math.round(value) || 1) }),
+      setSegmentMaxChars: (value) =>
+        set({ segmentMaxChars: Math.max(1, Math.round(value) || 1) }),
     }),
     {
       name: "transcriptpro-settings",
-      version: 4,
+      version: 5,
       migrate: (persisted) => {
         const state = persisted as Record<string, unknown>;
         // v0 → v1: LibreTranslate was dropped as a provider (public server went paid).
@@ -115,6 +143,15 @@ export const useSettingsStore = create<SettingsState>()(
           !validGeminiModels.includes(state.geminiModel)
         ) {
           state.geminiModel = "gemini-3.1-flash-lite";
+        }
+        // v4 → v5: transcription language became a persisted setting. Older
+        // installs have no value; anything non-string or the disabled "auto"
+        // sentinel must fall back to "" so the UI still forces an explicit pick.
+        if (
+          typeof state.transcriptionLanguage !== "string" ||
+          state.transcriptionLanguage === "auto"
+        ) {
+          state.transcriptionLanguage = "";
         }
         return state;
       },
