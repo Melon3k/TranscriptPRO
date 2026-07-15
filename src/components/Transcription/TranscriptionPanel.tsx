@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
-import { Mic, Download, Loader2, CheckCircle2, X } from "lucide-react";
+import { Mic, Download, Loader2, CheckCircle2, X, Scissors } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useSettingsStore } from "../../stores/settingsStore";
+import type { SegmentLimitModeSetting } from "../../stores/settingsStore";
 import { useSubtitleStore } from "../../stores/subtitleStore";
 import { useVersionStore } from "../../stores/versionStore";
 import {
@@ -10,6 +11,8 @@ import {
   transcribeAudio,
   cancelTranscription,
 } from "../../lib/tauri-commands";
+import { resegmentByLength } from "../../lib/subtitle-ops";
+import type { SegmentLimit } from "../../lib/subtitle-ops";
 import { formatError, isCancellation } from "../../lib/error-format";
 import type { WhisperModelInfo, TranscriptionProgress } from "../../types/subtitle";
 
@@ -42,9 +45,29 @@ export default function TranscriptionPanel({
   onCancelExtraction,
 }: TranscriptionPanelProps) {
   const { t } = useTranslation(["transcription", "common"]);
-  const { whisperModel, setWhisperModel, autoSaveOnTranscription, forceCpu } = useSettingsStore();
-  const { setSubtitles, clearOriginalSubtitles } = useSubtitleStore();
+  const {
+    whisperModel,
+    setWhisperModel,
+    autoSaveOnTranscription,
+    forceCpu,
+    segmentLimitMode,
+    segmentMaxWords,
+    segmentMaxChars,
+    setSegmentLimitMode,
+    setSegmentMaxWords,
+    setSegmentMaxChars,
+  } = useSettingsStore();
+  const { setSubtitles, clearOriginalSubtitles, resegment } = useSubtitleStore();
+  const hasSubtitles = useSubtitleStore((s) => s.subtitles.length > 0);
   const { addVersion } = useVersionStore();
+
+  const segmentLimit: SegmentLimit | null =
+    segmentLimitMode === "off"
+      ? null
+      : {
+          mode: segmentLimitMode,
+          value: segmentLimitMode === "words" ? segmentMaxWords : segmentMaxChars,
+        };
 
   const [models, setModels] = useState<WhisperModelInfo[]>([]);
   const [downloading, setDownloading] = useState(false);
@@ -90,7 +113,7 @@ export default function TranscriptionPanel({
     setProgress(null);
     setError(null);
     try {
-      const subs = await transcribeAudio(
+      let subs = await transcribeAudio(
         audioPath,
         whisperModel,
         language === "auto" ? null : language,
@@ -101,6 +124,10 @@ export default function TranscriptionPanel({
       // Fresh transcription replaces the document — drop any stale pre-translation
       // snapshot so "Restore original"/comparison don't point at the old file.
       clearOriginalSubtitles();
+      // Optional length-based re-split (word timestamps drive the timing)
+      if (segmentLimit) {
+        subs = resegmentByLength(subs, segmentLimit);
+      }
       // Not auto-saved to history → the result exists only in memory, so mark dirty
       // to guard against losing it on close.
       setSubtitles(subs, { dirty: !autoSaveOnTranscription });
@@ -199,6 +226,59 @@ export default function TranscriptionPanel({
             </option>
           ))}
         </select>
+      </div>
+
+      {/* Segment length limit */}
+      <div className="space-y-2">
+        <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">
+          {t("transcription:segmentLimitLabel")}
+        </label>
+        <div className="flex gap-2">
+          <select
+            value={segmentLimitMode}
+            onChange={(e) =>
+              setSegmentLimitMode(e.target.value as SegmentLimitModeSetting)
+            }
+            disabled={transcribing}
+            className="flex-1 min-w-0 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1.5 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
+          >
+            <option value="off">{t("transcription:segmentLimit.off")}</option>
+            <option value="words">{t("transcription:segmentLimit.words")}</option>
+            <option value="chars">{t("transcription:segmentLimit.chars")}</option>
+          </select>
+          {segmentLimit && (
+            <input
+              type="number"
+              min={1}
+              max={segmentLimitMode === "words" ? 30 : 200}
+              value={segmentLimit.value}
+              onChange={(e) => {
+                const v = parseInt(e.target.value, 10);
+                if (Number.isNaN(v)) return;
+                if (segmentLimitMode === "words") setSegmentMaxWords(v);
+                else setSegmentMaxChars(v);
+              }}
+              disabled={transcribing}
+              className="w-16 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1.5 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
+            />
+          )}
+        </div>
+        {segmentLimit && (
+          <>
+            <p className="text-[11px] leading-snug text-gray-400 dark:text-gray-500">
+              {t("transcription:segmentLimitHint")}
+            </p>
+            {hasSubtitles && !transcribing && (
+              <button
+                onClick={() => resegment(segmentLimit)}
+                className="flex items-center gap-1.5 w-full justify-center rounded bg-gray-100 dark:bg-gray-700 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+              >
+                <Scissors size={14} />
+                {t("transcription:applySegmentLimit")}
+              </button>
+            )}
+          </>
+        )}
       </div>
 
       {/* Speaker detection toggle */}

@@ -63,6 +63,77 @@ pub struct CachedContext {
     ctx: Arc<WhisperContext>,
 }
 
+/// DTW alignment-head preset for a ggml model file (`ggml-<name>.bin`). DTW token
+/// alignment yields word timestamps that track the actual speech far better than the
+/// energy heuristic (t0/t1) alone. Unknown names get `None` → plain context.
+fn dtw_preset_for_path(model_path: &Path) -> Option<whisper_rs::DtwModelPreset> {
+    use whisper_rs::DtwModelPreset as P;
+    let name = model_path
+        .file_stem()?
+        .to_str()?
+        .strip_prefix("ggml-")?;
+    match name {
+        "tiny" => Some(P::Tiny),
+        "tiny.en" => Some(P::TinyEn),
+        "base" => Some(P::Base),
+        "base.en" => Some(P::BaseEn),
+        "small" => Some(P::Small),
+        "small.en" => Some(P::SmallEn),
+        "medium" => Some(P::Medium),
+        "medium.en" => Some(P::MediumEn),
+        "large-v1" => Some(P::LargeV1),
+        "large-v2" => Some(P::LargeV2),
+        "large-v3" => Some(P::LargeV3),
+        "large-v3-turbo" => Some(P::LargeV3Turbo),
+        _ => None,
+    }
+}
+
+/// Create a Whisper context, preferring DTW token alignment (per-model attention-head
+/// preset). Falls back to a plain context when the preset is unknown or DTW init fails,
+/// so this can never make model loading worse than before.
+fn load_context(
+    app: &AppHandle,
+    model_path: &Path,
+    use_gpu: bool,
+) -> Result<WhisperContext, AppError> {
+    use whisper_rs::{DtwMode, DtwParameters};
+
+    let path_str = model_path.to_str().unwrap_or_default();
+
+    if let Some(preset) = dtw_preset_for_path(model_path) {
+        let mut ctx_params = WhisperContextParameters::default();
+        ctx_params.use_gpu(use_gpu);
+        ctx_params.dtw_parameters(DtwParameters {
+            mode: DtwMode::ModelPreset {
+                model_preset: preset,
+            },
+            ..Default::default()
+        });
+        match WhisperContext::new_with_params(path_str, ctx_params) {
+            Ok(ctx) => {
+                logger::info(app, "whisper", "DTW token alignment enabled");
+                return Ok(ctx);
+            }
+            Err(e) => {
+                logger::emit(
+                    app,
+                    "warn",
+                    "whisper",
+                    format!("DTW init failed ({}), using heuristic word timestamps", e),
+                );
+            }
+        }
+    }
+
+    let mut ctx_params = WhisperContextParameters::default();
+    ctx_params.use_gpu(use_gpu);
+    WhisperContext::new_with_params(path_str, ctx_params).map_err(|e| {
+        logger::error(app, "whisper", format!("Model load failed: {}", e));
+        AppError::TranscriptionFailed(format!("Failed to load model: {}", e))
+    })
+}
+
 /// Drop the cached context for a given (model, backend) — used after a failure so a
 /// potentially tainted GPU/Metal context is never reused on a later job.
 fn evict_context(cache: &crate::WhisperCache, model_path: &Path, use_gpu: bool) {
@@ -403,17 +474,7 @@ fn run_inference_pass(
             }
             _ => {
                 let load_started = Instant::now();
-                let mut ctx_params = WhisperContextParameters::default();
-                ctx_params.use_gpu(use_gpu);
-                let loaded = WhisperContext::new_with_params(
-                    model_path.to_str().unwrap_or_default(),
-                    ctx_params,
-                )
-                .map_err(|e| {
-                    logger::error(app, "whisper", format!("Model load failed: {}", e));
-                    AppError::TranscriptionFailed(format!("Failed to load model: {}", e))
-                })?;
-                let loaded = Arc::new(loaded);
+                let loaded = Arc::new(load_context(app, model_path, use_gpu)?);
                 *guard = Some(CachedContext {
                     model_path: model_path.to_path_buf(),
                     use_gpu,
@@ -518,6 +579,9 @@ fn run_inference_pass(
     let num_segments = state.full_n_segments();
     logger::info(app, "whisper", format!("Extracting {} segments", num_segments));
 
+    // First id of the special-token range — anything >= this is not speech text.
+    let token_eot = ctx.token_eot();
+
     let mut subtitles = Vec::new();
 
     for i in 0..num_segments {
@@ -542,46 +606,7 @@ fn run_inference_pass(
         let start_ms = (start_ts as u64) * 10;
         let end_ms = (end_ts as u64) * 10;
 
-        let num_tokens = segment.n_tokens();
-
-        let mut raw_tokens: Vec<(String, u64, u64)> = Vec::new();
-        for t in 0..num_tokens {
-            let token = match segment.get_token(t) {
-                Some(tok) => tok,
-                None => continue,
-            };
-            let token_text = token.to_str_lossy().map(|c| c.into_owned()).unwrap_or_default();
-            let data = token.token_data();
-
-            if token_text.is_empty()
-                || token_text.starts_with('[')
-                || token_text.starts_with("<|")
-            {
-                continue;
-            }
-
-            raw_tokens.push((token_text, (data.t0 as u64) * 10, (data.t1 as u64) * 10));
-        }
-
-        let mut words: Vec<Word> = Vec::new();
-        for (token_text, t0, t1) in &raw_tokens {
-            let starts_new_word = token_text.starts_with(' ') || words.is_empty();
-            let clean = token_text.trim().to_string();
-            if clean.is_empty() {
-                continue;
-            }
-
-            if starts_new_word {
-                words.push(Word {
-                    text: clean,
-                    start_time: *t0,
-                    end_time: *t1,
-                });
-            } else if let Some(last) = words.last_mut() {
-                last.text.push_str(&clean);
-                last.end_time = *t1;
-            }
-        }
+        let words = extract_word_timestamps(&segment, token_eot, start_ts, end_ts);
 
         let preview: String = text.chars().take(80).collect();
         let preview = if text.chars().count() > 80 {
@@ -623,6 +648,99 @@ fn run_inference_pass(
     }
 
     Ok(subtitles)
+}
+
+/// Group BPE tokens into words and return per-word timestamps.
+/// Tokens starting with a space `' '` begin a new word; all other tokens (incl.
+/// punctuation) are continuations of the preceding word.
+///
+/// Timing strategy: the word's *end* comes from DTW alignment (`t_dtw` of its last
+/// token) when the context was created with DTW enabled — DTW tracks the actual
+/// speech far better than the energy heuristic. The word's *start* keeps the
+/// heuristic `t0` (which detects pauses) clamped between the previous word's end and
+/// this word's end. Everything is clamped to the segment bounds and forced monotonic,
+/// so downstream splits can never produce out-of-order or out-of-range times.
+fn extract_word_timestamps(
+    segment: &whisper_rs::WhisperSegment<'_>,
+    token_eot: whisper_rs::WhisperTokenId,
+    seg_t0_cs: i64,
+    seg_t1_cs: i64,
+) -> Vec<Word> {
+    struct RawWord {
+        text: String,
+        t0: i64,    // heuristic start of first token (centiseconds)
+        t1: i64,    // heuristic end of last token (centiseconds)
+        t_dtw: i64, // DTW-aligned end of last token, -1 when unavailable
+    }
+
+    let num_tokens = segment.n_tokens();
+    let mut raw: Vec<RawWord> = Vec::new();
+    let mut pending_break = false;
+
+    for t in 0..num_tokens {
+        let token = match segment.get_token(t) {
+            Some(tok) => tok,
+            None => continue,
+        };
+
+        // Skip special / control tokens ([_BEG_], [_TT_x], <|pl|>, …) by id —
+        // string matching would also drop legitimate text starting with '[' or '<'.
+        if token.token_id() >= token_eot {
+            continue;
+        }
+
+        let token_text = match token.to_str_lossy() {
+            Ok(c) => c.into_owned(),
+            Err(_) => continue,
+        };
+
+        // Whitespace-only token: contributes no text, but a leading space still marks
+        // a word boundary for the next token. Dropping these entirely used to glue
+        // two words together silently.
+        if token_text.trim().is_empty() {
+            if token_text.starts_with(' ') {
+                pending_break = true;
+            }
+            continue;
+        }
+
+        let data = token.token_data();
+        let starts_word = token_text.starts_with(' ') || pending_break;
+        pending_break = false;
+        let piece = token_text.trim_start();
+
+        if starts_word || raw.is_empty() {
+            raw.push(RawWord {
+                text: piece.to_string(),
+                t0: data.t0,
+                t1: data.t1,
+                t_dtw: data.t_dtw,
+            });
+        } else if let Some(last) = raw.last_mut() {
+            last.text.push_str(piece);
+            last.t1 = data.t1;
+            if data.t_dtw >= 0 {
+                last.t_dtw = data.t_dtw;
+            }
+        }
+    }
+
+    let cs_to_ms = |cs: i64| (cs.max(0) * 10) as u64;
+
+    let mut words: Vec<Word> = Vec::with_capacity(raw.len());
+    let mut prev_end_cs = seg_t0_cs;
+    for rw in &raw {
+        let end_cs = if rw.t_dtw >= 0 { rw.t_dtw } else { rw.t1 }.clamp(prev_end_cs, seg_t1_cs);
+        let start_cs = rw.t0.clamp(prev_end_cs, end_cs);
+        words.push(Word {
+            text: rw.text.clone(),
+            start_time: cs_to_ms(start_cs),
+            end_time: cs_to_ms(end_cs),
+        });
+        prev_end_cs = end_cs;
+    }
+
+    words
 }
 
 /// Read a 16-bit PCM WAV file and return f32 samples normalized to [-1, 1].

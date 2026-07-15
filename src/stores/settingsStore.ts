@@ -4,6 +4,9 @@ import { TranslationProvider } from "../types/subtitle";
 
 export type UiLanguage = "pl" | "en";
 
+/** How to cap subtitle segment length after transcription. */
+export type SegmentLimitModeSetting = "off" | "words" | "chars";
+
 interface SettingsState {
   whisperModel: string;
   translationProvider: TranslationProvider;
@@ -20,6 +23,10 @@ interface SettingsState {
   autoCheckUpdates: boolean;
   language: UiLanguage;
   forceCpu: boolean;
+  // Segment length limit (for video-friendly subtitles)
+  segmentLimitMode: SegmentLimitModeSetting;
+  segmentMaxWords: number;
+  segmentMaxChars: number;
 
   setWhisperModel: (model: string) => void;
   setTranslationProvider: (provider: TranslationProvider) => void;
@@ -32,6 +39,9 @@ interface SettingsState {
   setAutoCheckUpdates: (v: boolean) => void;
   setLanguage: (lang: UiLanguage) => void;
   setForceCpu: (v: boolean) => void;
+  setSegmentLimitMode: (mode: SegmentLimitModeSetting) => void;
+  setSegmentMaxWords: (value: number) => void;
+  setSegmentMaxChars: (value: number) => void;
 }
 
 function detectInitialLanguage(): UiLanguage {
@@ -66,6 +76,9 @@ export const useSettingsStore = create<SettingsState>()(
       autoCheckUpdates: true,
       language: detectInitialLanguage(),
       forceCpu: false,
+      segmentLimitMode: "off",
+      segmentMaxWords: 7,
+      segmentMaxChars: 42,
 
       setWhisperModel: (model) => set({ whisperModel: model }),
       setTranslationProvider: (provider) =>
@@ -80,6 +93,11 @@ export const useSettingsStore = create<SettingsState>()(
       setAutoCheckUpdates: (v) => set({ autoCheckUpdates: v }),
       setLanguage: (lang) => set({ language: lang }),
       setForceCpu: (v) => set({ forceCpu: v }),
+      setSegmentLimitMode: (mode) => set({ segmentLimitMode: mode }),
+      setSegmentMaxWords: (value) =>
+        set({ segmentMaxWords: Math.max(1, Math.round(value) || 1) }),
+      setSegmentMaxChars: (value) =>
+        set({ segmentMaxChars: Math.max(1, Math.round(value) || 1) }),
     }),
     {
       name: "transcriptpro-settings",

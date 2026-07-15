@@ -21,6 +21,14 @@
     "uk": "Ukraiński"
   },
   "detectSpeakers": "Wykrywaj mówców",
+  "segmentLimitLabel": "Długość segmentu",
+  "segmentLimit": {
+    "off": "Domyślna Whispera (zdania)",
+    "words": "Maks. słów na segment",
+    "chars": "Maks. znaków na segment"
+  },
+  "segmentLimitHint": "Dłuższe segmenty są dzielone na granicach słów (limit przybliżony, preferuje interpunkcję i pauzy).",
+  "applySegmentLimit": "Podziel obecne napisy",
   "transcribe": "Transkrybuj",
   "cancel": "Anuluj",
   "emptyState": "Otwórz plik multimedialny aby rozpocząć transkrypcję",

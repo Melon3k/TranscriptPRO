@@ -21,6 +21,14 @@
     "uk": "Ukrainian"
   },
   "detectSpeakers": "Detect speakers",
+  "segmentLimitLabel": "Segment length",
+  "segmentLimit": {
+    "off": "Whisper default (sentences)",
+    "words": "Max words per segment",
+    "chars": "Max characters per segment"
+  },
+  "segmentLimitHint": "Longer segments are split at word boundaries (approximate limit, prefers punctuation and pauses).",
+  "applySegmentLimit": "Re-split current subtitles",
   "transcribe": "Transcribe",
   "cancel": "Cancel",
   "emptyState": "Open a media file to start transcription",
