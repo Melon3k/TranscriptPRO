@@ -20,6 +20,66 @@ fn validate_model_name(name: &str) -> Result<(), AppError> {
     }
 }
 
+/// Whitelist of transcription language codes accepted over IPC.
+// Full official Whisper language set (99 codes).
+// keep in sync with LANGUAGE_OPTIONS (frontend)
+const LANGUAGE_CODES: &[&str] = &[
+    "en", "pl", "de", "es", "fr", "it", "pt", "nl", "ru", "uk", "ja", "ko", "zh", "af", "am", "ar",
+    "as", "az", "ba", "be", "bg", "bn", "bo", "br", "bs", "ca", "cs", "cy", "da", "el", "et", "eu",
+    "fa", "fi", "fo", "gl", "gu", "ha", "haw", "he", "hi", "hr", "ht", "hu", "hy", "id", "is", "ka",
+    "kk", "km", "kn", "la", "lb", "ln", "lo", "lt", "lv", "mg", "mi", "mk", "ml", "mn", "mr", "ms",
+    "mt", "my", "ne", "nn", "no", "oc", "pa", "ps", "ro", "sa", "sd", "si", "sk", "sl", "sn", "so",
+    "sq", "sr", "su", "sv", "sw", "ta", "te", "tg", "th", "tk", "tl", "tr", "tt", "ur", "uz", "vi",
+    "yi", "yo", "yue",
+];
+
+/// Validate and normalize the transcription language before it reaches whisper-rs.
+/// Auto-detection was removed (empty/failed transcriptions), so empty / "auto" are
+/// rejected. The whitelist is defense-in-depth: the UI already restricts the choice,
+/// but `whisper_rs`'s `set_language` forwards the code through `CString::new(..).expect(..)`,
+/// which panics on an interior NUL byte — so an unvalidated IPC value could abort the
+/// process. Returns the canonical (lowercase) code.
+fn validate_language(language: Option<&str>) -> Result<String, AppError> {
+    let lang = language.map(str::trim).unwrap_or("");
+    if lang.is_empty() || lang.eq_ignore_ascii_case("auto") {
+        return Err(AppError::TranscriptionFailed(
+            "no transcription language selected".into(),
+        ));
+    }
+    match LANGUAGE_CODES.iter().find(|c| c.eq_ignore_ascii_case(lang)) {
+        Some(code) => Ok((*code).to_string()),
+        None => Err(AppError::TranscriptionFailed(format!(
+            "unsupported transcription language: {}",
+            lang
+        ))),
+    }
+}
+
+/// Serializes `transcribe_audio`. A second concurrent call would reset the shared cancel
+/// flag and evict the 1-slot Whisper context cache out from under the first, corrupting it.
+/// The RAII guard clears the flag on every exit path (early return, panic, normal completion),
+/// so a legitimate retry after the first run finishes still succeeds.
+static TRANSCRIPTION_RUNNING: AtomicBool = AtomicBool::new(false);
+
+struct TranscriptionRunningGuard;
+
+impl TranscriptionRunningGuard {
+    fn acquire() -> Result<Self, AppError> {
+        TRANSCRIPTION_RUNNING
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .map(|_| TranscriptionRunningGuard)
+            .map_err(|_| {
+                AppError::TranscriptionFailed("Transcription already in progress".into())
+            })
+    }
+}
+
+impl Drop for TranscriptionRunningGuard {
+    fn drop(&mut self) {
+        TRANSCRIPTION_RUNNING.store(false, Ordering::SeqCst);
+    }
+}
+
 /// List all available Whisper models (bundled + downloaded)
 #[tauri::command]
 pub async fn list_models(app: AppHandle) -> Result<Vec<WhisperModelInfo>, AppError> {
@@ -287,17 +347,15 @@ pub async fn transcribe_audio(
     // Language auto-detection is unreliable (empty/failed transcriptions), so the UI
     // forces an explicit choice and this command rejects anything else. `language`
     // stays Option in the IPC signature only to fail gracefully instead of with a
-    // deserialization error.
-    let language = match language.as_deref().map(str::trim) {
-        Some(lang) if !lang.is_empty() && !lang.eq_ignore_ascii_case("auto") => {
-            lang.to_string()
-        }
-        _ => {
-            return Err(AppError::TranscriptionFailed(
-                "no transcription language selected".into(),
-            ))
-        }
-    };
+    // deserialization error. Validation also blocks a NUL byte / junk code from
+    // reaching whisper-rs's `set_language` (which would panic in `CString::new`).
+    let language = validate_language(language.as_deref())?;
+
+    // Serialize concurrent transcriptions before touching shared state (see
+    // TranscriptionRunningGuard). Held until the end of the command — the guard lives
+    // across the spawn_blocking await below, so the flag is released only once the whole
+    // operation finishes.
+    let _running = TranscriptionRunningGuard::acquire()?;
 
     // Reset cancellation flag at the start of each run.
     cancel.0.store(false, Ordering::Relaxed);
@@ -373,4 +431,44 @@ pub async fn transcribe_audio(
     }
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_missing_empty_and_auto_language() {
+        assert!(validate_language(None).is_err());
+        assert!(validate_language(Some("")).is_err());
+        assert!(validate_language(Some("   ")).is_err());
+        assert!(validate_language(Some("auto")).is_err());
+        assert!(validate_language(Some("AUTO")).is_err());
+    }
+
+    /// SEC-1: a NUL byte would panic whisper-rs's `CString::new(..).expect(..)`; junk codes
+    /// must never reach FFI. All are rejected here.
+    #[test]
+    fn rejects_nul_byte_and_garbage_codes() {
+        assert!(validate_language(Some("e\0n")).is_err());
+        assert!(validate_language(Some("en\0")).is_err());
+        assert!(validate_language(Some("../../etc/passwd")).is_err());
+        assert!(validate_language(Some("english")).is_err());
+        assert!(validate_language(Some("xx")).is_err());
+        assert!(validate_language(Some("e n")).is_err());
+    }
+
+    #[test]
+    fn accepts_every_whitelisted_code() {
+        for code in LANGUAGE_CODES {
+            assert_eq!(&validate_language(Some(code)).unwrap(), code);
+        }
+    }
+
+    #[test]
+    fn trims_whitespace_and_normalizes_case() {
+        assert_eq!(validate_language(Some("  en  ")).unwrap(), "en");
+        assert_eq!(validate_language(Some("EN")).unwrap(), "en");
+        assert_eq!(validate_language(Some("Pl")).unwrap(), "pl");
+    }
 }

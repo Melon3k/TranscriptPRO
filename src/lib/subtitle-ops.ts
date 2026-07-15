@@ -226,7 +226,14 @@ function splitSegmentByLimit(seg: Subtitle, limit: SegmentLimit): Subtitle[] {
   const endsWithPunct = (i: number) => /[.,!?…;:]$/.test(tokens[i]);
   // Heuristic: a short bare word ("i", "na", "że", "jak", "and", "the") is a
   // connective that belongs with what FOLLOWS it, not with what precedes.
-  const isConnective = (i: number) => tokens[i].length <= 3 && !endsWithPunct(i);
+  // Only lowercase, digit-free tokens qualify: capitalised tokens (sentence
+  // starts, names, abbreviations like "USA") and anything with a digit ("3D",
+  // "2x", "42") are content, not function words, so they must not be penalised.
+  const isConnective = (i: number) =>
+    tokens[i].length <= 3 &&
+    !endsWithPunct(i) &&
+    !/[0-9]/.test(tokens[i]) &&
+    !/^\p{Lu}/u.test(tokens[i]);
   const pauseAfter = (i: number) =>
     aligned &&
     i + 1 < n &&

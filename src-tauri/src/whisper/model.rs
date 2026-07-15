@@ -104,6 +104,12 @@ fn load_context(
     if let Some(preset) = dtw_preset_for_path(model_path) {
         let mut ctx_params = WhisperContextParameters::default();
         ctx_params.use_gpu(use_gpu);
+        // DTW is enabled unconditionally whenever a preset is known. It raises memory use
+        // and decode time (most noticeable on large-v3) because whisper.cpp keeps the
+        // cross-attention weights for alignment, but word-level timestamps are required by
+        // the re-split feature, so the cost is intentional. When the preset is unknown or
+        // DTW init fails we fall back to the energy heuristic (t0/t1) below, so quality
+        // degrades gracefully rather than failing.
         ctx_params.dtw_parameters(DtwParameters {
             mode: DtwMode::ModelPreset {
                 model_preset: preset,
@@ -174,6 +180,11 @@ pub fn shutdown_cache(cache: &crate::WhisperCache, timeout: std::time::Duration)
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
     let drained = ACTIVE_JOBS.load(Ordering::SeqCst) == 0;
+    if !drained {
+        eprintln!(
+            "shutdown_cache: transcription still running at deadline; Metal context not released, exit-time abort possible"
+        );
+    }
     let cached = {
         let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
         guard.take()
@@ -689,19 +700,48 @@ fn run_inference_pass(
 /// heuristic `t0` (which detects pauses) clamped between the previous word's end and
 /// this word's end. Everything is clamped to the segment bounds and forced monotonic,
 /// so downstream splits can never produce out-of-order or out-of-range times.
+struct RawWord {
+    text: String,
+    t0: i64,    // heuristic start of first token (centiseconds)
+    t1: i64,    // heuristic end of last token (centiseconds)
+    t_dtw: i64, // DTW-aligned end of last token, -1 when unavailable
+}
+
+/// Turn grouped raw tokens into monotonic, in-bounds `Word`s. Split out of
+/// `extract_word_timestamps` so the clamp logic can be unit-tested without a live
+/// `WhisperSegment`.
+///
+/// Whisper occasionally emits a degenerate segment with `seg_t0_cs > seg_t1_cs`. The
+/// upper clamp bound is therefore `seg_t1_cs.max(prev_end_cs)`: in the normal case
+/// (t0 <= t1) it stays `seg_t1_cs`, but it never drops below the lower bound, so
+/// `Ord::clamp` (which asserts min <= max) can't panic. `start_cs` then clamps into
+/// `[prev_end_cs, end_cs]`, which is a valid range because `end_cs >= prev_end_cs`.
+fn words_from_raw(raw: &[RawWord], seg_t0_cs: i64, seg_t1_cs: i64) -> Vec<Word> {
+    let cs_to_ms = |cs: i64| (cs.max(0) * 10) as u64;
+
+    let mut words: Vec<Word> = Vec::with_capacity(raw.len());
+    let mut prev_end_cs = seg_t0_cs;
+    for rw in raw {
+        let end_cs =
+            if rw.t_dtw >= 0 { rw.t_dtw } else { rw.t1 }.clamp(prev_end_cs, seg_t1_cs.max(prev_end_cs));
+        let start_cs = rw.t0.clamp(prev_end_cs, end_cs);
+        words.push(Word {
+            text: rw.text.clone(),
+            start_time: cs_to_ms(start_cs),
+            end_time: cs_to_ms(end_cs),
+        });
+        prev_end_cs = end_cs;
+    }
+
+    words
+}
+
 fn extract_word_timestamps(
     segment: &whisper_rs::WhisperSegment<'_>,
     token_eot: whisper_rs::WhisperTokenId,
     seg_t0_cs: i64,
     seg_t1_cs: i64,
 ) -> Vec<Word> {
-    struct RawWord {
-        text: String,
-        t0: i64,    // heuristic start of first token (centiseconds)
-        t1: i64,    // heuristic end of last token (centiseconds)
-        t_dtw: i64, // DTW-aligned end of last token, -1 when unavailable
-    }
-
     let num_tokens = segment.n_tokens();
     let mut raw: Vec<RawWord> = Vec::new();
     let mut pending_break = false;
@@ -754,22 +794,7 @@ fn extract_word_timestamps(
         }
     }
 
-    let cs_to_ms = |cs: i64| (cs.max(0) * 10) as u64;
-
-    let mut words: Vec<Word> = Vec::with_capacity(raw.len());
-    let mut prev_end_cs = seg_t0_cs;
-    for rw in &raw {
-        let end_cs = if rw.t_dtw >= 0 { rw.t_dtw } else { rw.t1 }.clamp(prev_end_cs, seg_t1_cs);
-        let start_cs = rw.t0.clamp(prev_end_cs, end_cs);
-        words.push(Word {
-            text: rw.text.clone(),
-            start_time: cs_to_ms(start_cs),
-            end_time: cs_to_ms(end_cs),
-        });
-        prev_end_cs = end_cs;
-    }
-
-    words
+    words_from_raw(&raw, seg_t0_cs, seg_t1_cs)
 }
 
 /// Read a 16-bit PCM WAV file and return f32 samples normalized to [-1, 1].
@@ -976,5 +1001,60 @@ pub fn detect_speakers(subtitles: &mut [Subtitle], audio_data: &[f32]) {
     // Assign labels
     for (sub, &speaker_idx) in subtitles.iter_mut().zip(assignments.iter()) {
         sub.speaker = Some(format!("Speaker {}", speaker_idx + 1));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rw(text: &str, t0: i64, t1: i64, t_dtw: i64) -> RawWord {
+        RawWord {
+            text: text.to_string(),
+            t0,
+            t1,
+            t_dtw,
+        }
+    }
+
+    /// REL-1: a degenerate segment (seg_t0_cs > seg_t1_cs, as whisper.cpp sometimes emits)
+    /// must not panic in `Ord::clamp` and must still yield monotonic words with start <= end.
+    #[test]
+    fn degenerate_segment_does_not_panic_and_stays_monotonic() {
+        let raw = vec![rw("a", 500, 400, -1), rw("b", 450, 460, -1)];
+        // seg_t0_cs > seg_t1_cs — prev_end_cs (=seg_t0_cs) would exceed the old upper bound.
+        let words = words_from_raw(&raw, 500, 300);
+
+        assert_eq!(words.len(), 2);
+        let mut prev_end = 0u64;
+        for w in &words {
+            assert!(w.start_time <= w.end_time, "word not monotonic: {:?}", w);
+            assert!(w.start_time >= prev_end, "start regressed: {:?}", w);
+            prev_end = w.end_time;
+        }
+    }
+
+    /// Normal path (t0 <= t1): DTW end is used, timings stay in [seg_t0, seg_t1] and monotonic.
+    #[test]
+    fn normal_segment_uses_dtw_end_within_bounds() {
+        let raw = vec![rw("hello", 10, 40, 45), rw("world", 50, 90, 95)];
+        let words = words_from_raw(&raw, 0, 100);
+
+        assert_eq!(words.len(), 2);
+        assert_eq!(words[0].start_time, 100); // 10 cs -> 100 ms
+        assert_eq!(words[0].end_time, 450); // DTW 45 cs -> 450 ms
+        assert!(words[1].start_time >= words[0].end_time);
+        assert!(words[1].end_time <= 1000); // seg_t1 100 cs -> 1000 ms
+    }
+
+    /// Without DTW (t_dtw < 0) the heuristic t1 provides the end, clamped to segment bounds.
+    #[test]
+    fn falls_back_to_heuristic_end_without_dtw() {
+        let raw = vec![rw("x", 10, 200, -1)];
+        let words = words_from_raw(&raw, 0, 100);
+
+        assert_eq!(words.len(), 1);
+        assert_eq!(words[0].start_time, 100); // 10 cs -> 100 ms
+        assert_eq!(words[0].end_time, 1000); // t1 200 cs clamped to seg_t1 100 cs -> 1000 ms
     }
 }

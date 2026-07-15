@@ -18,20 +18,21 @@ import type { WhisperModelInfo, TranscriptionProgress } from "../../types/subtit
 
 // Whisper's language auto-detection proved unreliable (empty/failed transcriptions),
 // so there is deliberately no "auto" option — the user must pick a language.
-const LANGUAGE_OPTIONS = [
-  "en",
-  "pl",
-  "de",
-  "fr",
-  "es",
-  "it",
-  "pt",
-  "nl",
-  "ja",
-  "ko",
-  "zh",
-  "ru",
-  "uk",
+// Single source of truth for the selectable transcription languages in the frontend.
+// keep in sync with backend language whitelist (transcribe.rs)
+// Full official Whisper language set (99 codes). Ordered UX-first: the most common
+// languages, then the remainder alphabetically by code.
+export const LANGUAGE_OPTIONS = [
+  // Most common first
+  "en", "pl", "de", "es", "fr", "it", "pt", "nl", "ru", "uk", "ja", "ko", "zh",
+  // Remainder, alphabetical by code
+  "af", "am", "ar", "as", "az", "ba", "be", "bg", "bn", "bo", "br", "bs", "ca",
+  "cs", "cy", "da", "el", "et", "eu", "fa", "fi", "fo", "gl", "gu", "ha", "haw",
+  "he", "hi", "hr", "ht", "hu", "hy", "id", "is", "ka", "kk", "km", "kn", "la",
+  "lb", "ln", "lo", "lt", "lv", "mg", "mi", "mk", "ml", "mn", "mr", "ms", "mt",
+  "my", "ne", "nn", "no", "oc", "pa", "ps", "ro", "sa", "sd", "si", "sk", "sl",
+  "sn", "so", "sq", "sr", "su", "sv", "sw", "ta", "te", "tg", "th", "tk", "tl",
+  "tr", "tt", "ur", "uz", "vi", "yi", "yo", "yue",
 ] as const;
 
 interface TranscriptionPanelProps {
@@ -57,6 +58,8 @@ export default function TranscriptionPanel({
     setSegmentLimitMode,
     setSegmentMaxWords,
     setSegmentMaxChars,
+    transcriptionLanguage: language,
+    setTranscriptionLanguage: setLanguage,
   } = useSettingsStore();
   const { setSubtitles, clearOriginalSubtitles, resegment } = useSubtitleStore();
   const hasSubtitles = useSubtitleStore((s) => s.subtitles.length > 0);
@@ -76,7 +79,6 @@ export default function TranscriptionPanel({
   const [transcribing, setTranscribing] = useState(false);
   const [progress, setProgress] = useState<TranscriptionProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [language, setLanguage] = useState("");
   const [detectSpeakers, setDetectSpeakers] = useState(false);
 
   useEffect(() => {
@@ -273,13 +275,18 @@ export default function TranscriptionPanel({
               {t("transcription:segmentLimitHint")}
             </p>
             {hasSubtitles && !transcribing && (
-              <button
-                onClick={() => resegment(segmentLimit)}
-                className="flex items-center gap-1.5 w-full justify-center rounded bg-gray-100 dark:bg-gray-700 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-              >
-                <Scissors size={14} />
-                {t("transcription:applySegmentLimit")}
-              </button>
+              <>
+                <button
+                  onClick={() => resegment(segmentLimit)}
+                  className="flex items-center gap-1.5 w-full justify-center rounded bg-gray-100 dark:bg-gray-700 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                >
+                  <Scissors size={14} />
+                  {t("transcription:applySegmentLimit")}
+                </button>
+                <p className="text-[11px] leading-snug text-gray-400 dark:text-gray-500">
+                  {t("transcription:resplitDirectionHint")}
+                </p>
+              </>
             )}
           </>
         )}
