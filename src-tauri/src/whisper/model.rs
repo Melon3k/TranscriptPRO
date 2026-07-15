@@ -134,6 +134,54 @@ fn load_context(
     })
 }
 
+/// Number of `transcribe()` calls currently running. `shutdown_cache` drains this
+/// before dropping the cache: a job that is still *loading* a model has live Metal
+/// buffers that are not yet visible in the cache, so watching the cache alone
+/// would miss them.
+static ACTIVE_JOBS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+struct JobGuard;
+
+impl JobGuard {
+    fn new() -> Self {
+        ACTIVE_JOBS.fetch_add(1, Ordering::SeqCst);
+        JobGuard
+    }
+}
+
+impl Drop for JobGuard {
+    fn drop(&mut self) {
+        ACTIVE_JOBS.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// Drop the cached context before the process exits, waiting (bounded) for any
+/// in-flight transcription to finish first — the caller must already have set the
+/// cancellation flag so an in-flight job aborts instead of running to completion.
+///
+/// ggml's Metal device is a C++ static singleton whose destructor
+/// (`ggml_metal_device_free` → `ggml_metal_rsets_free`) runs during libc `exit()`
+/// and aborts unless every Metal residency set has been released. A cached GPU
+/// context still owns its model buffers — and their residency sets — at that
+/// point, so quitting after a Metal transcription SIGABRTed. Freeing the context
+/// here releases the buffers while the app is still running.
+///
+/// Returns false when a job was still running at the deadline — the exit-time
+/// abort may then still fire (same behavior as before this fix).
+pub fn shutdown_cache(cache: &crate::WhisperCache, timeout: std::time::Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    while ACTIVE_JOBS.load(Ordering::SeqCst) > 0 && Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let drained = ACTIVE_JOBS.load(Ordering::SeqCst) == 0;
+    let cached = {
+        let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+        guard.take()
+    };
+    drop(cached);
+    drained
+}
+
 /// Drop the cached context for a given (model, backend) — used after a failure so a
 /// potentially tainted GPU/Metal context is never reused on a later job.
 fn evict_context(cache: &crate::WhisperCache, model_path: &Path, use_gpu: bool) {
@@ -162,6 +210,7 @@ pub fn transcribe(
     cache: &crate::WhisperCache,
 ) -> Result<Vec<Subtitle>, AppError> {
     let started = Instant::now();
+    let _job = JobGuard::new();
 
     // ── Load model ──────────────────────────────────────────────────────
     let model_size_mb = std::fs::metadata(model_path).map(|m| m.len() / 1_048_576).unwrap_or(0);

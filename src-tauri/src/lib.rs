@@ -230,8 +230,8 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while running TranscriptPRO")
-        .run(|app_handle, event| {
-            if let RunEvent::ExitRequested { api, .. } = event {
+        .run(|app_handle, event| match event {
+            RunEvent::ExitRequested { api, .. } => {
                 let dirty = app_handle.state::<DirtyState>().0.load(Ordering::Relaxed);
                 if dirty {
                     // Quit (incl. macOS Cmd+Q) with unsaved changes — stay open and let the
@@ -248,5 +248,21 @@ pub fn run() {
                     kill_local_llm(app_handle);
                 }
             }
+            // Last event before tao calls std::process::exit. The cached Whisper
+            // context must be freed now: ggml's Metal device singleton is torn down
+            // by C++ static destructors inside exit() and aborts (SIGABRT on quit)
+            // if any of its Metal buffers are still alive. Cancel first so an
+            // in-flight transcription aborts promptly instead of holding Metal
+            // resources past shutdown_cache's bounded wait.
+            RunEvent::Exit => {
+                app_handle
+                    .state::<TranscriptionCancel>()
+                    .0
+                    .store(true, Ordering::Relaxed);
+                if let Some(cache) = app_handle.try_state::<WhisperCache>() {
+                    whisper::model::shutdown_cache(&cache, std::time::Duration::from_secs(5));
+                }
+            }
+            _ => {}
         });
 }
