@@ -208,53 +208,70 @@ function splitSegmentByLimit(seg: Subtitle, limit: SegmentLimit): Subtitle[] {
   const limitWeight = limit.mode === "words" ? limit.value : limit.value + 1;
   if (total <= limitWeight) return [seg];
 
-  const groupCount = Math.min(tokens.length, Math.ceil(total / limitWeight));
-  if (groupCount < 2) return [seg];
-
-  // Balanced boundaries: cut where cumulative weight crosses k/groupCount of
-  // the total, so pieces come out roughly equal instead of a full last-orphan.
-  const boundaries: number[] = [];
-  let acc = 0;
-  let k = 1;
-  for (let i = 0; i < tokens.length && k < groupCount; i++) {
-    acc += weights[i];
-    if (acc >= (k * total) / groupCount && i + 1 < tokens.length) {
-      boundaries.push(i + 1);
-      k++;
-    }
-  }
-
   // Words are usable for timing only when they map 1:1 onto the text tokens
   // (the text may have been edited after transcription).
   const aligned = seg.words.length === tokens.length;
 
-  // Nudge each boundary ±1 word towards a natural break: after punctuation,
-  // or where there is an audible pause between words.
+  // Pick cut points with dynamic programming instead of a balanced-greedy pass:
+  // the limit is a HARD cap (a group may exceed it only when a single token is
+  // by itself heavier than the limit), and within that we minimise a cost that
+  // (a) dislikes underfull groups, (b) likes cutting after punctuation or an
+  // audible pause, and (c) refuses to strand connectives — short function
+  // words like "i"/"na"/"że" shouldn't end a line, let alone stand alone.
   const PAUSE_MS = 250;
-  const snapped: number[] = [];
-  for (const b of boundaries) {
-    const prev = snapped.length > 0 ? snapped[snapped.length - 1] : 0;
-    let best = b;
-    let bestScore = -Infinity;
-    for (const cand of [b - 1, b, b + 1]) {
-      if (cand <= prev || cand >= tokens.length) continue;
-      let score = cand === b ? 0.5 : 0; // slight preference for the balanced cut
-      if (/[.,!?…;:]$/.test(tokens[cand - 1])) score += 3;
-      if (
-        aligned &&
-        seg.words[cand].startTime - seg.words[cand - 1].endTime >= PAUSE_MS
-      ) {
-        score += 2;
+  const n = tokens.length;
+  // Sentence-final punctuation is a great cut; a comma is only a mild one —
+  // never worth stranding two half-empty pieces around it.
+  const endsWithStrongPunct = (i: number) => /[.!?…]$/.test(tokens[i]);
+  const endsWithPunct = (i: number) => /[.,!?…;:]$/.test(tokens[i]);
+  // Heuristic: a short bare word ("i", "na", "że", "jak", "and", "the") is a
+  // connective that belongs with what FOLLOWS it, not with what precedes.
+  const isConnective = (i: number) => tokens[i].length <= 3 && !endsWithPunct(i);
+  const pauseAfter = (i: number) =>
+    aligned &&
+    i + 1 < n &&
+    seg.words[i + 1].startTime - seg.words[i].endTime >= PAUSE_MS;
+
+  // dp[i] = minimal cost of segmenting tokens[0..i); prevCut[i] = where the
+  // last group before i starts on that optimal path.
+  const dp = new Array<number>(n + 1).fill(Infinity);
+  const prevCut = new Array<number>(n + 1).fill(-1);
+  dp[0] = 0;
+  for (let i = 1; i <= n; i++) {
+    let w = 0;
+    for (let j = i - 1; j >= 0; j--) {
+      w += weights[j];
+      const size = i - j;
+      if (w > limitWeight && size > 1) break; // hard cap (single token exempt)
+      if (dp[j] === Infinity) continue;
+
+      let cost = dp[j];
+      // Underfull groups waste screen time — quadratic penalty on the gap.
+      const fill = Math.min(w, limitWeight) / limitWeight;
+      cost += (1 - fill) * (1 - fill) * 4;
+      // Break quality at this cut (the final boundary is not a real cut)
+      if (i < n) {
+        if (endsWithStrongPunct(i - 1)) cost -= 2;
+        else if (endsWithPunct(i - 1)) cost -= 0.75;
+        else if (pauseAfter(i - 1)) cost -= 1.5;
+        if (isConnective(i - 1)) cost += 2;
       }
-      if (score > bestScore) {
-        bestScore = score;
-        best = cand;
+      // A lone connective as its own subtitle reads terribly — avoid hard.
+      if (size === 1 && isConnective(j)) cost += 4;
+
+      if (cost < dp[i]) {
+        dp[i] = cost;
+        prevCut[i] = j;
       }
-    }
-    if (snapped.length === 0 || best > snapped[snapped.length - 1]) {
-      snapped.push(best);
     }
   }
+
+  // Backtrack the optimal cut positions
+  const snapped: number[] = [];
+  for (let i = prevCut[n]; i > 0; i = prevCut[i]) {
+    snapped.unshift(i);
+  }
+  if (snapped.length === 0) return [seg];
 
   // Cut into pieces along the snapped boundaries
   const pieces: Subtitle[] = [];
