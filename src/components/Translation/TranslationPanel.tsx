@@ -1,64 +1,38 @@
-import { useEffect, useState } from "react";
-import { Download, Languages, Loader2, Columns2, X } from "lucide-react";
+import { useEffect, useState, type CSSProperties } from "react";
+import { Download, Languages, Columns2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useSubtitleStore } from "../../stores/subtitleStore";
 import { useVersionStore } from "../../stores/versionStore";
+import { useNotifyStore } from "../../stores/notifyStore";
 import {
-  translateSubtitles,
-  cancelTranslation,
-  localModelStatus,
-  downloadLocalModel,
-  cancelLocalModelDownload,
-  type LocalModelInfo,
+  translateSubtitles, cancelTranslation, localModelStatus,
+  downloadLocalModel, cancelLocalModelDownload, type LocalModelInfo,
 } from "../../lib/tauri-commands";
 import { formatError, isCancellation } from "../../lib/error-format";
 import type { TranslationProgress, TranslationProvider } from "../../types/subtitle";
+import { COLORS, f, primaryBtn } from "../../lib/ui";
+import { FieldLabel, Select } from "../common/Field";
+import { ProgressCard } from "../Transcription/TranscriptionPanel";
 
 const PROVIDER_OPTIONS = ["gemini", "claude", "local"] as const;
-const LANGUAGE_OPTIONS = [
-  "EN",
-  "PL",
-  "DE",
-  "FR",
-  "ES",
-  "IT",
-  "PT",
-  "NL",
-  "JA",
-  "KO",
-  "ZH",
-  "RU",
-  "UK",
-] as const;
+const LANGUAGE_OPTIONS = ["EN", "PL", "DE", "FR", "ES", "IT", "PT", "NL", "JA", "KO", "ZH", "RU", "UK"] as const;
 
 export default function TranslationPanel() {
   const { t } = useTranslation(["translation", "common"]);
-  const {
-    translationProvider,
-    setTranslationProvider,
-    hasGeminiKey,
-    hasClaudeKey,
-    geminiModel,
-    autoSaveOnTranslation,
-  } = useSettingsStore();
+  const { translationProvider, setTranslationProvider, hasGeminiKey, hasClaudeKey, geminiModel, autoSaveOnTranslation } =
+    useSettingsStore();
   const { addVersion } = useVersionStore();
   const {
-    subtitles,
-    setSubtitles,
-    originalSubtitles,
-    setOriginalSubtitles,
-    clearOriginalSubtitles,
-    comparisonMode,
-    setComparisonMode,
+    subtitles, setSubtitles, originalSubtitles, setOriginalSubtitles,
+    clearOriginalSubtitles, comparisonMode, setComparisonMode,
   } = useSubtitleStore();
+  const notify = useNotifyStore((s) => s.notify);
 
   const [targetLang, setTargetLang] = useState("EN");
   const [sourceLang, setSourceLang] = useState("");
   const [translating, setTranslating] = useState(false);
   const [progress, setProgress] = useState<TranslationProgress | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [warning, setWarning] = useState<string | null>(null);
   const [translated, setTranslated] = useState(false);
   const [localModel, setLocalModel] = useState<LocalModelInfo | null>(null);
   const [downloadingModel, setDownloadingModel] = useState(false);
@@ -68,352 +42,207 @@ export default function TranslationPanel() {
 
   useEffect(() => {
     if (!isLocal) return;
-    localModelStatus()
-      .then(setLocalModel)
-      .catch(() => setLocalModel(null));
+    localModelStatus().then(setLocalModel).catch(() => setLocalModel(null));
   }, [isLocal]);
 
-  const handleCancelTranslation = async () => {
-    try {
-      await cancelTranslation();
-    } catch (e) {
-      console.error("Cancel translation failed:", e);
-    }
-  };
-
-  const handleDownloadModel = async () => {
-    setDownloadingModel(true);
-    setError(null);
-    setModelProgress(0);
-    try {
-      await downloadLocalModel((p) => setModelProgress(p));
-      setLocalModel(await localModelStatus());
-    } catch (e) {
-      // A user cancel isn't an error — just refresh status (model stays not-downloaded).
-      if (isCancellation(e)) {
-        setLocalModel(await localModelStatus().catch(() => null));
-      } else {
-        setError(formatError(t, e));
-      }
-    } finally {
-      setDownloadingModel(false);
-    }
-  };
-
-  const handleCancelDownload = async () => {
-    try {
-      await cancelLocalModelDownload();
-    } catch (e) {
-      console.error("Cancel model download failed:", e);
-    }
-  };
-
-  const hasKey = isLocal
-    ? true // the local model needs no API key
-    : translationProvider === "gemini"
-    ? hasGeminiKey
-    : hasClaudeKey;
-  // TranslateGemma has no source auto-detect, so "local" requires an explicit source.
+  const hasKey = isLocal ? true : translationProvider === "gemini" ? hasGeminiKey : hasClaudeKey;
   const localNeedsSource = isLocal && !sourceLang;
   const localNeedsModel = isLocal && !(localModel?.downloaded ?? false);
-  const canTranslate =
-    subtitles.length > 0 && hasKey && !localNeedsSource && !localNeedsModel;
+  const canTranslate = subtitles.length > 0 && hasKey && !localNeedsSource && !localNeedsModel;
+
+  const handleDownloadModel = async () => {
+    setDownloadingModel(true); setModelProgress(0);
+    try { await downloadLocalModel(setModelProgress); setLocalModel(await localModelStatus()); }
+    catch (e) {
+      if (isCancellation(e)) setLocalModel(await localModelStatus().catch(() => null));
+      else notify("error", formatError(t, e));
+    } finally { setDownloadingModel(false); }
+  };
+  const handleCancelDownload = async () => {
+    try { await cancelLocalModelDownload(); } catch (e) { console.error("Cancel model download failed:", e); }
+  };
+  const handleCancelTranslation = async () => {
+    try { await cancelTranslation(); } catch (e) { console.error("Cancel translation failed:", e); }
+  };
 
   const handleTranslate = async () => {
     if (!canTranslate) return;
-    setTranslating(true);
-    setError(null);
-    setWarning(null);
-    setProgress(null);
+    setTranslating(true); setProgress(null);
     try {
-      // Snapshot originals before translation
       setOriginalSubtitles([...subtitles]);
-
       const result = await translateSubtitles(
-        subtitles,
-        targetLang,
-        translationProvider,
-        sourceLang || undefined,
-        translationProvider === "gemini" ? geminiModel : undefined,
-        (p) => setProgress(p)
+        subtitles, targetLang, translationProvider, sourceLang || undefined,
+        translationProvider === "gemini" ? geminiModel : undefined, setProgress,
       );
-
       if (result.translatedCount === 0) {
-        // Nothing was translated (error on the very first request) — treat as a
-        // hard failure: surface the message and drop the snapshot.
-        setError(result.warning ?? t("translation:nothingTranslated"));
+        notify("error", result.warning ?? t("translation:nothingTranslated"));
         clearOriginalSubtitles();
         return;
       }
-
-      // Not auto-saved to history → mark dirty so the unsaved translation isn't lost on close.
       setSubtitles(result.subtitles, { dirty: !autoSaveOnTranslation });
       setTranslated(true);
+      setComparisonMode(true);
       if (result.warning) {
-        // Partial success: keep what we got + the comparison snapshot, but warn
-        // instead of silently pretending the whole file was translated.
-        setWarning(
-          t("translation:partialWarning", {
-            done: result.translatedCount,
-            total: subtitles.length,
-          })
-        );
-      } else if (autoSaveOnTranslation) {
-        addVersion(result.subtitles, "translation", {
-          provider: translationProvider,
-          targetLang,
-          sourceLang: sourceLang || undefined,
-          model: translationProvider === "gemini" ? geminiModel : undefined,
-        });
+        notify("error", t("translation:partialWarning", { done: result.translatedCount, total: subtitles.length }));
+      } else {
+        if (autoSaveOnTranslation) {
+          addVersion(result.subtitles, "translation", {
+            provider: translationProvider, targetLang,
+            sourceLang: sourceLang || undefined,
+            model: translationProvider === "gemini" ? geminiModel : undefined,
+          });
+        }
+        notify("success", t("translation:doneNotice", { done: result.translatedCount, total: subtitles.length }));
       }
     } catch (e) {
-      setError(formatError(t, e));
-      // Clear snapshot on failure
+      notify("error", formatError(t, e));
       clearOriginalSubtitles();
     } finally {
-      setTranslating(false);
-      setProgress(null);
+      setTranslating(false); setProgress(null);
     }
   };
 
   return (
-    <div className="p-4 space-y-4">
-      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2">
-        <Languages size={16} />
-        {t("translation:header")}
-      </h3>
+    <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+        <Languages size={17} color={COLORS.violetLight} />
+        <span style={f(600, 15, "display")}>{t("translation:header")}</span>
+      </div>
 
-      {/* Provider */}
-      <div className="space-y-2">
-        <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">
-          {t("translation:providerLabel")}
-        </label>
-        <select
-          value={translationProvider}
-          onChange={(e) => setTranslationProvider(e.target.value as TranslationProvider)}
-          className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1.5 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
-          disabled={translating}
-        >
-          {PROVIDER_OPTIONS.map((p) => (
-            <option key={p} value={p}>
+      <FieldLabel>{t("translation:providerLabel")}</FieldLabel>
+      <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+        {PROVIDER_OPTIONS.map((p) => {
+          const active = translationProvider === p;
+          return (
+            <button
+              key={p}
+              onClick={() => !translating && setTranslationProvider(p as TranslationProvider)}
+              disabled={translating}
+              style={{
+                flex: 1, height: 30, display: "flex", alignItems: "center", justifyContent: "center",
+                borderRadius: 7, cursor: translating ? "not-allowed" : "pointer",
+                background: active ? "rgba(124,58,237,.16)" : "var(--c-raised)",
+                border: `1px solid ${active ? COLORS.violet : "var(--c-border)"}`,
+                color: active ? "#c4b5fd" : "var(--c-text2)", ...f(600, 11),
+              }}
+            >
               {t(`translation:provider.${p}`)}
-            </option>
-          ))}
-        </select>
+            </button>
+          );
+        })}
       </div>
 
-      {/* Target language */}
-      <div className="space-y-2">
-        <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">
-          {t("translation:targetLanguageLabel")}
-        </label>
-        <select
-          value={targetLang}
-          onChange={(e) => setTargetLang(e.target.value)}
-          className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1.5 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
-          disabled={translating}
-        >
-          {LANGUAGE_OPTIONS.map((code) => (
-            <option key={code} value={code}>
-              {t(`translation:language.${code}`)}
-            </option>
-          ))}
-        </select>
+      <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+        <div style={{ flex: 1 }}>
+          <FieldLabel>{t("translation:targetLanguageLabel")}</FieldLabel>
+          <Select value={targetLang} disabled={translating} onChange={(e) => setTargetLang(e.target.value)} style={{ height: 32 }}>
+            {LANGUAGE_OPTIONS.map((c) => <option key={c} value={c}>{t(`translation:language.${c}`)}</option>)}
+          </Select>
+        </div>
+        <div style={{ flex: 1 }}>
+          <FieldLabel>{t("translation:sourceLanguageLabel")}</FieldLabel>
+          <Select value={sourceLang} disabled={translating} onChange={(e) => setSourceLang(e.target.value)} style={{ height: 32 }}>
+            <option value="">{t("translation:sourceAuto")}</option>
+            {LANGUAGE_OPTIONS.map((c) => <option key={c} value={c}>{t(`translation:language.${c}`)}</option>)}
+          </Select>
+        </div>
       </div>
 
-      {/* Source language (optional) */}
-      <div className="space-y-2">
-        <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">
-          {t("translation:sourceLanguageLabel")}
-        </label>
-        <select
-          value={sourceLang}
-          onChange={(e) => setSourceLang(e.target.value)}
-          className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1.5 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
-          disabled={translating}
-        >
-          <option value="">{t("translation:sourceAuto")}</option>
-          {LANGUAGE_OPTIONS.map((code) => (
-            <option key={code} value={code}>
-              {t(`translation:language.${code}`)}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {/* Local model download (one-time, ~2.3 GB) */}
       {isLocal && localModel && !localModel.downloaded && (
-        <div className="space-y-1">
+        <div style={{ marginBottom: 14 }}>
           {downloadingModel ? (
             <>
-              <div className="flex items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-400">
-                <span className="flex items-center gap-2">
-                  <Loader2 size={14} className="animate-spin" />
-                  {t("translation:localModel.downloading", {
-                    percent: Math.round(modelProgress * 100),
-                  })}
-                </span>
-                <button
-                  onClick={() => void handleCancelDownload()}
-                  className="flex items-center gap-1 text-gray-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
-                >
-                  <X size={13} />
-                  {t("translation:cancel")}
-                </button>
-              </div>
-              <div className="h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
-                <div
-                  className="h-full bg-blue-500 transition-[width] duration-300"
-                  style={{ width: `${modelProgress * 100}%` }}
-                />
-              </div>
+              <ProgressCard label={t("translation:localModel.downloading", { percent: Math.round(modelProgress * 100) })} percent={Math.round(modelProgress * 100)} accent={COLORS.violet} />
+              <button onClick={handleCancelDownload} style={{ ...ghostLink, marginTop: 8 }}>
+                <X size={13} />{t("translation:cancel")}
+              </button>
             </>
           ) : (
             <>
-              <p className="rounded bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700 px-3 py-2 text-xs text-gray-600 dark:text-gray-400 leading-relaxed">
-                {t("translation:localModel.gemmaConsent")}
-              </p>
-              <button
-                onClick={() => void handleDownloadModel()}
-                className="flex items-center gap-2 w-full justify-center rounded-lg bg-blue-500 hover:bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors"
-              >
-                <Download size={16} />
-                {t("translation:localModel.download", {
-                  size: (localModel.sizeMb / 1024).toFixed(1),
-                })}
+              <p style={{ ...noteBox, marginBottom: 8 }}>{t("translation:localModel.gemmaConsent")}</p>
+              <button onClick={handleDownloadModel} style={primaryBtn(COLORS.blue)}>
+                <Download size={16} />{t("translation:localModel.download", { size: (localModel.sizeMb / 1024).toFixed(1) })}
               </button>
             </>
           )}
         </div>
       )}
 
-      {/* Translate / Cancel button */}
       {translating ? (
-        <button
-          onClick={handleCancelTranslation}
-          className="flex items-center gap-2 w-full justify-center rounded-lg bg-red-500 hover:bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors"
-        >
-          <X size={16} />
-          {t("translation:cancel")}
-        </button>
-      ) : (
-        <button
-          onClick={handleTranslate}
-          disabled={!canTranslate || downloadingModel}
-          className="flex items-center gap-2 w-full justify-center rounded-lg bg-purple-500 hover:bg-purple-600 disabled:bg-purple-300 dark:disabled:bg-purple-800 px-4 py-2 text-sm font-medium text-white transition-colors"
-        >
-          <Languages size={16} />
-          {t("translation:translate", { count: subtitles.length })}
-        </button>
-      )}
-
-      {/* Translation progress */}
-      {translating && (
-        <div className="space-y-1">
-          <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-            <Loader2 size={14} className="animate-spin" />
-            {progress && progress.total > 0
-              ? t("translation:progress", { done: progress.done, total: progress.total })
-              : t("translation:translating")}
-          </div>
-          {progress && progress.total > 0 && (
-            <div className="h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
-              <div
-                className="h-full bg-purple-500 transition-[width] duration-300"
-                style={{ width: `${(progress.done / progress.total) * 100}%` }}
-              />
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Comparison toggle */}
-      {translated && originalSubtitles && (
-        <div className="space-y-2">
-          <button
-            onClick={() => setComparisonMode(!comparisonMode)}
-            className={`flex items-center gap-2 w-full justify-center rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-              comparisonMode
-                ? "bg-amber-500 hover:bg-amber-600 text-white"
-                : "bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600"
-            }`}
-          >
-            {comparisonMode ? (
-              <>
-                <X size={16} />
-                {t("translation:hideComparison")}
-              </>
-            ) : (
-              <>
-                <Columns2 size={16} />
-                {t("translation:compare")}
-              </>
-            )}
+        <>
+          <button onClick={handleCancelTranslation} style={{ ...dangerBtn, marginBottom: 14 }}>
+            <X size={15} />{t("translation:cancel")}
           </button>
+          <ProgressCard
+            label={progress && progress.total > 0 ? t("translation:progress", { done: progress.done, total: progress.total }) : t("translation:translating")}
+            percent={progress && progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : null}
+            accent={COLORS.violet}
+          />
+        </>
+      ) : (
+        <button onClick={handleTranslate} disabled={!canTranslate || downloadingModel} style={primaryBtn(COLORS.violet, !canTranslate || downloadingModel)}>
+          <Languages size={15} />{t("translation:translate", { count: subtitles.length })}
+        </button>
+      )}
 
-          {!comparisonMode && (
-            <div className="flex gap-2">
-              {/* Keep the translation: drop the pre-translation snapshot. */}
-              <button
-                onClick={() => {
-                  clearOriginalSubtitles();
-                  setTranslated(false);
-                }}
-                className="flex-1 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-              >
-                {t("translation:keepTranslation")}
-              </button>
-              {/* Reject the translation: bring the original text back. */}
-              <button
-                onClick={() => {
-                  if (!originalSubtitles) return;
-                  setSubtitles(originalSubtitles, { dirty: true });
-                  clearOriginalSubtitles();
-                  setTranslated(false);
-                }}
-                className="flex-1 text-xs text-gray-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
-              >
-                {t("translation:restoreOriginal")}
-              </button>
-            </div>
-          )}
+      {translated && originalSubtitles && !translating && (
+        <div style={{ marginTop: 12 }}>
+          <button onClick={() => setComparisonMode(!comparisonMode)} style={{ ...secondaryBtn, height: 38, marginBottom: 10 }}>
+            <Columns2 size={14} />
+            {comparisonMode ? t("translation:hideComparison") : t("translation:compare")}
+          </button>
+          <div style={{ display: "flex", gap: 9 }}>
+            <button
+              onClick={() => { clearOriginalSubtitles(); setTranslated(false); }}
+              style={{ ...secondaryBtn, flex: 1, height: 36 }}
+            >
+              {t("translation:keepTranslation")}
+            </button>
+            <button
+              onClick={() => {
+                if (!originalSubtitles) return;
+                setSubtitles(originalSubtitles, { dirty: true });
+                clearOriginalSubtitles();
+                setTranslated(false);
+              }}
+              style={{ ...secondaryBtn, flex: 1, height: 36 }}
+            >
+              {t("translation:restoreOriginal")}
+            </button>
+          </div>
         </div>
       )}
 
-      {/* Warnings */}
       {!hasKey && !isLocal && (
-        <p className="text-xs text-amber-500 dark:text-amber-400 text-center">
-          {t("translation:apiKeyMissing", {
-            provider: t(`translation:providerName.${translationProvider}`),
-          })}
-        </p>
+        <p style={warnText}>{t("translation:apiKeyMissing", { provider: t(`translation:providerName.${translationProvider}`) })}</p>
       )}
-      {localNeedsSource && !localNeedsModel && (
-        <p className="text-xs text-amber-500 dark:text-amber-400 text-center">
-          {t("translation:localModel.needsSource")}
-        </p>
-      )}
-      {/* Standing attribution once the model is present; before download the
-          consent notice in the download block covers it (avoid showing both). */}
+      {localNeedsSource && !localNeedsModel && <p style={warnText}>{t("translation:localModel.needsSource")}</p>}
       {isLocal && localModel?.downloaded && (
-        <p className="text-[10px] text-gray-400 dark:text-gray-500 text-center leading-relaxed">
+        <p style={f(400, 10, "body", { color: "var(--c-muted)", textAlign: "center", lineHeight: 1.5, marginTop: 10 })}>
           {t("translation:localModel.gemmaNotice")}
         </p>
-      )}
-
-      {/* Partial-success warning (kept translation, but the run stopped early) */}
-      {warning && (
-        <div className="rounded bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
-          {warning}
-        </div>
-      )}
-
-      {/* Error */}
-      {error && (
-        <div className="rounded bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 px-3 py-2 text-xs text-red-600 dark:text-red-400">
-          {error}
-        </div>
       )}
     </div>
   );
 }
+
+const secondaryBtn: CSSProperties = {
+  display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%",
+  background: "var(--c-raised)", border: "1px solid var(--c-border)", borderRadius: 9,
+  color: "var(--c-text)", cursor: "pointer", fontFamily: "Inter, sans-serif", fontWeight: 600, fontSize: 12,
+};
+const dangerBtn: CSSProperties = {
+  display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", height: 42,
+  background: "rgba(240,67,91,.12)", border: "1px solid rgba(240,67,91,.4)", borderRadius: 9,
+  color: COLORS.red, cursor: "pointer", fontFamily: "Inter, sans-serif", fontWeight: 600, fontSize: 13,
+};
+const ghostLink: CSSProperties = {
+  display: "flex", alignItems: "center", justifyContent: "center", gap: 5, width: "100%",
+  background: "none", border: "none", color: "var(--c-muted)", cursor: "pointer",
+  fontFamily: "Inter, sans-serif", fontWeight: 600, fontSize: 11,
+};
+const noteBox: CSSProperties = {
+  ...f(400, 11, "body", { color: "var(--c-text2)", lineHeight: 1.5 }),
+  background: "var(--c-input)", border: "1px solid var(--c-border)", borderRadius: 8, padding: "8px 11px", margin: 0,
+};
+const warnText: CSSProperties = { ...f(400, 11, "body", { color: COLORS.amber, textAlign: "center", marginTop: 10 }) };
