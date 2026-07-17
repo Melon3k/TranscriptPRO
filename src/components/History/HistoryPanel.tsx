@@ -102,7 +102,7 @@ function VersionCard({
   const { icon, color } = actionIcon(version.action);
 
   return (
-    <div style={{ border: `1px solid ${expanded ? COLORS.amber : "var(--c-border)"}`, borderRadius: 9, background: expanded ? "rgba(245,165,36,.05)" : "var(--c-raised)", overflow: "hidden" }}>
+    <div style={{ border: `1px solid ${expanded ? COLORS.amber : "var(--c-border)"}`, borderRadius: 9, background: expanded ? "rgba(245,165,36,.05)" : "var(--c-raised)", overflow: "hidden", flexShrink: 0 }}>
       <div style={{ padding: "10px 12px", display: "flex", alignItems: "center", gap: 9 }}>
         <span style={{ width: 26, height: 26, borderRadius: 7, background: "var(--c-input)", display: "flex", alignItems: "center", justifyContent: "center", color, flex: "none" }}>
           {icon}
