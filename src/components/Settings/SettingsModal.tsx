@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Settings as SettingsIcon, RefreshCw, ChevronDown } from "lucide-react";
+import { Settings as SettingsIcon, RefreshCw, Sun, Moon } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
 import { useTranslation } from "react-i18next";
 import { useSettingsStore, type UiLanguage } from "../../stores/settingsStore";
@@ -46,13 +46,10 @@ export default function SettingsModal({ open, onClose }: Props) {
           {/* Theme */}
           <Row>
             <div style={f(600, 12, "body")}>{t("settings:themeLabel")}</div>
-            <button
-              onClick={toggleDarkMode}
-              style={{ width: 130, height: 32, padding: "0 10px", background: "var(--c-input)", border: "1px solid var(--c-border)", borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", ...f(500, 11, "body", { color: "var(--c-text)" }) }}
-            >
-              {darkMode ? t("settings:themeDark") : t("settings:themeLight")}
-              <ChevronDown size={12} color="var(--c-muted)" />
-            </button>
+            <div style={{ display: "flex", gap: 3, background: "var(--c-input)", border: "1px solid var(--c-border)", borderRadius: 8, padding: 3 }}>
+              <SegBtn active={!darkMode} onClick={() => { if (darkMode) toggleDarkMode(); }} icon={<Sun size={13} />} label={t("settings:themeLight")} />
+              <SegBtn active={darkMode} onClick={() => { if (!darkMode) toggleDarkMode(); }} icon={<Moon size={13} />} label={t("settings:themeDark")} />
+            </div>
           </Row>
 
           {/* Language */}
@@ -131,6 +128,41 @@ export default function SettingsModal({ open, onClose }: Props) {
 
 function Row({ children }: { children: React.ReactNode }) {
   return <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>{children}</div>;
+}
+
+function SegBtn({
+  active,
+  onClick,
+  icon,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      aria-pressed={active}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        height: 26,
+        padding: "0 12px",
+        borderRadius: 6,
+        border: "none",
+        cursor: "pointer",
+        background: active ? COLORS.blue : "transparent",
+        color: active ? "#fff" : "var(--c-text2)",
+        ...f(600, 11),
+      }}
+    >
+      {icon}
+      {label}
+    </button>
+  );
 }
 function Divider() {
   return <div style={{ height: 1, background: "var(--c-border)" }} />;
