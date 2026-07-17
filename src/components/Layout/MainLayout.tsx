@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "react-i18next";
-import { Upload } from "lucide-react";
 import {
   setDirty, exitApp, cancelAudioExtraction,
   openMediaFileDialog, openSrtFileDialog,
@@ -15,9 +14,7 @@ import { useLogStore, type LogEntry } from "../../stores/logStore";
 import { useRecentFilesStore, type RecentFile } from "../../stores/recentFilesStore";
 import { useOnboardingStore } from "../../stores/onboardingStore";
 import { useNotifyStore } from "../../stores/notifyStore";
-import { useFileDrop } from "../../hooks/useFileDrop";
 import { routeFile, classifyFile, type FileRoutingCallbacks } from "../../lib/file-routing";
-import { f } from "../../lib/ui";
 import type { AppMode } from "./modes";
 import TitleBar from "./TitleBar";
 import Rail from "./Rail";
@@ -109,20 +106,22 @@ export default function MainLayout() {
 
   const handleOpenRecent = useCallback((file: RecentFile) => { void openPath(file.path); }, [openPath]);
 
-  const handleDroppedFiles = useCallback(
-    async (paths: string[]) => {
-      const supported = paths.find((p) => classifyFile(p) !== "unsupported");
-      if (!supported) {
-        const exts = paths.map((p) => p.split(".").pop()?.toLowerCase() ?? "?").join(", ");
-        notify("error", t("unsupportedFileFormat", { exts }));
-        return;
+  // Native drag-drop is disabled on the window (so HTML5 word dragging in the
+  // segment list works). Swallow any stray OS file drop so the webview doesn't
+  // navigate to the file; opening is done from the buttons in the open view.
+  useEffect(() => {
+    const swallowFileDrop = (e: DragEvent) => {
+      if (e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files")) {
+        e.preventDefault();
       }
-      await openPath(supported);
-    },
-    [openPath, notify, t],
-  );
-
-  const { isDragging } = useFileDrop(handleDroppedFiles);
+    };
+    window.addEventListener("dragover", swallowFileDrop);
+    window.addEventListener("drop", swallowFileDrop);
+    return () => {
+      window.removeEventListener("dragover", swallowFileDrop);
+      window.removeEventListener("drop", swallowFileDrop);
+    };
+  }, []);
 
   // Rust `app-log` events → log store.
   useEffect(() => {
@@ -241,43 +240,6 @@ export default function MainLayout() {
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <KeyboardShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       {!onboardingCompleted && <OnboardingWizard />}
-
-      {isDragging && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 70,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            background: "rgba(37,99,255,.1)",
-            backdropFilter: "blur(2px)",
-            border: "4px dashed #2563FF",
-            pointerEvents: "none",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: 12,
-              borderRadius: 14,
-              background: "var(--c-panel)",
-              padding: "24px 32px",
-              boxShadow: "0 20px 60px rgba(0,0,0,.5)",
-              border: "1px solid var(--c-border)",
-            }}
-          >
-            <Upload size={36} color="#2563FF" />
-            <div style={{ textAlign: "center" }}>
-              <p style={f(600, 14, "body", { color: "var(--c-text)", margin: 0 })}>{t("dropFileToOpen")}</p>
-              <p style={f(400, 12, "body", { color: "var(--c-muted)", marginTop: 4 })}>{t("dropFileHint")}</p>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

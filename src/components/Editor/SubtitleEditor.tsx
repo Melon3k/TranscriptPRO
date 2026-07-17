@@ -100,7 +100,7 @@ export default function SubtitleEditor() {
   return (
     <div
       style={{
-        width: 252,
+        width: 504,
         flex: "none",
         background: "var(--c-panel)",
         borderRight: "1px solid var(--c-border)",

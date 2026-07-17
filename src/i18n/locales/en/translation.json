@@ -40,7 +40,8 @@
   "apiKeyMissing": "Set your {{provider}} API key in Settings",
   "providerName": {
     "gemini": "Gemini",
-    "claude": "Claude"
+    "claude": "Claude",
+    "local": "Local"
   },
   "localModel": {
     "download": "Download model ({{size}} GB)",

@@ -1,7 +1,7 @@
 {
   "title": "Open a file to get started",
   "subtitle": "Load a video or audio file to transcribe, or an existing SRT file to edit and translate.",
-  "dropHere": "Drag and drop a file here",
+  "dropHere": "Click to choose a file",
   "openMedia": "Open media",
   "importSrt": "Import SRT",
   "recent": "RECENT FILES",

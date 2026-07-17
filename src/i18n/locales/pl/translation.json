@@ -42,7 +42,8 @@
   "apiKeyMissing": "Ustaw klucz API {{provider}} w Ustawieniach",
   "providerName": {
     "gemini": "Gemini",
-    "claude": "Claude"
+    "claude": "Claude",
+    "local": "Lokalny"
   },
   "localModel": {
     "download": "Pobierz model ({{size}} GB)",

@@ -1,5 +1,5 @@
-import { useRef, useEffect, useCallback } from "react";
-import { Play, Pause, SkipBack, SkipForward, Film } from "lucide-react";
+import { useRef, useEffect, useCallback, useState } from "react";
+import { Play, Pause, SkipBack, SkipForward, Film, Captions, CaptionsOff } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { usePlayerStore } from "../../stores/playerStore";
@@ -8,15 +8,17 @@ import { formatDuration } from "../../lib/time-format";
 import { COLORS, FONTS } from "../../lib/ui";
 
 /**
- * Center video/audio stage. Renders the media, a (disabled) styled-caption
- * preview box — subtitle styling/positioning is not implemented yet, so the box
- * is grayed and non-interactive — and the transport controls.
+ * Center video/audio stage. Renders the media, an optional subtitle overlay
+ * (toggled from the corner button, only when subtitles exist), and the
+ * transport controls.
  */
 export default function Player() {
   const { t } = useTranslation(["player"]);
   const { filePath, currentTimeMs, duration, isPlaying, setCurrentTimeMs, setDuration, setIsPlaying } =
     usePlayerStore();
   const subtitles = useSubtitleStore((s) => s.subtitles);
+  const [showSubs, setShowSubs] = useState(false);
+  const hasSubtitles = subtitles.length > 0;
 
   const mediaRef = useRef<HTMLVideoElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
@@ -65,7 +67,6 @@ export default function Player() {
   const mediaSrc = filePath ? convertFileSrc(filePath) : undefined;
 
   const activeSub = subtitles.find((s) => currentTimeMs >= s.startTime && currentTimeMs < s.endTime);
-  const captionText = activeSub?.text || t("player:sampleCaption");
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
@@ -109,45 +110,66 @@ export default function Player() {
           </>
         )}
 
-        {/* Disabled styled-caption preview box (styling/positioning not implemented). */}
-        <div
-          title={t("player:stylingDisabled")}
-          style={{
-            position: "absolute",
-            left: "50%",
-            transform: "translateX(-50%)",
-            bottom: "8%",
-            width: "62%",
-            border: "1.5px dashed var(--c-border)",
-            borderRadius: 6,
-            padding: "12px 18px",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 4,
-            background: "rgba(8,12,18,.28)",
-            userSelect: "none",
-            opacity: 0.55,
-            pointerEvents: "none",
-          }}
-        >
-          <span
+        {/* Subtitle overlay — only rendered while enabled and a cue is active. */}
+        {showSubs && activeSub && (
+          <div
             style={{
-              fontFamily: FONTS.display,
-              fontWeight: 800,
-              fontSize: 22,
-              color: "#fff",
-              textAlign: "center",
-              WebkitTextStroke: "1px #0D1117",
+              position: "absolute",
+              left: "50%",
+              transform: "translateX(-50%)",
+              bottom: "8%",
+              maxWidth: "80%",
+              padding: "6px 14px",
+              borderRadius: 6,
+              background: "rgba(8,12,18,.55)",
+              userSelect: "none",
+              pointerEvents: "none",
             }}
           >
-            {captionText}
-          </span>
-          <span style={{ fontFamily: FONTS.mono, fontSize: 8, letterSpacing: ".08em", color: "var(--c-muted)" }}>
-            {t("player:previewLabel")}
-          </span>
-        </div>
+            <span
+              style={{
+                fontFamily: FONTS.display,
+                fontWeight: 700,
+                fontSize: 22,
+                color: "#fff",
+                textAlign: "center",
+                display: "block",
+                lineHeight: 1.25,
+                // Clean outline via layered shadows — avoids the "chewed" look
+                // that -webkit-text-stroke produces when the stroke overlaps the fill.
+                textShadow:
+                  "-1px -1px 0 #0b0f16, 1px -1px 0 #0b0f16, -1px 1px 0 #0b0f16, 1px 1px 0 #0b0f16, 0 2px 5px rgba(0,0,0,.7)",
+              }}
+            >
+              {activeSub.text}
+            </span>
+          </div>
+        )}
+
+        {/* Corner toggle — enabled only when there are subtitles to show. */}
+        {hasSubtitles && (
+          <button
+            onClick={() => setShowSubs((v) => !v)}
+            title={showSubs ? t("player:hideSubtitles") : t("player:showSubtitles")}
+            style={{
+              position: "absolute",
+              top: 10,
+              right: 10,
+              width: 32,
+              height: 32,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              borderRadius: 8,
+              cursor: "pointer",
+              background: showSubs ? COLORS.blue : "rgba(8,12,18,.6)",
+              border: `1px solid ${showSubs ? COLORS.blue : "var(--c-border)"}`,
+              color: "#fff",
+            }}
+          >
+            {showSubs ? <Captions size={16} /> : <CaptionsOff size={16} />}
+          </button>
+        )}
       </div>
 
       {/* transport */}

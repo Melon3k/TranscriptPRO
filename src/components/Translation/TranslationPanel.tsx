@@ -118,34 +118,33 @@ export default function TranslationPanel() {
               key={p}
               onClick={() => !translating && setTranslationProvider(p as TranslationProvider)}
               disabled={translating}
+              title={t(`translation:provider.${p}`)}
               style={{
-                flex: 1, height: 30, display: "flex", alignItems: "center", justifyContent: "center",
-                borderRadius: 7, cursor: translating ? "not-allowed" : "pointer",
+                flex: 1, minWidth: 0, height: 30, display: "flex", alignItems: "center", justifyContent: "center",
+                borderRadius: 7, cursor: translating ? "not-allowed" : "pointer", whiteSpace: "nowrap",
                 background: active ? "rgba(124,58,237,.16)" : "var(--c-raised)",
                 border: `1px solid ${active ? COLORS.violet : "var(--c-border)"}`,
                 color: active ? "#c4b5fd" : "var(--c-text2)", ...f(600, 11),
               }}
             >
-              {t(`translation:provider.${p}`)}
+              {t(`translation:providerName.${p}`)}
             </button>
           );
         })}
       </div>
 
-      <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
-        <div style={{ flex: 1 }}>
-          <FieldLabel>{t("translation:targetLanguageLabel")}</FieldLabel>
-          <Select value={targetLang} disabled={translating} onChange={(e) => setTargetLang(e.target.value)} style={{ height: 32 }}>
-            {LANGUAGE_OPTIONS.map((c) => <option key={c} value={c}>{t(`translation:language.${c}`)}</option>)}
-          </Select>
-        </div>
-        <div style={{ flex: 1 }}>
-          <FieldLabel>{t("translation:sourceLanguageLabel")}</FieldLabel>
-          <Select value={sourceLang} disabled={translating} onChange={(e) => setSourceLang(e.target.value)} style={{ height: 32 }}>
-            <option value="">{t("translation:sourceAuto")}</option>
-            {LANGUAGE_OPTIONS.map((c) => <option key={c} value={c}>{t(`translation:language.${c}`)}</option>)}
-          </Select>
-        </div>
+      <div style={{ marginBottom: 12 }}>
+        <FieldLabel>{t("translation:targetLanguageLabel")}</FieldLabel>
+        <Select value={targetLang} disabled={translating} onChange={(e) => setTargetLang(e.target.value)}>
+          {LANGUAGE_OPTIONS.map((c) => <option key={c} value={c}>{t(`translation:language.${c}`)}</option>)}
+        </Select>
+      </div>
+      <div style={{ marginBottom: 16 }}>
+        <FieldLabel>{t("translation:sourceLanguageLabel")}</FieldLabel>
+        <Select value={sourceLang} disabled={translating} onChange={(e) => setSourceLang(e.target.value)}>
+          <option value="">{t("translation:sourceAuto")}</option>
+          {LANGUAGE_OPTIONS.map((c) => <option key={c} value={c}>{t(`translation:language.${c}`)}</option>)}
+        </Select>
       </div>
 
       {isLocal && localModel && !localModel.downloaded && (

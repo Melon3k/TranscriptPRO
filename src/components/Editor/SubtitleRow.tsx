@@ -1,9 +1,27 @@
 import { useState, useEffect, memo, type CSSProperties } from "react";
 import { Scissors, ChevronDown, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Subtitle } from "../../types/subtitle";
+import { Subtitle, Word } from "../../types/subtitle";
 import { formatTimestamp, parseTimestamp } from "../../lib/time-format";
 import { COLORS, f, FONTS } from "../../lib/ui";
+
+/**
+ * Rebuild word tokens from edited sentence text, spreading the segment's time
+ * range evenly across the new words. The segment card renders word chips (not the
+ * raw text), so a text edit must regenerate the chips or it wouldn't show up.
+ * Per-word timing becomes approximate for manually edited segments — acceptable.
+ */
+function retokenize(text: string, start: number, end: number): Word[] {
+  const tokens = text.split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return [];
+  const dur = Math.max(0, end - start);
+  const step = dur / tokens.length;
+  return tokens.map((tok, i) => ({
+    text: tok,
+    startTime: Math.round(start + i * step),
+    endTime: Math.round(start + (i + 1) * step),
+  }));
+}
 
 export interface WordDragPayload {
   sourceSubId: string;
@@ -71,7 +89,16 @@ function SubtitleRow({
   const hasWords = subtitle.words && subtitle.words.length > 0;
 
   const commit = () => {
-    if (editingText !== subtitle.text) onUpdate(subtitle.id, { text: editingText });
+    const trimmed = editingText.trim();
+    if (trimmed !== subtitle.text.trim()) {
+      // Update both the sentence text and the word chips so the segment card
+      // reflects the edit (chips are derived from `words`, not `text`).
+      const changes: Partial<Subtitle> = { text: trimmed };
+      if (subtitle.words.length > 0) {
+        changes.words = retokenize(trimmed, subtitle.startTime, subtitle.endTime);
+      }
+      onUpdate(subtitle.id, changes);
+    }
     setEditing(false);
   };
 
