@@ -1,217 +1,125 @@
-import { X, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
+import { Settings as SettingsIcon, RefreshCw, ChevronDown } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
 import { useTranslation } from "react-i18next";
 import { useSettingsStore, type UiLanguage } from "../../stores/settingsStore";
 import { useUpdateStore } from "../../stores/updateStore";
 import { checkForUpdates } from "../../lib/updater";
 import { SUPPORTED_LANGUAGES } from "../../i18n";
+import { COLORS, f, FONTS, scrim, modalCard } from "../../lib/ui";
+import { Select, CheckRow } from "../common/Field";
+import { ModalHeader } from "../KeyboardShortcutsModal";
 import ApiKeyField from "./ApiKeyField";
 
-interface SettingsModalProps {
+interface Props {
   open: boolean;
   onClose: () => void;
 }
 
-export default function SettingsModal({ open, onClose }: SettingsModalProps) {
-  const { t } = useTranslation(["settings", "common"]);
+export default function SettingsModal({ open, onClose }: Props) {
+  const { t } = useTranslation(["settings", "common", "toolbar"]);
   const {
-    geminiModel,
-    setGeminiModel,
-    autoSaveOnTranscription,
-    setAutoSaveOnTranscription,
-    autoSaveOnTranslation,
-    setAutoSaveOnTranslation,
-    autoSaveOnImport,
-    setAutoSaveOnImport,
-    autoCheckUpdates,
-    setAutoCheckUpdates,
-    language,
-    setLanguage,
-    forceCpu,
-    setForceCpu,
+    geminiModel, setGeminiModel,
+    autoSaveOnTranscription, setAutoSaveOnTranscription,
+    autoSaveOnTranslation, setAutoSaveOnTranslation,
+    autoSaveOnImport, setAutoSaveOnImport,
+    autoCheckUpdates, setAutoCheckUpdates,
+    language, setLanguage, forceCpu, setForceCpu,
+    darkMode, toggleDarkMode,
   } = useSettingsStore();
-
   const updateStatus = useUpdateStore((s) => s.status);
-  const [appVersion, setAppVersion] = useState<string>("");
+  const [appVersion, setAppVersion] = useState("");
 
   useEffect(() => {
     if (!open) return;
-    getVersion()
-      .then(setAppVersion)
-      .catch(() => setAppVersion(""));
+    getVersion().then(setAppVersion).catch(() => setAppVersion(""));
   }, [open]);
 
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div
-        className="flex w-full max-w-md max-h-[90vh] flex-col rounded-xl bg-white dark:bg-gray-800 shadow-2xl border border-gray-200 dark:border-gray-700"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex shrink-0 items-center justify-between border-b border-gray-200 dark:border-gray-700 px-5 py-3">
-          <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-200">{t("settings:title")}</h2>
-          <button
-            onClick={onClose}
-            aria-label={t("common:close")}
-            className="rounded p-1 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
-          >
-            <X size={16} />
-          </button>
-        </div>
+    <div style={scrim} onClick={onClose}>
+      <div style={{ ...modalCard(560), maxHeight: 660 }} onClick={(e) => e.stopPropagation()}>
+        <ModalHeader icon={<SettingsIcon size={17} color={COLORS.blueLight} />} title={t("settings:title")} onClose={onClose} />
 
-        {/* Body */}
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 space-y-5">
-          {/* Language switcher — top of modal so users can find it from any locale */}
-          <div className="space-y-1.5">
-            <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">
-              {t("settings:language.label")}
-            </label>
-            <select
-              value={language}
-              onChange={(e) => setLanguage(e.target.value as UiLanguage)}
-              className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1.5 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
+        <div style={{ flex: 1, overflowY: "auto", padding: "18px 20px", display: "flex", flexDirection: "column", gap: 15 }}>
+          {/* Theme */}
+          <Row>
+            <div style={f(600, 12, "body")}>{t("settings:themeLabel")}</div>
+            <button
+              onClick={toggleDarkMode}
+              style={{ width: 130, height: 32, padding: "0 10px", background: "var(--c-input)", border: "1px solid var(--c-border)", borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", ...f(500, 11, "body", { color: "var(--c-text)" }) }}
             >
-              {SUPPORTED_LANGUAGES.map((lng) => (
-                <option key={lng} value={lng}>
-                  {t(`settings:language.${lng}`)}
-                </option>
-              ))}
-            </select>
+              {darkMode ? t("settings:themeDark") : t("settings:themeLight")}
+              <ChevronDown size={12} color="var(--c-muted)" />
+            </button>
+          </Row>
+
+          {/* Language */}
+          <div>
+            <div style={f(600, 12, "body", { marginBottom: 8 })}>{t("settings:language.label")}</div>
+            <Select value={language} onChange={(e) => setLanguage(e.target.value as UiLanguage)}>
+              {SUPPORTED_LANGUAGES.map((lng) => <option key={lng} value={lng}>{t(`settings:language.${lng}`)}</option>)}
+            </Select>
           </div>
 
-          {/* Gemini API Key */}
-          <ApiKeyField
-            provider="gemini"
-            label={t("settings:geminiApiKey")}
-            placeholder="AIzaSy..."
-          />
+          <Divider />
 
-          {/* Gemini Model */}
-          <div className="space-y-1.5">
-            <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">
-              {t("settings:geminiModel")}
-            </label>
-            <select
-              value={geminiModel}
-              onChange={(e) => setGeminiModel(e.target.value)}
-              className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1.5 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
-            >
+          <ApiKeyField provider="gemini" label={t("settings:geminiApiKey")} placeholder="AIzaSy..." />
+
+          <div>
+            <div style={f(600, 12, "body", { marginBottom: 8 })}>{t("settings:geminiModel")}</div>
+            <Select value={geminiModel} onChange={(e) => setGeminiModel(e.target.value)}>
               <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite (Free tier)</option>
               <option value="gemini-3.5-flash">gemini-3.5-flash (Paid)</option>
               <option value="gemini-2.5-pro">gemini-2.5-pro (Paid)</option>
-            </select>
+            </Select>
           </div>
 
-          {/* Claude API Key */}
-          <ApiKeyField
-            provider="claude"
-            label={t("settings:claudeApiKey")}
-            placeholder="sk-ant-api03-..."
-          />
+          <ApiKeyField provider="claude" label={t("settings:claudeApiKey")} placeholder="sk-ant-api03-..." />
 
-          {/* Transcription */}
-          <div className="border-t border-gray-200 dark:border-gray-700 pt-4 space-y-2.5">
-            <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-              {t("settings:transcription.section")}
-            </p>
-            <label className="flex items-center gap-2.5 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={forceCpu}
-                onChange={(e) => setForceCpu(e.target.checked)}
-                className="h-4 w-4 rounded border-gray-300 text-blue-500 focus:ring-blue-400"
-              />
-              <div>
-                <span className="text-sm text-gray-700 dark:text-gray-300">
-                  {t("settings:transcription.forceCpu")}
+          <Divider />
+
+          <CheckRow checked={forceCpu} onChange={setForceCpu} label={t("settings:transcription.forceCpu")} hint={t("settings:transcription.forceCpuHint")} />
+
+          <Divider />
+          <div style={f(600, 10, "body", { color: "var(--c-muted)", letterSpacing: ".08em", textTransform: "uppercase" })}>
+            {t("settings:history.section")}
+          </div>
+          <CheckRow checked={autoSaveOnTranscription} onChange={setAutoSaveOnTranscription} label={t("settings:history.afterTranscription")} />
+          <CheckRow checked={autoSaveOnTranslation} onChange={setAutoSaveOnTranslation} label={t("settings:history.afterTranslation")} />
+          <CheckRow checked={autoSaveOnImport} onChange={setAutoSaveOnImport} label={t("settings:history.afterImport")} />
+
+          <Divider />
+
+          <Row>
+            <div>
+              <div style={f(600, 12, "body")}>
+                {t("settings:updates.appVersion")}{" "}
+                <span style={{ fontFamily: FONTS.mono, fontWeight: 500, fontSize: 10, color: "var(--c-muted)" }}>
+                  {appVersion ? `v${appVersion}` : "—"}
                 </span>
-                <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-                  {t("settings:transcription.forceCpuHint")}
-                </p>
               </div>
-            </label>
-          </div>
-
-          {/* Version history */}
-          <div className="border-t border-gray-200 dark:border-gray-700 pt-4 space-y-2.5">
-            <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-              {t("settings:history.section")}
-            </p>
-            {([
-              [t("settings:history.afterTranscription"), autoSaveOnTranscription, setAutoSaveOnTranscription],
-              [t("settings:history.afterTranslation"), autoSaveOnTranslation, setAutoSaveOnTranslation],
-              [t("settings:history.afterImport"), autoSaveOnImport, setAutoSaveOnImport],
-            ] as [string, boolean, (v: boolean) => void][]).map(([label, value, setter]) => (
-              <label key={label} className="flex items-center gap-2.5 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={value}
-                  onChange={(e) => setter(e.target.checked)}
-                  className="h-4 w-4 rounded border-gray-300 text-blue-500 focus:ring-blue-400"
-                />
-                <span className="text-sm text-gray-700 dark:text-gray-300">{label}</span>
-              </label>
-            ))}
-          </div>
-
-          {/* Updates */}
-          <div className="border-t border-gray-200 dark:border-gray-700 pt-4 space-y-2.5">
-            <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-              {t("settings:updates.section")}
-            </p>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-700 dark:text-gray-300">
-                {t("settings:updates.appVersion")}
-              </span>
-              <span className="text-sm font-mono text-gray-500 dark:text-gray-400">
-                {appVersion ? `v${appVersion}` : "—"}
-              </span>
-            </div>
-            <label className="flex items-center gap-2.5 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={autoCheckUpdates}
-                onChange={(e) => setAutoCheckUpdates(e.target.checked)}
-                className="h-4 w-4 rounded border-gray-300 text-blue-500 focus:ring-blue-400"
-              />
-              <span className="text-sm text-gray-700 dark:text-gray-300">
-                {t("settings:updates.autoCheck")}
-              </span>
-            </label>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => void checkForUpdates()}
-                disabled={updateStatus === "checking" || updateStatus === "downloading"}
-                className="inline-flex items-center gap-1.5 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                <RefreshCw
-                  size={12}
-                  className={updateStatus === "checking" ? "animate-spin" : ""}
-                />
-                {t("settings:updates.checkNow")}
-              </button>
               {updateStatus === "up-to-date" && (
-                <span className="text-xs text-green-600 dark:text-green-400">
-                  {t("settings:updates.upToDate")}
-                </span>
-              )}
-              {updateStatus === "checking" && (
-                <span className="text-xs text-gray-500 dark:text-gray-400">
-                  {t("settings:updates.checking")}
-                </span>
+                <div style={f(400, 10, "body", { color: COLORS.green, marginTop: 1 })}>{t("settings:updates.upToDate")}</div>
               )}
             </div>
-          </div>
+            <button
+              onClick={() => void checkForUpdates()}
+              disabled={updateStatus === "checking" || updateStatus === "downloading"}
+              style={{ display: "flex", alignItems: "center", gap: 6, height: 30, padding: "0 12px", background: "var(--c-raised)", border: "1px solid var(--c-border)", borderRadius: 7, cursor: "pointer", ...f(600, 10, "body", { color: "var(--c-text)" }) }}
+            >
+              <RefreshCw size={12} style={{ animation: updateStatus === "checking" ? "spin 1s linear infinite" : undefined }} />
+              {t("settings:updates.checkNow")}
+            </button>
+          </Row>
+          <CheckRow checked={autoCheckUpdates} onChange={setAutoCheckUpdates} label={t("settings:updates.autoCheck")} />
         </div>
 
-        {/* Footer */}
-        <div className="shrink-0 border-t border-gray-200 dark:border-gray-700 px-5 py-3 flex justify-end">
+        <div style={{ display: "flex", justifyContent: "flex-end", padding: "14px 20px", borderTop: "1px solid var(--c-border)" }}>
           <button
             onClick={onClose}
-            className="rounded-lg bg-blue-500 hover:bg-blue-600 px-4 py-1.5 text-sm font-medium text-white transition-colors"
+            style={{ height: 34, padding: "0 20px", display: "flex", alignItems: "center", background: COLORS.blue, border: "none", borderRadius: 8, color: "#fff", cursor: "pointer", ...f(600, 12) }}
           >
             {t("common:done")}
           </button>
@@ -221,3 +129,9 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
   );
 }
 
+function Row({ children }: { children: React.ReactNode }) {
+  return <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>{children}</div>;
+}
+function Divider() {
+  return <div style={{ height: 1, background: "var(--c-border)" }} />;
+}
