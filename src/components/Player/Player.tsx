@@ -65,7 +65,7 @@ export default function Player() {
   const mediaSrc = filePath ? convertFileSrc(filePath) : undefined;
 
   const activeSub = subtitles.find((s) => currentTimeMs >= s.startTime && currentTimeMs < s.endTime);
-  const captionText = activeSub?.text || t("player:samplaCaption");
+  const captionText = activeSub?.text || t("player:sampleCaption");
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>

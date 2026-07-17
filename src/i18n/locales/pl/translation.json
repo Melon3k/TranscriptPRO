@@ -35,6 +35,8 @@
   "translate_other": "Przetłumacz ({{count}} segmentów)",
   "hideComparison": "Ukryj porównanie",
   "compare": "Porównaj z oryginałem",
+  "compareTitle": "Porównanie: oryginał ↔ tłumaczenie",
+  "doneNotice": "Przetłumaczono {{done}} / {{total}} segmentów",
   "keepTranslation": "Zachowaj tłumaczenie",
   "restoreOriginal": "Przywróć oryginał",
   "apiKeyMissing": "Ustaw klucz API {{provider}} w Ustawieniach",

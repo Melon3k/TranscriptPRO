@@ -15,6 +15,8 @@ import plLogPanel from "./locales/pl/logPanel.json";
 import plErrors from "./locales/pl/errors.json";
 import plOnboarding from "./locales/pl/onboarding.json";
 import plShortcuts from "./locales/pl/shortcuts.json";
+import plOpen from "./locales/pl/open.json";
+import plStyle from "./locales/pl/style.json";
 
 import enCommon from "./locales/en/common.json";
 import enSettings from "./locales/en/settings.json";
@@ -29,6 +31,8 @@ import enLogPanel from "./locales/en/logPanel.json";
 import enErrors from "./locales/en/errors.json";
 import enOnboarding from "./locales/en/onboarding.json";
 import enShortcuts from "./locales/en/shortcuts.json";
+import enOpen from "./locales/en/open.json";
+import enStyle from "./locales/en/style.json";
 
 export const SUPPORTED_LANGUAGES = ["pl", "en"] as const;
 export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
@@ -48,6 +52,8 @@ const resources = {
     errors: plErrors,
     onboarding: plOnboarding,
     shortcuts: plShortcuts,
+    open: plOpen,
+    style: plStyle,
   },
   en: {
     common: enCommon,
@@ -63,6 +69,8 @@ const resources = {
     errors: enErrors,
     onboarding: enOnboarding,
     shortcuts: enShortcuts,
+    open: enOpen,
+    style: enStyle,
   },
 } as const;
 

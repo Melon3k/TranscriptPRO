@@ -33,6 +33,8 @@
   "translate_other": "Translate ({{count}} segments)",
   "hideComparison": "Hide comparison",
   "compare": "Compare with original",
+  "compareTitle": "Comparison: original ↔ translation",
+  "doneNotice": "Translated {{done}} / {{total}} segments",
   "keepTranslation": "Keep translation",
   "restoreOriginal": "Restore original",
   "apiKeyMissing": "Set your {{provider}} API key in Settings",

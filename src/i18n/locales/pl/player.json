@@ -1,4 +1,7 @@
 {
   "back5s": "Cofnij 5 sekund",
-  "forward5s": "Przewiń 5 sekund"
+  "forward5s": "Przewiń 5 sekund",
+  "sampleCaption": "Przykładowy tekst napisów",
+  "previewLabel": "PODGLĄD",
+  "stylingDisabled": "Stylizacja napisów — wkrótce"
 }

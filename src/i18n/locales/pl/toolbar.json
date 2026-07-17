@@ -16,5 +16,8 @@
   "lightMode": "Tryb jasny",
   "darkMode": "Tryb ciemny",
   "settings": "Ustawienia",
+  "style": "Stylizacja napisów",
+  "exportKaraoke": "karaoke",
+  "exportText": "tekst",
   "exportSuccess": "Wyeksportowano do {{name}}"
 }

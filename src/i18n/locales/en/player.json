@@ -1,4 +1,7 @@
 {
   "back5s": "Back 5 seconds",
-  "forward5s": "Forward 5 seconds"
+  "forward5s": "Forward 5 seconds",
+  "sampleCaption": "Sample subtitle text",
+  "previewLabel": "PREVIEW",
+  "stylingDisabled": "Caption styling is coming soon"
 }

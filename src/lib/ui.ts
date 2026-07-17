@@ -92,7 +92,7 @@ export const sectionLabel: CSSProperties = {
 
 /** Primary action button (filled). Pass a background to override the blue. */
 export function primaryBtn(
-  bg = COLORS.blue,
+  bg: string = COLORS.blue,
   disabled = false,
 ): CSSProperties {
   return {
@@ -173,7 +173,7 @@ export function modalCard(width: number): CSSProperties {
 }
 
 /** Toggle switch (track + knob) style pair. */
-export function toggle(on: boolean, accent = COLORS.blue): {
+export function toggle(on: boolean, accent: string = COLORS.blue): {
   track: CSSProperties;
   knob: CSSProperties;
 } {
