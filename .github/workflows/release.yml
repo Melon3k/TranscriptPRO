@@ -82,7 +82,12 @@ jobs:
           New-Item -ItemType Directory -Force -Path src-tauri/binaries | Out-Null
           $zip = "$env:RUNNER_TEMP\ffmpeg.zip"
           $dir = "$env:RUNNER_TEMP\ffmpeg-extracted"
-          Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile $zip
+          # Version-pinned package + SHA-256 — keep URL and hash in sync with
+          # scripts/download-ffmpeg.sh (WIN_URL / WIN_SHA).
+          Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-8.1.2-essentials_build.zip" -OutFile $zip
+          $expected = "db580001caa24ac104c8cb856cd113a87b0a443f7bdf47d8c12b1d740584a2ec"
+          $got = (Get-FileHash -Path $zip -Algorithm SHA256).Hash.ToLower()
+          if ($got -ne $expected) { throw "ffmpeg archive SHA-256 mismatch: expected $expected, got $got" }
           Expand-Archive -Path $zip -DestinationPath $dir -Force
           $exe = Get-ChildItem -Path $dir -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
           if (-not $exe) { throw "ffmpeg.exe not found in archive" }
