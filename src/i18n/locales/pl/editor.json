@@ -1,4 +1,6 @@
 {
+  "segments": "Segmenty",
+  "editHint": "Enter zapisuje · Esc anuluje",
   "emptyTitle": "Brak załadowanych napisów",
   "emptyHint": "Otwórz plik multimedialny lub zaimportuj SRT",
   "selectionBanner_one": "{{count}} słowo zaznaczone — kliknij blok docelowy aby przenieść",

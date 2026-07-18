@@ -16,5 +16,8 @@
   "lightMode": "Light mode",
   "darkMode": "Dark mode",
   "settings": "Settings",
+  "style": "Caption styling",
+  "exportKaraoke": "karaoke",
+  "exportText": "text",
   "exportSuccess": "Exported to {{name}}"
 }

@@ -6,6 +6,47 @@
  * to the `.dark` class that App.tsx toggles on <html> based on settingsStore. */
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* ── Design tokens (TranscriptPRO design system) ─────────────────────────────
+ * The redesigned UI is driven by CSS variables, not Tailwind utilities. Colours
+ * default to the dark theme (`:root`); the app root carries data-th="dark|light"
+ * (set in MainLayout from settingsStore.darkMode) so the light overrides win.
+ * Names mirror the imported prototype (`--c-*`) so the ported inline styles map
+ * 1:1. Fonts fall back to the system stack because the desktop CSP blocks the
+ * Google Fonts CDN. */
+:root,
+:root [data-th="dark"] {
+  --c-bg: #0D1117;
+  --c-panel: #131926;
+  --c-raised: #1A1F2B;
+  --c-rail: #0b0f16;
+  --c-border: #2A3342;
+  --c-input: #10151F;
+  --c-text: #F8FAFC;
+  --c-text2: #A9B2C0;
+  --c-muted: #667085;
+  --c-title: #0b0f16;
+  --c-hover: #1E2634;
+}
+
+[data-th="light"] {
+  --c-bg: #E9EEF5;
+  --c-panel: #FFFFFF;
+  --c-raised: #F3F6FB;
+  --c-rail: #F4F7FB;
+  --c-border: #E3E8F0;
+  --c-input: #F5F8FC;
+  --c-text: #0F172A;
+  --c-text2: #475569;
+  --c-muted: #8A95A6;
+  --c-title: #FFFFFF;
+  --c-hover: #EEF3F9;
+}
+
+/* Fixed accent colours (theme-independent) + brand gradient. */
+:root {
+  --gradient-flow: linear-gradient(120deg, #2563FF 0%, #00B4FF 45%, #7C3AED 100%);
+}
+
 /* ── Base resets ─────────────────────────────────────────────────────────── */
 *, *::before, *::after {
   box-sizing: border-box;
@@ -15,7 +56,13 @@ html, body, #root {
   height: 100%;
   margin: 0;
   padding: 0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+body {
+  background: var(--c-bg);
+  color: var(--c-text);
 }
 
 /* ── Prevent text selection on UI chrome ─────────────────────────────────── */
@@ -23,28 +70,49 @@ button, [role="button"] {
   user-select: none;
 }
 
+/* ── Keyframes (subtitle animation previews + spinners) ──────────────────── */
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes an-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes an-slide { from { opacity: 0; transform: translateY(26px); } to { opacity: 1; transform: none; } }
+@keyframes an-pop { 0% { opacity: 0; transform: scale(.55); } 60% { transform: scale(1.06); } 100% { opacity: 1; transform: scale(1); } }
+@keyframes an-blur { from { opacity: 0; filter: blur(9px); } to { opacity: 1; filter: blur(0); } }
+@keyframes an-type { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+@keyframes an-kar { 0% { color: #22D3EE; text-shadow: 0 0 12px #22D3EE; } 100% { color: #fff; text-shadow: none; } }
+
+/* ── Range sliders (subtitle inspector) ──────────────────────────────────── */
+input[type=range] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--c-border);
+  outline: none;
+  cursor: pointer;
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #2563FF;
+  cursor: pointer;
+  box-shadow: 0 0 0 3px rgba(37, 99, 255, .2);
+}
+input[type=range]:disabled { cursor: not-allowed; opacity: .5; }
+input[type=range]:disabled::-webkit-slider-thumb { cursor: not-allowed; }
+
 /* ── Custom scrollbar ────────────────────────────────────────────────────── */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--c-border); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--c-muted); }
 
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 3px;
-}
-
-.dark ::-webkit-scrollbar-thumb {
-  background: #475569;
-}
+/* ── Native form controls follow the theme (selects/inputs/checkboxes) ───── */
+select, input, textarea { color-scheme: light dark; }
 
 /* ── Timestamp input ─────────────────────────────────────────────────────── */
 .timestamp-input {
-  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 0.75rem;
   letter-spacing: 0.02em;
 }

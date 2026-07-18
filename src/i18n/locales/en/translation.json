@@ -33,12 +33,15 @@
   "translate_other": "Translate ({{count}} segments)",
   "hideComparison": "Hide comparison",
   "compare": "Compare with original",
+  "compareTitle": "Comparison: original ↔ translation",
+  "doneNotice": "Translated {{done}} / {{total}} segments",
   "keepTranslation": "Keep translation",
   "restoreOriginal": "Restore original",
   "apiKeyMissing": "Set your {{provider}} API key in Settings",
   "providerName": {
     "gemini": "Gemini",
-    "claude": "Claude"
+    "claude": "Claude",
+    "local": "Local"
   },
   "localModel": {
     "download": "Download model ({{size}} GB)",

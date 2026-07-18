@@ -1,0 +1,26 @@
+{
+  "tabs": {
+    "inspector": "Inspector",
+    "animations": "Animations",
+    "effects": "Effects"
+  },
+  "comingSoon": "Caption styling, animations and presets are coming in a future release. This panel is a preview and is not active yet.",
+  "text": "TEXT",
+  "size": "Size",
+  "letterSpacing": "Letter spacing",
+  "lineHeight": "Line height",
+  "outlineShadowGlow": "OUTLINE · SHADOW · GLOW",
+  "outline": "Outline",
+  "shadow": "Shadow",
+  "glow": "Glow",
+  "glowStrength": "Glow strength",
+  "captionBox": "CAPTION BOX",
+  "boxPosition": "Box position",
+  "boxBottomCenter": "Bottom · center",
+  "width": "Width",
+  "bottomDistance": "Distance from bottom",
+  "applyToSelected": "Apply to selected",
+  "applyToAll": "All",
+  "searchPreset": "Search preset…",
+  "newPreset": "New"
+}
