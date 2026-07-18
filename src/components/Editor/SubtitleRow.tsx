@@ -1,8 +1,9 @@
 import { useState, useEffect, memo, type CSSProperties } from "react";
-import { Scissors, ChevronDown, Trash2 } from "lucide-react";
+import { Scissors, ChevronDown, Trash2, AlertTriangle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Subtitle, Word } from "../../types/subtitle";
 import { formatTimestamp, parseTimestamp } from "../../lib/time-format";
+import { hasInvertedTiming } from "../../lib/subtitle-ops";
 import { COLORS, f, FONTS } from "../../lib/ui";
 
 /**
@@ -135,16 +136,25 @@ function SubtitleRow({
     }
   };
 
+  // Non-blocking inverted-time signal: TimeCode deliberately allows transient
+  // start >= end (users move a segment by editing start first), so flag it
+  // visually instead. Export additionally warns so it can't ship silently.
+  const isInverted = hasInvertedTiming(subtitle);
+
   const border = isDropTarget
     ? `1px solid ${COLORS.violet}`
-    : isActive || isSelected
-      ? `1px solid ${COLORS.blue}`
-      : "1px solid var(--c-border)";
+    : isInverted
+      ? `1px solid ${COLORS.red}`
+      : isActive || isSelected
+        ? `1px solid ${COLORS.blue}`
+        : "1px solid var(--c-border)";
   const background = isDropTarget
     ? "rgba(124,58,237,.08)"
-    : isActive || isSelected
-      ? "rgba(37,99,255,.08)"
-      : "var(--c-raised)";
+    : isInverted
+      ? "rgba(240,67,91,.06)"
+      : isActive || isSelected
+        ? "rgba(37,99,255,.08)"
+        : "var(--c-raised)";
 
   const spk = subtitle.speaker ? speakerShort(subtitle.speaker) : null;
   const spkColor = spk ? SPEAKER_COLORS[(spk.num - 1) % SPEAKER_COLORS.length] : null;
@@ -263,9 +273,18 @@ function SubtitleRow({
 
       {/* footer timecodes (double-click to edit) */}
       <div style={{ marginTop: 7, display: "flex", gap: 6, alignItems: "center" }}>
-        <TimeCode value={subtitle.startTime} onSeek={onSeek} onChange={(ms) => onUpdate(subtitle.id, { startTime: ms })} />
+        <TimeCode value={subtitle.startTime} onSeek={onSeek} onChange={(ms) => onUpdate(subtitle.id, { startTime: ms })} invalid={isInverted} />
         <span style={{ fontFamily: FONTS.mono, fontSize: 9, color: "var(--c-muted)" }}>→</span>
-        <TimeCode value={subtitle.endTime} onSeek={onSeek} onChange={(ms) => onUpdate(subtitle.id, { endTime: ms })} />
+        <TimeCode value={subtitle.endTime} onSeek={onSeek} onChange={(ms) => onUpdate(subtitle.id, { endTime: ms })} invalid={isInverted} />
+        {isInverted && (
+          <span
+            title={t("editor:invertedTime")}
+            style={{ display: "flex", alignItems: "center", gap: 4, color: COLORS.red, ...f(600, 9) }}
+          >
+            <AlertTriangle size={11} />
+            {t("editor:invertedTime")}
+          </span>
+        )}
       </div>
     </div>
   );
@@ -366,10 +385,12 @@ function TimeCode({
   value,
   onSeek,
   onChange,
+  invalid,
 }: {
   value: number;
   onSeek: (ms: number) => void;
   onChange: (ms: number) => void;
+  invalid?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(formatTimestamp(value));
@@ -414,7 +435,7 @@ function TimeCode({
         fontFamily: FONTS.mono,
         fontWeight: 500,
         fontSize: 9,
-        color: "var(--c-muted)",
+        color: invalid ? COLORS.red : "var(--c-muted)",
         background: "none",
         border: "none",
         padding: 0,
