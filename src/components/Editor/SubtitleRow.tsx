@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect, memo } from "react";
-import { Scissors, ChevronUp, ChevronDown, Trash2 } from "lucide-react";
+import { Scissors, ChevronUp, ChevronDown, Trash2, AlertTriangle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Subtitle } from "../../types/subtitle";
 import { formatTimestamp, parseTimestamp } from "../../lib/time-format";
+import { hasInvertedTiming } from "../../lib/subtitle-ops";
 
 export interface WordDragPayload {
   sourceSubId: string;
@@ -76,6 +77,11 @@ function SubtitleRow({
 
   const hasWords = subtitle.words && subtitle.words.length > 0;
 
+  // Non-blocking inverted-time signal: time edits deliberately allow transient
+  // start >= end (see handleTimeChange), so flag it visually instead. Export
+  // additionally warns so a broken timing can't ship silently.
+  const isInverted = hasInvertedTiming(subtitle);
+
   const handleWordClick = (e: React.MouseEvent, wordIdx: number) => {
     if (e.metaKey || e.ctrlKey) {
       e.preventDefault();
@@ -143,6 +149,8 @@ function SubtitleRow({
           ? "border-violet-400 dark:border-violet-500 bg-violet-50 dark:bg-violet-900/10 ring-1 ring-violet-300 dark:ring-violet-700"
           : isDropTarget
           ? "border-green-400 dark:border-green-500 bg-green-50 dark:bg-green-900/10 ring-1 ring-green-300 dark:ring-green-700 cursor-pointer"
+          : isInverted
+          ? "border-red-400 dark:border-red-500 bg-red-50 dark:bg-red-900/10 ring-1 ring-red-300 dark:ring-red-700"
           : isActive
           ? "border-blue-400 dark:border-blue-500 bg-blue-50 dark:bg-blue-900/20"
           : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"
@@ -155,6 +163,12 @@ function SubtitleRow({
       {isDropTarget && (
         <div className="text-[11px] text-green-600 dark:text-green-400 font-medium mb-1.5 flex items-center gap-1">
           <span>{t("editor:dropHereHint")}</span>
+        </div>
+      )}
+      {isInverted && !isDropTarget && (
+        <div className="text-[11px] text-red-600 dark:text-red-400 font-medium mb-1.5 flex items-center gap-1">
+          <AlertTriangle size={12} />
+          <span>{t("editor:invertedTime")}</span>
         </div>
       )}
       <div className="flex gap-2">
@@ -174,11 +188,13 @@ function SubtitleRow({
             value={formatTimestamp(subtitle.startTime)}
             onChange={(v) => handleTimeChange("startTime", v)}
             onClick={() => onSeek(subtitle.startTime)}
+            invalid={isInverted}
           />
           <TimestampInput
             value={formatTimestamp(subtitle.endTime)}
             onChange={(v) => handleTimeChange("endTime", v)}
             onClick={() => onSeek(subtitle.endTime)}
+            invalid={isInverted}
           />
         </div>
 
@@ -324,10 +340,12 @@ function TimestampInput({
   value,
   onChange,
   onClick,
+  invalid,
 }: {
   value: string;
   onChange: (v: string) => void;
   onClick: () => void;
+  invalid?: boolean;
 }) {
   const { t } = useTranslation(["editor"]);
   const [editing, setEditing] = useState(false);
@@ -359,7 +377,11 @@ function TimestampInput({
 
   return (
     <button
-      className="timestamp-input w-[7.5rem] rounded px-1.5 py-0.5 text-left text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+      className={`timestamp-input w-[7.5rem] rounded px-1.5 py-0.5 text-left transition-colors ${
+        invalid
+          ? "text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
+          : "text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-200"
+      }`}
       onClick={onClick}
       onDoubleClick={() => setEditing(true)}
       title={t("editor:timestampHint")}

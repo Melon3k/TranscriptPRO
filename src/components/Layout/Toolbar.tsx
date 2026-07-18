@@ -32,6 +32,8 @@ import {
   exportVtt,
   exportAss,
 } from "../../lib/tauri-commands";
+import { ask } from "@tauri-apps/plugin-dialog";
+import { hasInvertedTiming } from "../../lib/subtitle-ops";
 import { routeFile, type FileRoutingCallbacks } from "../../lib/file-routing";
 import { formatError } from "../../lib/error-format";
 import { usePlayerStore } from "../../stores/playerStore";
@@ -265,8 +267,28 @@ function ExportDropdown({
   // `faithful` = the format round-trips the full editing state (timing + structure), so a
   // successful export means "saved". TXT (no timing) and Word SRT (loses segment grouping
   // on re-import) are lossy, so they must NOT clear the unsaved-changes guard.
-  async function run(handler: () => Promise<string | null>, faithful: boolean) {
+  // `timed` = the format carries timings, so inverted cues (start >= end) would ship
+  // broken — in-editor editing deliberately allows the transient inversion, this dialog
+  // is the backstop that keeps it from leaving the app silently.
+  async function run(
+    handler: () => Promise<string | null>,
+    faithful: boolean,
+    timed: boolean
+  ) {
     setOpen(false);
+    if (timed) {
+      const inverted = subtitles.filter(hasInvertedTiming);
+      if (inverted.length > 0) {
+        const proceed = await ask(
+          t("toolbar:invertedTimings", {
+            count: inverted.length,
+            first: inverted[0].index,
+          }),
+          { title: t("toolbar:invertedTimingsTitle"), kind: "warning" }
+        );
+        if (!proceed) return;
+      }
+    }
     try {
       const savedPath = await handler();
       if (savedPath) {
@@ -278,10 +300,16 @@ function ExportDropdown({
     }
   }
 
-  const items: { label: string; faithful: boolean; handler: () => Promise<string | null> }[] = [
+  const items: {
+    label: string;
+    faithful: boolean;
+    timed: boolean;
+    handler: () => Promise<string | null>;
+  }[] = [
     {
       label: "SRT",
       faithful: true,
+      timed: true,
       handler: async () => {
         const path = await saveSrtFileDialog();
         if (path) await exportSrt(path, subtitles);
@@ -291,6 +319,7 @@ function ExportDropdown({
     {
       label: "Word SRT",
       faithful: false,
+      timed: true,
       handler: async () => {
         const path = await saveSrtFileDialog("subtitles-words.srt");
         if (path) await exportWordSrt(path, subtitles);
@@ -300,6 +329,7 @@ function ExportDropdown({
     {
       label: "VTT",
       faithful: true,
+      timed: true,
       handler: async () => {
         const path = await saveVttFileDialog();
         if (path) await exportVtt(path, subtitles);
@@ -309,6 +339,7 @@ function ExportDropdown({
     {
       label: "ASS",
       faithful: true,
+      timed: true,
       handler: async () => {
         const path = await saveAssFileDialog();
         if (path) await exportAss(path, subtitles);
@@ -318,6 +349,7 @@ function ExportDropdown({
     {
       label: "TXT",
       faithful: false,
+      timed: false,
       handler: async () => {
         const path = await saveTxtFileDialog();
         if (path) await exportTxt(path, subtitles);
@@ -346,7 +378,7 @@ function ExportDropdown({
           {items.map((item) => (
             <button
               key={item.label}
-              onClick={() => run(item.handler, item.faithful)}
+              onClick={() => run(item.handler, item.faithful, item.timed)}
               className="w-full text-left px-3 py-1.5 text-xs text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
             >
               {item.label}

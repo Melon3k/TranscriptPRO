@@ -16,5 +16,8 @@
   "lightMode": "Light mode",
   "darkMode": "Dark mode",
   "settings": "Settings",
-  "exportSuccess": "Exported to {{name}}"
+  "exportSuccess": "Exported to {{name}}",
+  "invertedTimingsTitle": "Inverted timings",
+  "invertedTimings_one": "1 subtitle (#{{first}}) has an end time that is not after its start time. Export anyway?",
+  "invertedTimings_other": "{{count}} subtitles have end times that are not after their start times (first: #{{first}}). Export anyway?"
 }

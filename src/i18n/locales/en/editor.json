@@ -16,6 +16,7 @@
     "delete": "Delete"
   },
   "timestampHint": "Click to seek, double-click to edit",
+  "invertedTime": "End time is not after start time",
   "insertHere": "Insert here (position {{index}})",
   "comparison": {
     "original": "Original",
