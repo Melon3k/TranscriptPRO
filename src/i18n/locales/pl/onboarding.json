@@ -6,7 +6,9 @@
   "model": {
     "title": "Wybierz model Whisper",
     "subtitle": "Whisper działa w całości na Twoim urządzeniu — transkrypcja nie wymaga połączenia z internetem.",
-    "nextBlocked": "Pobierz model, aby kontynuować"
+    "nextBlocked": "Nie zainstalowano jeszcze modelu",
+    "skip": "Pomiń — pobiorę później",
+    "skipHint": "Model możesz pobrać w każdej chwili z panelu transkrypcji. Transkrypcja nie zadziała, dopóki żaden model nie jest zainstalowany."
   },
   "apiKeys": {
     "title": "Klucze API (opcjonalnie)",
