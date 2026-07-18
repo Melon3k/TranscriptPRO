@@ -1,31 +1,21 @@
 import { useState, useEffect } from "react";
-import { Mic, Download, Loader2, CheckCircle2, X, Scissors } from "lucide-react";
+import { Mic, Download, X, Scissors } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useSettingsStore } from "../../stores/settingsStore";
-import type { SegmentLimitModeSetting } from "../../stores/settingsStore";
+import { useSettingsStore, type SegmentLimitModeSetting } from "../../stores/settingsStore";
 import { useSubtitleStore } from "../../stores/subtitleStore";
 import { useVersionStore } from "../../stores/versionStore";
-import {
-  listModels,
-  downloadModel,
-  transcribeAudio,
-  cancelTranscription,
-} from "../../lib/tauri-commands";
-import { resegmentByLength } from "../../lib/subtitle-ops";
-import type { SegmentLimit } from "../../lib/subtitle-ops";
+import { useNotifyStore } from "../../stores/notifyStore";
+import { listModels, downloadModel, transcribeAudio, cancelTranscription } from "../../lib/tauri-commands";
+import { resegmentByLength, type SegmentLimit } from "../../lib/subtitle-ops";
 import { formatError, isCancellation } from "../../lib/error-format";
 import type { WhisperModelInfo, TranscriptionProgress } from "../../types/subtitle";
+import { COLORS, f, primaryBtn } from "../../lib/ui";
+import { FieldLabel, Select, CheckRow } from "../common/Field";
 
-// Whisper's language auto-detection proved unreliable (empty/failed transcriptions),
-// so there is deliberately no "auto" option — the user must pick a language.
-// Single source of truth for the selectable transcription languages in the frontend.
-// keep in sync with backend language whitelist (transcribe.rs)
-// Full official Whisper language set (99 codes). Ordered UX-first: the most common
-// languages, then the remainder alphabetically by code.
+// Whisper's auto-detect is unreliable, so a language must be picked (no "auto").
+// Full official 99-code Whisper set, common languages first.
 export const LANGUAGE_OPTIONS = [
-  // Most common first
   "en", "pl", "de", "es", "fr", "it", "pt", "nl", "ru", "uk", "ja", "ko", "zh",
-  // Remainder, alphabetical by code
   "af", "am", "ar", "as", "az", "ba", "be", "bg", "bn", "bo", "br", "bs", "ca",
   "cs", "cy", "da", "el", "et", "eu", "fa", "fi", "fo", "gl", "gu", "ha", "haw",
   "he", "hi", "hr", "ht", "hu", "hy", "id", "is", "ka", "kk", "km", "kn", "la",
@@ -41,114 +31,60 @@ interface TranscriptionPanelProps {
   onCancelExtraction: () => void;
 }
 
-export default function TranscriptionPanel({
-  audioPath,
-  extracting,
-  onCancelExtraction,
-}: TranscriptionPanelProps) {
+export default function TranscriptionPanel({ audioPath, extracting, onCancelExtraction }: TranscriptionPanelProps) {
   const { t } = useTranslation(["transcription", "common"]);
   const {
-    whisperModel,
-    setWhisperModel,
-    autoSaveOnTranscription,
-    forceCpu,
-    segmentLimitMode,
-    segmentMaxWords,
-    segmentMaxChars,
-    setSegmentLimitMode,
-    setSegmentMaxWords,
-    setSegmentMaxChars,
-    transcriptionLanguage: language,
-    setTranscriptionLanguage: setLanguage,
+    whisperModel, setWhisperModel, autoSaveOnTranscription, forceCpu,
+    segmentLimitMode, segmentMaxWords, segmentMaxChars,
+    setSegmentLimitMode, setSegmentMaxWords, setSegmentMaxChars,
+    transcriptionLanguage: language, setTranscriptionLanguage: setLanguage,
   } = useSettingsStore();
   const { setSubtitles, clearOriginalSubtitles, resegment } = useSubtitleStore();
   const hasSubtitles = useSubtitleStore((s) => s.subtitles.length > 0);
   const { addVersion } = useVersionStore();
+  const notify = useNotifyStore((s) => s.notify);
 
   const segmentLimit: SegmentLimit | null =
     segmentLimitMode === "off"
       ? null
-      : {
-          mode: segmentLimitMode,
-          value: segmentLimitMode === "words" ? segmentMaxWords : segmentMaxChars,
-        };
+      : { mode: segmentLimitMode, value: segmentLimitMode === "words" ? segmentMaxWords : segmentMaxChars };
 
   const [models, setModels] = useState<WhisperModelInfo[]>([]);
   const [downloading, setDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [transcribing, setTranscribing] = useState(false);
   const [progress, setProgress] = useState<TranscriptionProgress | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [detectSpeakers, setDetectSpeakers] = useState(false);
 
-  useEffect(() => {
-    loadModels();
-  }, []);
-
+  useEffect(() => { void loadModels(); }, []);
   const loadModels = async () => {
-    try {
-      const m = await listModels();
-      setModels(m);
-    } catch (e) {
-      console.error("Failed to list models:", e);
-    }
+    try { setModels(await listModels()); } catch (e) { console.error("Failed to list models:", e); }
   };
-
   const selectedModel = models.find((m) => m.name === whisperModel);
 
   const handleDownload = async () => {
-    setDownloading(true);
-    setDownloadProgress(0);
-    setError(null);
-    try {
-      await downloadModel(whisperModel, (p) => setDownloadProgress(p));
-      await loadModels();
-    } catch (e) {
-      setError(formatError(t, e));
-    } finally {
-      setDownloading(false);
-    }
+    setDownloading(true); setDownloadProgress(0);
+    try { await downloadModel(whisperModel, setDownloadProgress); await loadModels(); }
+    catch (e) { notify("error", formatError(t, e)); }
+    finally { setDownloading(false); }
   };
 
   const handleTranscribe = async () => {
     if (!audioPath || !language) return;
-    setTranscribing(true);
-    setProgress(null);
-    setError(null);
+    setTranscribing(true); setProgress(null);
     try {
-      let subs = await transcribeAudio(
-        audioPath,
-        whisperModel,
-        language,
-        detectSpeakers,
-        forceCpu,
-        (p) => setProgress(p)
-      );
-      // Fresh transcription replaces the document — drop any stale pre-translation
-      // snapshot so "Restore original"/comparison don't point at the old file.
+      let subs = await transcribeAudio(audioPath, whisperModel, language, detectSpeakers, forceCpu, setProgress);
       clearOriginalSubtitles();
-      // Optional length-based re-split (word timestamps drive the timing)
-      if (segmentLimit) {
-        subs = resegmentByLength(subs, segmentLimit);
-      }
-      // Not auto-saved to history → the result exists only in memory, so mark dirty
-      // to guard against losing it on close.
+      if (segmentLimit) subs = resegmentByLength(subs, segmentLimit);
       setSubtitles(subs, { dirty: !autoSaveOnTranscription });
-      if (autoSaveOnTranscription) {
-        addVersion(subs, "transcription", {
-          whisperModel,
-          language,
-        });
-      }
+      if (autoSaveOnTranscription) addVersion(subs, "transcription", { whisperModel, language });
+      notify("success", t("transcription:doneNotice", { count: subs.length }));
     } catch (e) {
       if (isCancellation(e)) {
-        setProgress({
-          stage: "cancelled",
-          progress: 0,
-          message: t("errors:CANCELLED", { ns: "errors" }),
-        });
+        setProgress({ stage: "cancelled", progress: 0, message: t("errors:CANCELLED", { ns: "errors" }) });
+        notify("error", t("transcription:cancelledNotice"));
       } else {
-        setError(formatError(t, e));
+        notify("error", formatError(t, e));
       }
     } finally {
       setTranscribing(false);
@@ -156,241 +92,178 @@ export default function TranscriptionPanel({
   };
 
   const handleCancel = async () => {
-    try {
-      await cancelTranscription();
-    } catch (e) {
-      console.error("Cancel failed:", e);
-    }
+    try { await cancelTranscription(); } catch (e) { console.error("Cancel failed:", e); }
   };
 
-  return (
-    <div className="p-4 space-y-4">
-      <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2">
-        <Mic size={16} />
-        {t("transcription:header")}
-      </h3>
+  const modelDownloaded = selectedModel?.downloaded ?? true;
 
-      {/* Model selector */}
-      <div className="space-y-2">
-        <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">
-          {t("transcription:modelLabel")}
-        </label>
-        <select
-          value={whisperModel}
-          onChange={(e) => setWhisperModel(e.target.value)}
-          className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1.5 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
-          disabled={transcribing}
-        >
+  return (
+    <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+        <Mic size={17} color={COLORS.cyan} />
+        <span style={f(600, 15, "display")}>{t("transcription:header")}</span>
+      </div>
+
+      <FieldLabel>{t("transcription:modelLabel")}</FieldLabel>
+      <div style={{ marginBottom: 14 }}>
+        <Select value={whisperModel} disabled={transcribing} onChange={(e) => setWhisperModel(e.target.value)}>
           {models.map((m) => (
             <option key={m.name} value={m.name}>
-              {m.name} ({m.sizeMb} MB)
-              {m.downloaded ? " \u2713" : ""}
+              {m.name} ({m.sizeMb} MB){m.downloaded ? " ✓" : ""}
             </option>
           ))}
-        </select>
-
+        </Select>
         {selectedModel && !selectedModel.downloaded && (
           <button
             onClick={handleDownload}
             disabled={downloading}
-            className="flex items-center gap-1.5 w-full justify-center rounded bg-gray-100 dark:bg-gray-700 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50 transition-colors"
+            style={{ ...secondaryBtn, marginTop: 8 }}
           >
             {downloading ? (
-              <>
-                <Loader2 size={14} className="animate-spin" />
-                {t("transcription:downloading", {
-                  percent: Math.round(downloadProgress * 100),
-                })}
-              </>
+              <><Spinner />{t("transcription:downloading", { percent: Math.round(downloadProgress * 100) })}</>
             ) : (
-              <>
-                <Download size={14} />
-                {t("transcription:downloadModel", { sizeMb: selectedModel.sizeMb })}
-              </>
+              <><Download size={14} />{t("transcription:downloadModel", { sizeMb: selectedModel.sizeMb })}</>
             )}
           </button>
         )}
       </div>
 
-      {/* Language */}
-      <div className="space-y-2">
-        <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">
-          {t("transcription:languageLabel")}
-        </label>
-        <select
-          value={language}
-          onChange={(e) => setLanguage(e.target.value)}
-          className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1.5 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
-          disabled={transcribing}
-        >
-          <option value="" disabled>
-            {t("transcription:languagePlaceholder")}
-          </option>
+      <FieldLabel>{t("transcription:languageLabel")}</FieldLabel>
+      <div style={{ marginBottom: 14 }}>
+        <Select value={language} disabled={transcribing} onChange={(e) => setLanguage(e.target.value)}>
+          <option value="" disabled>{t("transcription:languagePlaceholder")}</option>
           {LANGUAGE_OPTIONS.map((code) => (
-            <option key={code} value={code}>
-              {t(`transcription:language.${code}`)}
-            </option>
+            <option key={code} value={code}>{t(`transcription:language.${code}`)}</option>
           ))}
-        </select>
+        </Select>
       </div>
 
-      {/* Segment length limit */}
-      <div className="space-y-2">
-        <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">
-          {t("transcription:segmentLimitLabel")}
-        </label>
-        <div className="flex gap-2">
-          <select
-            value={segmentLimitMode}
-            onChange={(e) =>
-              setSegmentLimitMode(e.target.value as SegmentLimitModeSetting)
-            }
-            disabled={transcribing}
-            className="flex-1 min-w-0 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1.5 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
-          >
+      <FieldLabel>{t("transcription:segmentLimitLabel")}</FieldLabel>
+      <div style={{ display: "flex", gap: 8, marginBottom: segmentLimit ? 8 : 16 }}>
+        <div style={{ flex: 2, minWidth: 0 }}>
+          <Select value={segmentLimitMode} disabled={transcribing} onChange={(e) => setSegmentLimitMode(e.target.value as SegmentLimitModeSetting)}>
             <option value="off">{t("transcription:segmentLimit.off")}</option>
             <option value="words">{t("transcription:segmentLimit.words")}</option>
             <option value="chars">{t("transcription:segmentLimit.chars")}</option>
-          </select>
-          {segmentLimit && (
-            <input
-              type="number"
-              min={1}
-              max={segmentLimitMode === "words" ? 30 : 200}
-              value={segmentLimit.value}
-              onChange={(e) => {
-                const v = parseInt(e.target.value, 10);
-                if (Number.isNaN(v)) return;
-                if (segmentLimitMode === "words") setSegmentMaxWords(v);
-                else setSegmentMaxChars(v);
-              }}
-              disabled={transcribing}
-              className="w-16 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1.5 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
-            />
-          )}
+          </Select>
         </div>
         {segmentLimit && (
-          <>
-            <p className="text-[11px] leading-snug text-gray-400 dark:text-gray-500">
-              {t("transcription:segmentLimitHint")}
-            </p>
-            {hasSubtitles && !transcribing && (
-              <>
-                <button
-                  onClick={() => resegment(segmentLimit)}
-                  className="flex items-center gap-1.5 w-full justify-center rounded bg-gray-100 dark:bg-gray-700 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-                >
-                  <Scissors size={14} />
-                  {t("transcription:applySegmentLimit")}
-                </button>
-                <p className="text-[11px] leading-snug text-gray-400 dark:text-gray-500">
-                  {t("transcription:resplitDirectionHint")}
-                </p>
-              </>
-            )}
-          </>
+          <input
+            type="number"
+            min={1}
+            max={segmentLimitMode === "words" ? 30 : 200}
+            value={segmentLimit.value}
+            disabled={transcribing}
+            onChange={(e) => {
+              const v = parseInt(e.target.value, 10);
+              if (Number.isNaN(v)) return;
+              if (segmentLimitMode === "words") setSegmentMaxWords(v);
+              else setSegmentMaxChars(v);
+            }}
+            style={{
+              width: 60, height: 34, textAlign: "center", background: "var(--c-input)",
+              border: "1px solid var(--c-border)", borderRadius: 7, color: "var(--c-text)",
+              fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, fontSize: 12, outline: "none",
+            }}
+          />
         )}
       </div>
+      {segmentLimit && (
+        <div style={{ marginBottom: 16 }}>
+          <p style={f(400, 11, "body", { color: "var(--c-muted)", lineHeight: 1.4, margin: "0 0 8px" })}>
+            {t("transcription:segmentLimitHint")}
+          </p>
+          {hasSubtitles && !transcribing && (
+            <button onClick={() => resegment(segmentLimit)} style={secondaryBtn}>
+              <Scissors size={14} />
+              {t("transcription:applySegmentLimit")}
+            </button>
+          )}
+        </div>
+      )}
 
-      {/* Speaker detection toggle */}
-      <label className="flex items-center gap-2 cursor-pointer">
-        <input
-          type="checkbox"
-          checked={detectSpeakers}
-          onChange={(e) => setDetectSpeakers(e.target.checked)}
-          disabled={transcribing}
-          className="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-500 focus:ring-blue-400"
-        />
-        <span className="text-xs font-medium text-gray-600 dark:text-gray-400">
-          {t("transcription:detectSpeakers")}
-        </span>
-      </label>
+      <div style={{ marginBottom: 20 }}>
+        <CheckRow checked={detectSpeakers} disabled={transcribing} onChange={setDetectSpeakers} label={t("transcription:detectSpeakers")} />
+      </div>
 
-      {/* Transcribe / Cancel button */}
       {transcribing ? (
-        <button
-          onClick={handleCancel}
-          className="flex items-center gap-2 w-full justify-center rounded-lg bg-red-500 hover:bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors"
-        >
-          <X size={16} />
-          {t("transcription:cancel")}
-        </button>
+        <>
+          <button onClick={handleCancel} style={{ ...dangerBtn, marginBottom: 14 }}>
+            <X size={15} />{t("transcription:cancel")}
+          </button>
+          <ProgressCard
+            label={progress ? t(`transcription:progress.${progress.stage}`, {
+              percent: Math.round(progress.progress * 100),
+              index: progress.index ?? 0, total: progress.total ?? 0, count: progress.total ?? 0,
+              defaultValue: progress.message,
+            }) : t("transcription:progress.transcribing_audio", { percent: 0 })}
+            percent={progress ? Math.round(progress.progress * 100) : 0}
+            accent={COLORS.cyan}
+          />
+        </>
+      ) : extracting ? (
+        <>
+          <ProgressCard label={t("transcription:extractingAudio")} percent={null} accent={COLORS.cyan} />
+          <button onClick={onCancelExtraction} style={{ ...dangerBtn, marginTop: 12 }}>
+            <X size={15} />{t("transcription:cancel")}
+          </button>
+        </>
       ) : (
         <>
           <button
             onClick={handleTranscribe}
-            disabled={
-              !audioPath || !language || (selectedModel && !selectedModel.downloaded)
-            }
-            className="flex items-center gap-2 w-full justify-center rounded-lg bg-blue-500 hover:bg-blue-600 disabled:bg-blue-300 dark:disabled:bg-blue-800 px-4 py-2 text-sm font-medium text-white transition-colors"
+            disabled={!audioPath || !language || !modelDownloaded}
+            style={primaryBtn(COLORS.blue, !audioPath || !language || !modelDownloaded)}
           >
-            <Mic size={16} />
-            {t("transcription:transcribe")}
+            <Mic size={15} />{t("transcription:transcribe")}
           </button>
           {audioPath && !language && (
-            <p className="text-[11px] leading-snug text-gray-400 dark:text-gray-500 text-center">
+            <p style={f(400, 11, "body", { color: "var(--c-muted)", textAlign: "center", marginTop: 8 })}>
               {t("transcription:selectLanguageHint")}
+            </p>
+          )}
+          {!audioPath && (
+            <p style={f(400, 11, "body", { color: "var(--c-muted)", textAlign: "center", marginTop: 8 })}>
+              {t("transcription:emptyState")}
             </p>
           )}
         </>
       )}
+    </div>
+  );
+}
 
-      {/* Progress */}
-      {progress && (
-        <div className="space-y-1">
-          <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-            {progress.stage === "done" ? (
-              <CheckCircle2 size={14} className="text-green-500" />
-            ) : (
-              <Loader2 size={14} className="animate-spin" />
-            )}
-            {t(`transcription:progress.${progress.stage}`, {
-              percent: Math.round(progress.progress * 100),
-              index: progress.index ?? 0,
-              total: progress.total ?? 0,
-              count: progress.total ?? 0,
-              defaultValue: progress.message,
-            })}
-          </div>
-          <div className="h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
-            <div
-              className="h-full bg-blue-500 transition-[width] duration-300"
-              style={{ width: `${progress.progress * 100}%` }}
-            />
-          </div>
-        </div>
-      )}
+const secondaryBtn: React.CSSProperties = {
+  display: "flex", alignItems: "center", justifyContent: "center", gap: 6, width: "100%", height: 34,
+  background: "var(--c-raised)", border: "1px solid var(--c-border)", borderRadius: 7,
+  color: "var(--c-text2)", cursor: "pointer", fontFamily: "Inter, sans-serif", fontWeight: 600, fontSize: 11,
+};
 
-      {/* Audio extraction status + cancel */}
-      {extracting && (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-            <Loader2 size={14} className="animate-spin" />
-            {t("transcription:extractingAudio")}
-          </div>
-          <button
-            onClick={onCancelExtraction}
-            className="flex items-center gap-2 w-full justify-center rounded-lg bg-red-500 hover:bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors"
-          >
-            <X size={16} />
-            {t("transcription:cancel")}
-          </button>
-        </div>
-      )}
+const dangerBtn: React.CSSProperties = {
+  display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", height: 42,
+  background: "rgba(240,67,91,.12)", border: "1px solid rgba(240,67,91,.4)", borderRadius: 9,
+  color: COLORS.red, cursor: "pointer", fontFamily: "Inter, sans-serif", fontWeight: 600, fontSize: 13,
+};
 
-      {/* Status */}
-      {!audioPath && !extracting && (
-        <p className="text-xs text-gray-400 dark:text-gray-500 text-center">
-          {t("transcription:emptyState")}
-        </p>
-      )}
+function Spinner({ color = COLORS.cyan }: { color?: string }) {
+  return (
+    <span style={{ width: 14, height: 14, borderRadius: "50%", border: `2px solid ${color}`, borderTopColor: "transparent", animation: "spin .8s linear infinite", display: "inline-block" }} />
+  );
+}
 
-      {/* Error */}
-      {error && (
-        <div className="rounded bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 px-3 py-2 text-xs text-red-600 dark:text-red-400">
-          {error}
-        </div>
-      )}
+export function ProgressCard({ label, percent, accent }: { label: string; percent: number | null; accent: string }) {
+  return (
+    <div style={{ background: "var(--c-input)", border: "1px solid var(--c-border)", borderRadius: 9, padding: 13 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 9 }}>
+        <Spinner color={accent} />
+        <span style={f(500, 11, "body")}>{label}</span>
+        {percent !== null && (
+          <span style={{ marginLeft: "auto", fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, fontSize: 11, color: accent }}>{percent}%</span>
+        )}
+      </div>
+      <div style={{ height: 5, borderRadius: 3, background: "var(--c-border)", position: "relative", overflow: "hidden" }}>
+        <span style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: percent !== null ? `${percent}%` : "40%", background: accent, borderRadius: 3 }} />
+      </div>
     </div>
   );
 }

@@ -128,3 +128,55 @@ Still open:
 - **`assetProtocol` scope.** *(Security — likely wontfix)* Currently `**` to allow media from
   arbitrary user-chosen paths; a file-open app can't easily narrow this without breaking the
   core flow. Revisit only if Tauri grows a dynamic-scope API; otherwise document the decision.
+
+## New design (redesign UI) — features present in the UI but not yet implemented
+
+The `feat/new-design` redesign (PR #23) ships the full new UI, but some panels
+are **built and rendered disabled/grayed** because there is no backend for them
+yet (per the brief: build the UI, gray it out, add no behaviour). This section
+tracks what it would take to make each one real.
+
+### A. Caption styling — "Inspector" panel (disabled) *(LARGE)*
+- [ ] Font family picker (applied), size, letter-spacing, line-height sliders
+- [ ] Alignment L/C/R, bold / italic / uppercase (TT)
+- [ ] Outline / shadow / glow toggles + glow strength
+- [ ] Colours: text / outline / shadow / glow (no colour UI yet; model has the fields)
+- [ ] Caption-box position (3×3 grid), center H/V, width, distance-from-bottom
+
+### B. Subtitle positioning on the player *(MEDIUM)*
+- [ ] Draggable caption box on the video (handles, `x%` / `bottom%`) — today the
+      overlay is static, only show/hide via the corner CC toggle
+- [ ] Bind position/width to the style model
+
+### C. Subtitle animations — "Animations" tab (disabled) *(LARGE)*
+- [ ] Types: fade / slide / pop / typewriter / karaoke / blur
+- [ ] Apply to selected / all
+- [ ] Duration, per-word delay, easing, highlight colour
+- [ ] Per-word animation
+- [ ] **Animation editor modal** (with live preview) — not built at all
+
+### D. Presets / effects — "Effects" tab (disabled) *(MEDIUM)*
+- [ ] Preset cards (Neon, Hard shadow, Thick outline, Soft)
+- [ ] New / Duplicate / Save / Delete + inline editor
+- [ ] Preset search
+- [ ] Persist presets
+
+### E. Design elements skipped in the implementation *(SMALL)*
+- [ ] **Export preview modal** (SRT/VTT tabs + text preview + Download) — export
+      currently goes straight to the native save dialog (functional, no preview)
+
+### F. Cross-cutting prerequisites for A–D
+- [ ] Extend `Subtitle` (or a new store) with style/animation data — global and/or per-segment
+- [ ] Render the style on the video overlay in `Player` (plain text today)
+- [ ] Backend: serialize style/animation into **ASS** (`export_ass`) and possibly karaoke/Word SRT
+- [ ] Persist style settings / presets (localStorage / settings / per project)
+- [ ] (CSP) No real Outfit/Inter webfonts — consider bundling `.woff2` locally so style previews are faithful
+
+### G. Regression to decide *(from the redesign)*
+- [ ] Drag-and-drop a **file** onto the window to open it — disabled (`dragDropEnabled: false`)
+      because the native Tauri drag-drop swallowed HTML5 word dragging on macOS. To have both,
+      reimplement word DnD on pointer events (mouse) and re-enable native file drop.
+
+Not on this list (these work): Whisper transcription + speaker detection, translation
+(Gemini/Claude/local Gemma), SRT import, SRT/VTT/ASS/TXT/Word SRT export, editing/segments,
+version history + diff, logs, settings, updates.

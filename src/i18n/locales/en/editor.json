@@ -1,4 +1,6 @@
 {
+  "segments": "Segments",
+  "editHint": "Enter saves · Esc cancels",
   "emptyTitle": "No subtitles loaded",
   "emptyHint": "Open a media file or import an SRT",
   "selectionBanner_one": "{{count}} word selected — click a target block to move",

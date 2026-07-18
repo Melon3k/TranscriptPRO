@@ -1,0 +1,26 @@
+{
+  "tabs": {
+    "inspector": "Inspektor",
+    "animations": "Animacje",
+    "effects": "Efekty"
+  },
+  "comingSoon": "Stylizacja napisów, animacje i presety pojawią się w przyszłej wersji. Ten panel to podgląd i nie jest jeszcze aktywny.",
+  "text": "TEKST",
+  "size": "Rozmiar",
+  "letterSpacing": "Odstęp liter",
+  "lineHeight": "Interlinia",
+  "outlineShadowGlow": "OBRYS · CIEŃ · GLOW",
+  "outline": "Obrys",
+  "shadow": "Cień",
+  "glow": "Poświata (glow)",
+  "glowStrength": "Siła poświaty",
+  "captionBox": "BOX NAPISÓW",
+  "boxPosition": "Pozycja boxa",
+  "boxBottomCenter": "Dół · środek",
+  "width": "Szerokość",
+  "bottomDistance": "Odległość od dołu",
+  "applyToSelected": "Zastosuj do zaznaczonych",
+  "applyToAll": "Wszystkie",
+  "searchPreset": "Szukaj presetu…",
+  "newPreset": "Nowy"
+}

@@ -1,5 +1,8 @@
 {
   "title": "Ustawienia",
+  "themeLabel": "Motyw",
+  "themeDark": "Ciemny",
+  "themeLight": "Jasny",
   "geminiApiKey": "Klucz API Gemini",
   "geminiModel": "Model Gemini",
   "claudeApiKey": "Klucz API Claude",
