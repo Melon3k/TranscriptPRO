@@ -48,5 +48,23 @@
   "applyToSelected": "Apply to selected",
   "applyToAll": "All",
   "searchPreset": "Search preset…",
-  "newPreset": "New"
+  "newPreset": "New",
+  "presets": {
+    "builtin": {
+      "neon": "Neon",
+      "hardShadow": "Hard shadow",
+      "thickOutline": "Thick outline",
+      "soft": "Soft"
+    },
+    "duplicate": "Duplicate",
+    "save": "Save current style",
+    "delete": "Delete",
+    "deleteConfirm": "Delete this preset?",
+    "rename": "Rename",
+    "namePlaceholder": "Preset name",
+    "defaultName": "My preset",
+    "builtinBadge": "Built-in",
+    "active": "Active",
+    "empty": "No presets match your search."
+  }
 }

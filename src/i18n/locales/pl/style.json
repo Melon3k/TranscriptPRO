@@ -48,5 +48,23 @@
   "applyToSelected": "Zastosuj do zaznaczonych",
   "applyToAll": "Wszystkie",
   "searchPreset": "Szukaj presetu…",
-  "newPreset": "Nowy"
+  "newPreset": "Nowy",
+  "presets": {
+    "builtin": {
+      "neon": "Neon",
+      "hardShadow": "Twardy cień",
+      "thickOutline": "Gruby obrys",
+      "soft": "Miękki"
+    },
+    "duplicate": "Duplikuj",
+    "save": "Zapisz bieżący styl",
+    "delete": "Usuń",
+    "deleteConfirm": "Usunąć ten preset?",
+    "rename": "Zmień nazwę",
+    "namePlaceholder": "Nazwa presetu",
+    "defaultName": "Mój preset",
+    "builtinBadge": "Wbudowany",
+    "active": "Aktywny",
+    "empty": "Brak presetów pasujących do wyszukiwania."
+  }
 }

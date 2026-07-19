@@ -1,5 +1,5 @@
-import { useState, type CSSProperties, type ReactNode } from "react";
-import { Sparkles, Layers, ChevronDown, Lock, Search, Plus, RotateCcw } from "lucide-react";
+import { useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { Sparkles, Layers, ChevronDown, Lock, Search, Plus, RotateCcw, Copy, Trash2, Pencil, Check, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { COLORS, f, FONTS, tabStyle, sectionLabel, selectStyle, toggle } from "../../lib/ui";
 import { useStyleStore } from "../../stores/styleStore";
@@ -8,9 +8,11 @@ import {
   CAPTION_FONTS,
   STYLE_LIMITS,
   normalizeHexColor,
+  captionTextCss,
   type NumericStyleField,
 } from "../../lib/caption-style";
-import type { CaptionAlign, CaptionFontId } from "../../types/captionStyle";
+import { BUILTIN_PRESETS, uniquePresetName } from "../../lib/caption-presets";
+import type { CaptionAlign, CaptionFontId, CaptionStyle } from "../../types/captionStyle";
 
 type StyleTab = "inspector" | "anim" | "effects";
 
@@ -20,7 +22,7 @@ type StyleTab = "inspector" | "anim" | "effects";
  * are still non-interactive previews, kept grayed behind the lock notice.
  */
 export default function StylePanel() {
-  const { t } = useTranslation(["style"]);
+  const { t } = useTranslation(["style", "common"]);
   const [tab, setTab] = useState<StyleTab>("inspector");
 
   return (
@@ -43,9 +45,13 @@ export default function StylePanel() {
         <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
           <Inspector t={t} />
         </div>
+      ) : tab === "effects" ? (
+        <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
+          <Effects t={t} />
+        </div>
       ) : (
         <>
-          {/* Disabled notice — Animations/Effects only; the Inspector is live. */}
+          {/* Disabled notice — Animations only; Inspector and Effects are live. */}
           <div
             style={{
               display: "flex",
@@ -62,7 +68,7 @@ export default function StylePanel() {
             <span style={f(600, 10, "body", { color: COLORS.amber, lineHeight: 1.4 })}>{t("style:comingSoon")}</span>
           </div>
           <div style={{ flex: 1, overflowY: "auto", padding: 16, opacity: 0.45, pointerEvents: "none", userSelect: "none" }}>
-            {tab === "anim" ? <Animations t={t} /> : <Effects t={t} />}
+            <Animations t={t} />
           </div>
         </>
       )}
@@ -339,32 +345,284 @@ function Animations({ t }: { t: TFn }) {
   );
 }
 
+/** A preset as rendered in the grid: built-ins carry a resolved (translated)
+ *  name and no persisted identity; user presets are their store rows. */
+interface PresetItem {
+  id: string;
+  name: string;
+  style: CaptionStyle;
+  builtin: boolean;
+}
+
 function Effects({ t }: { t: TFn }) {
-  const presets = ["Neon cyan", "Twardy cień", "Gruby obrys", "Miękki"];
+  const style = useStyleStore((s) => s.style);
+  const activePresetId = useStyleStore((s) => s.activePresetId);
+  const applyPreset = useStyleStore((s) => s.applyPreset);
+  const presets = useStyleStore((s) => s.presets);
+  const addPreset = useStyleStore((s) => s.addPreset);
+  const updatePreset = useStyleStore((s) => s.updatePreset);
+  const deletePreset = useStyleStore((s) => s.deletePreset);
+
+  const [search, setSearch] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  const items: PresetItem[] = [
+    ...BUILTIN_PRESETS.map((p) => ({ id: p.id, name: t(p.nameKey), style: p.style, builtin: true })),
+    ...presets.map((p) => ({ id: p.id, name: p.name, style: p.style, builtin: false })),
+  ];
+  const allNames = items.map((p) => p.name);
+  const q = search.trim().toLowerCase();
+  const filtered = q ? items.filter((p) => p.name.toLowerCase().includes(q)) : items;
+
+  const onNew = () => {
+    const id = addPreset(uniquePresetName(t("style:presets.defaultName"), allNames), style);
+    setEditingId(id);
+    setSearch("");
+  };
+
   return (
     <>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
         <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 6, height: 28, padding: "0 9px", background: "var(--c-input)", border: "1px solid var(--c-border)", borderRadius: 7, color: "var(--c-muted)" }}>
           <Search size={12} />
-          <span style={f(400, 10)}>{t("style:searchPreset")}</span>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t("style:searchPreset")}
+            aria-label={t("style:searchPreset")}
+            style={{ flex: 1, minWidth: 0, background: "none", border: "none", outline: "none", color: "var(--c-text)", ...f(400, 10, "body") }}
+          />
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 5, height: 28, padding: "0 10px", background: "rgba(37,99,255,.14)", border: `1px solid ${COLORS.blue}`, borderRadius: 7, color: COLORS.blueLight, ...f(600, 10) }}>
+        <button
+          onClick={onNew}
+          style={{ display: "flex", alignItems: "center", gap: 5, height: 28, padding: "0 10px", background: "rgba(37,99,255,.14)", border: `1px solid ${COLORS.blue}`, borderRadius: 7, color: COLORS.blueLight, cursor: "pointer", ...f(600, 10) }}
+        >
           <Plus size={12} />
           {t("style:newPreset")}
+        </button>
+      </div>
+      {filtered.length === 0 ? (
+        <div style={f(400, 10, "body", { color: "var(--c-muted)", padding: "8px 2px" })}>{t("style:presets.empty")}</div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 9 }}>
+          {filtered.map((preset) => (
+            <PresetCard
+              key={preset.id}
+              t={t}
+              preset={preset}
+              active={activePresetId === preset.id}
+              editing={editingId === preset.id}
+              confirmingDelete={confirmDeleteId === preset.id}
+              onApply={() => applyPreset(preset.id, preset.style)}
+              onDuplicate={() => {
+                const id = addPreset(uniquePresetName(preset.name, allNames), preset.style);
+                setEditingId(id);
+              }}
+              onSaveOver={() => updatePreset(preset.id, { style })}
+              onRename={(name) => updatePreset(preset.id, { name })}
+              setEditing={(on) => setEditingId(on ? preset.id : null)}
+              onDeleteRequest={() => setConfirmDeleteId(preset.id)}
+              onDeleteConfirm={() => {
+                deletePreset(preset.id);
+                setConfirmDeleteId(null);
+              }}
+              onDeleteCancel={() => setConfirmDeleteId(null)}
+            />
+          ))}
         </div>
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 9 }}>
-        {presets.map((name, i) => (
-          <div key={name} style={{ border: `1px solid ${i === 0 ? COLORS.cyan : "var(--c-border)"}`, borderRadius: 9, overflow: "hidden", background: "#0c1017" }}>
-            <div style={{ height: 44, display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <span style={{ fontFamily: FONTS.display, fontWeight: 900, fontSize: 15, color: i === 0 ? "#fff" : COLORS.amber, textShadow: i === 0 ? `0 0 10px ${COLORS.cyan}` : "none" }}>Aa</span>
-            </div>
-            <div style={{ ...f(600, 9), padding: "5px 8px", borderTop: "1px solid var(--c-border)", color: "var(--c-text)" }}>{name}</div>
-          </div>
-        ))}
-      </div>
+      )}
     </>
   );
+}
+
+function PresetCard({
+  t,
+  preset,
+  active,
+  editing,
+  confirmingDelete,
+  onApply,
+  onDuplicate,
+  onSaveOver,
+  onRename,
+  setEditing,
+  onDeleteRequest,
+  onDeleteConfirm,
+  onDeleteCancel,
+}: {
+  t: TFn;
+  preset: PresetItem;
+  active: boolean;
+  editing: boolean;
+  confirmingDelete: boolean;
+  onApply: () => void;
+  onDuplicate: () => void;
+  onSaveOver: () => void;
+  onRename: (name: string) => void;
+  setEditing: (on: boolean) => void;
+  onDeleteRequest: () => void;
+  onDeleteConfirm: () => void;
+  onDeleteCancel: () => void;
+}) {
+  // Escape must cancel without the trailing blur re-committing the draft.
+  const cancelledRef = useRef(false);
+  const commit = (value: string) => {
+    if (cancelledRef.current) {
+      cancelledRef.current = false;
+    } else {
+      onRename(value.trim() || preset.name);
+    }
+    setEditing(false);
+  };
+
+  const stop = (fn: () => void) => (e: ReactMouseEvent) => {
+    e.stopPropagation();
+    fn();
+  };
+
+  return (
+    <div
+      // While confirming a delete the card must not apply the preset: clicking
+      // the prompt label or the preview surface would otherwise silently
+      // overwrite the live style instead of answering the dialog.
+      onClick={confirmingDelete ? undefined : onApply}
+      style={{
+        border: `1px solid ${active ? COLORS.cyan : "var(--c-border)"}`,
+        borderRadius: 9,
+        overflow: "hidden",
+        background: "var(--c-panel)",
+        cursor: confirmingDelete ? "default" : "pointer",
+      }}
+    >
+      {/* Preview surface picks the tone that contrasts the sample's text color,
+          so a dark-text preset stays legible (independent of the app theme). */}
+      <div style={{ position: "relative", height: 44, display: "flex", alignItems: "center", justifyContent: "center", background: isLightColor(preset.style.textColor) ? "#0c1017" : "#e9edf2" }}>
+        <span style={{ ...captionTextCss(preset.style), fontSize: 22, whiteSpace: "nowrap" }}>Aa</span>
+        {active && (
+          <span style={{ position: "absolute", top: 4, right: 4, ...badge(COLORS.cyan) }}>{t("style:presets.active")}</span>
+        )}
+        {preset.builtin && !active && (
+          <span style={{ position: "absolute", top: 4, right: 4, ...badge(COLORS.amber) }}>{t("style:presets.builtinBadge")}</span>
+        )}
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 6px", borderTop: "1px solid var(--c-border)", minHeight: 28 }}>
+        {confirmingDelete ? (
+          <>
+            <span style={f(600, 9, "body", { flex: 1, minWidth: 0, color: COLORS.red, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>
+              {t("style:presets.deleteConfirm")}
+            </span>
+            <ActionBtn label={t("style:presets.delete")} onClick={stop(onDeleteConfirm)} danger>
+              <Trash2 size={12} />
+            </ActionBtn>
+            <ActionBtn label={t("common:cancel")} onClick={stop(onDeleteCancel)}>
+              <X size={12} />
+            </ActionBtn>
+          </>
+        ) : editing && !preset.builtin ? (
+          <input
+            autoFocus
+            defaultValue={preset.name}
+            aria-label={t("style:presets.namePlaceholder")}
+            placeholder={t("style:presets.namePlaceholder")}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur();
+              else if (e.key === "Escape") {
+                cancelledRef.current = true;
+                e.currentTarget.blur();
+              }
+            }}
+            onBlur={(e) => commit(e.currentTarget.value)}
+            style={{ flex: 1, minWidth: 0, height: 20, padding: "0 5px", background: "var(--c-input)", border: `1px solid ${COLORS.blue}`, borderRadius: 5, color: "var(--c-text)", outline: "none", ...f(600, 9, "body") }}
+          />
+        ) : preset.builtin ? (
+          <>
+            <span style={f(600, 9, "body", { flex: 1, minWidth: 0, color: "var(--c-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>
+              {preset.name}
+            </span>
+            <ActionBtn label={t("style:presets.duplicate")} onClick={stop(onDuplicate)}>
+              <Copy size={12} />
+            </ActionBtn>
+          </>
+        ) : (
+          <>
+            <button
+              onClick={stop(() => setEditing(true))}
+              title={t("style:presets.rename")}
+              style={{ flex: 1, minWidth: 0, textAlign: "left", background: "none", border: "none", padding: 0, cursor: "text", color: "var(--c-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", ...f(600, 9, "body") }}
+            >
+              {preset.name}
+            </button>
+            <ActionBtn label={t("style:presets.rename")} onClick={stop(() => setEditing(true))}>
+              <Pencil size={12} />
+            </ActionBtn>
+            <ActionBtn label={t("style:presets.save")} onClick={stop(onSaveOver)}>
+              <Check size={12} />
+            </ActionBtn>
+            <ActionBtn label={t("style:presets.duplicate")} onClick={stop(onDuplicate)}>
+              <Copy size={12} />
+            </ActionBtn>
+            <ActionBtn label={t("style:presets.delete")} onClick={stop(onDeleteRequest)} danger>
+              <Trash2 size={12} />
+            </ActionBtn>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ActionBtn({ label, onClick, danger, children }: { label: string; onClick: (e: ReactMouseEvent) => void; danger?: boolean; children: ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: 22,
+        height: 20,
+        flex: "none",
+        padding: 0,
+        borderRadius: 5,
+        border: "1px solid var(--c-border)",
+        background: "var(--c-raised)",
+        color: danger ? COLORS.red : "var(--c-text2)",
+        cursor: "pointer",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** True if a #RRGGBB color is light enough to need a dark backdrop (Rec. 601
+ *  luma). Used only to pick a contrasting preview surface; non-#RRGGBB inputs
+ *  are treated as dark. */
+function isLightColor(hex: string): boolean {
+  const m = /^#([0-9a-fA-F]{6})$/.exec(hex);
+  if (!m) return false;
+  const n = parseInt(m[1], 16);
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  return 0.299 * r + 0.587 * g + 0.114 * b > 140;
+}
+
+function badge(color: string): CSSProperties {
+  return f(600, 8, "body", {
+    color,
+    background: "var(--c-panel)",
+    border: `1px solid ${color}88`,
+    borderRadius: 4,
+    padding: "1px 5px",
+    letterSpacing: ".06em",
+    textTransform: "uppercase",
+  });
 }
 
 const pill: CSSProperties = {
