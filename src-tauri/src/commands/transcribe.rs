@@ -20,6 +20,55 @@ fn validate_model_name(name: &str) -> Result<(), AppError> {
     }
 }
 
+struct ModelSpec {
+    name: &'static str,
+    size_mb: u64,
+    /// Bundled with the app installer (still listed so the UI shows it).
+    bundled: bool,
+    /// Pinned SHA-256, taken from the HuggingFace LFS metadata of
+    /// ggerganov/whisper.cpp (2026-07-17). Downloads are verified against this,
+    /// so a compromised or corrupted mirror response can't land a bad model
+    /// file. If upstream ever re-uploads a model, downloads fail loudly and the
+    /// pin must be re-verified and updated.
+    sha256: &'static str,
+}
+
+/// Single source of truth for the offered Whisper models: `list_models` derives
+/// the UI list from it and `download_model` uses it as both download whitelist
+/// and checksum table, so the two can't drift apart.
+const MODELS: &[ModelSpec] = &[
+    ModelSpec {
+        name: "tiny",
+        size_mb: 75,
+        bundled: false,
+        sha256: "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21",
+    },
+    ModelSpec {
+        name: "small",
+        size_mb: 466,
+        bundled: true,
+        sha256: "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
+    },
+    ModelSpec {
+        name: "medium",
+        size_mb: 1500,
+        bundled: false,
+        sha256: "6c14d5adee5f86394037b4e4e8b59f1673b6cee10e3cf0b11bbdbee79c156208",
+    },
+    ModelSpec {
+        name: "large-v3",
+        size_mb: 3100,
+        bundled: false,
+        sha256: "64d182b440b98d5203c4f9bd541544d84c605196c4f7b845dfa11fb23594d1e2",
+    },
+    ModelSpec {
+        name: "large-v3-turbo",
+        size_mb: 1600,
+        bundled: false,
+        sha256: "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69",
+    },
+];
+
 /// Whitelist of transcription language codes accepted over IPC.
 // Full official Whisper language set (99 codes).
 // keep in sync with LANGUAGE_OPTIONS (frontend)
@@ -92,28 +141,20 @@ pub async fn list_models(app: AppHandle) -> Result<Vec<WhisperModelInfo>, AppErr
     std::fs::create_dir_all(&models_dir)
         .map_err(|e: std::io::Error| AppError::FileError(e.to_string()))?;
 
-    let available = vec![
-        ("tiny", 75u64, false),
-        ("small", 466, true),   // bundled with app
-        ("medium", 1500, false),
-        ("large-v3", 3100, false),
-        ("large-v3-turbo", 1600, false),
-    ];
-
     let mut result = Vec::new();
-    for (name, size_mb, bundled) in available {
-        let path = models_dir.join(format!("ggml-{}.bin", name));
+    for spec in MODELS {
+        let path = models_dir.join(format!("ggml-{}.bin", spec.name));
         let downloaded = path.exists();
         result.push(WhisperModelInfo {
-            name: name.to_string(),
-            size_mb,
+            name: spec.name.to_string(),
+            size_mb: spec.size_mb,
             downloaded,
             path: if downloaded {
                 Some(path.to_string_lossy().to_string())
             } else {
                 None
             },
-            bundled,
+            bundled: spec.bundled,
         });
     }
 
@@ -131,6 +172,14 @@ pub async fn download_model(
     on_progress: Channel<f32>,
 ) -> Result<(), AppError> {
     validate_model_name(&model_name)?;
+
+    // Only models in the MODELS table are downloadable (same table list_models
+    // offers), and every download is verified against the pinned checksum.
+    let expected_sha256 = MODELS
+        .iter()
+        .find(|spec| spec.name == model_name)
+        .map(|spec| spec.sha256)
+        .ok_or_else(|| AppError::Other(format!("Unknown model: {}", model_name)))?;
 
     let models_dir = app
         .path()
@@ -153,7 +202,8 @@ pub async fn download_model(
 
     // Stream into the temp file; on any failure remove it so a partial download is
     // never mistaken for a complete model by list_models/transcribe_audio.
-    match download_to_temp(&app, &url, &temp_path, None, None, &on_progress).await {
+    match download_to_temp(&app, &url, &temp_path, Some(expected_sha256), None, &on_progress).await
+    {
         Ok(()) => {
             // Replace any existing (possibly corrupt) file, then move the fresh one in.
             if output_path.exists() {

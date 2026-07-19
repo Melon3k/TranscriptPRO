@@ -23,6 +23,8 @@ import {
   exportVtt,
   exportAss,
 } from "../../lib/tauri-commands";
+import { ask } from "@tauri-apps/plugin-dialog";
+import { hasInvertedTiming } from "../../lib/subtitle-ops";
 import { formatError } from "../../lib/error-format";
 import { navStyle, f } from "../../lib/ui";
 import type { AppMode } from "./modes";
@@ -111,11 +113,28 @@ function ExportMenu() {
 
   // `faithful` formats round-trip the full editing state, so a successful export
   // clears the unsaved-changes guard; TXT and Word SRT are lossy and must not.
+  // `timed` formats carry timings, so inverted cues (start >= end) would ship
+  // broken — in-editor editing deliberately allows the transient inversion, this
+  // dialog is the backstop that keeps it from leaving the app silently.
   async function run(
     handler: () => Promise<string | null>,
     faithful: boolean,
+    timed: boolean,
   ) {
     setOpen(false);
+    if (timed) {
+      const inverted = subtitles.filter(hasInvertedTiming);
+      if (inverted.length > 0) {
+        const proceed = await ask(
+          t("toolbar:invertedTimings", {
+            count: inverted.length,
+            first: inverted[0].index,
+          }),
+          { title: t("toolbar:invertedTimingsTitle"), kind: "warning" },
+        );
+        if (!proceed) return;
+      }
+    }
     try {
       const savedPath = await handler();
       if (savedPath) {
@@ -131,26 +150,27 @@ function ExportMenu() {
     label: string;
     hint: string;
     faithful: boolean;
+    timed: boolean;
     handler: () => Promise<string | null>;
   }[] = [
     {
-      label: "SRT", hint: "SubRip", faithful: true,
+      label: "SRT", hint: "SubRip", faithful: true, timed: true,
       handler: async () => { const p = await saveSrtFileDialog(); if (p) await exportSrt(p, subtitles); return p; },
     },
     {
-      label: "Word SRT", hint: t("toolbar:exportKaraoke"), faithful: false,
+      label: "Word SRT", hint: t("toolbar:exportKaraoke"), faithful: false, timed: true,
       handler: async () => { const p = await saveSrtFileDialog("subtitles-words.srt"); if (p) await exportWordSrt(p, subtitles); return p; },
     },
     {
-      label: "VTT", hint: "WebVTT", faithful: true,
+      label: "VTT", hint: "WebVTT", faithful: true, timed: true,
       handler: async () => { const p = await saveVttFileDialog(); if (p) await exportVtt(p, subtitles); return p; },
     },
     {
-      label: "ASS", hint: "SubStation", faithful: true,
+      label: "ASS", hint: "SubStation", faithful: true, timed: true,
       handler: async () => { const p = await saveAssFileDialog(); if (p) await exportAss(p, subtitles); return p; },
     },
     {
-      label: "TXT", hint: t("toolbar:exportText"), faithful: false,
+      label: "TXT", hint: t("toolbar:exportText"), faithful: false, timed: false,
       handler: async () => { const p = await saveTxtFileDialog(); if (p) await exportTxt(p, subtitles); return p; },
     },
   ];
@@ -186,7 +206,7 @@ function ExportMenu() {
           {items.map((item) => (
             <button
               key={item.label}
-              onClick={() => run(item.handler, item.faithful)}
+              onClick={() => run(item.handler, item.faithful, item.timed)}
               style={{
                 display: "flex",
                 alignItems: "center",

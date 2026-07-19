@@ -302,10 +302,22 @@ export default function OnboardingWizard() {
                 {t("onboarding:apiKeys.skip")}
               </button>
             )}
+            {/* The model step must be completable offline — a download can't be
+                required to finish onboarding (models can be fetched later from the
+                transcription panel). */}
             {step === 1 && !canNext && (
-              <span className="text-xs text-amber-600 dark:text-amber-400">
-                {t("onboarding:model.nextBlocked")}
-              </span>
+              <>
+                <span className="text-xs text-amber-600 dark:text-amber-400">
+                  {t("onboarding:model.nextBlocked")}
+                </span>
+                <button
+                  onClick={handleNext}
+                  title={t("onboarding:model.skipHint")}
+                  className="text-sm text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                >
+                  {t("onboarding:model.skip")}
+                </button>
+              </>
             )}
             <button
               onClick={handleNext}

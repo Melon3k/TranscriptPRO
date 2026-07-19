@@ -8,6 +8,17 @@ export function reindex(subtitles: Subtitle[]): Subtitle[] {
 }
 
 /**
+ * A cue whose end time is not after its start time (start >= end) is broken in
+ * every timed subtitle format. Time edits deliberately allow the transient
+ * inversion (users move a segment by editing start first), so this predicate is
+ * the single definition both the row highlight and the export warning rely on —
+ * they must never disagree.
+ */
+export function hasInvertedTiming(s: Subtitle): boolean {
+  return s.startTime >= s.endTime;
+}
+
+/**
  * Generate a simple unique ID (crypto.randomUUID with fallback).
  */
 export function generateId(): string {

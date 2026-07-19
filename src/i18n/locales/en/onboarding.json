@@ -6,7 +6,9 @@
   "model": {
     "title": "Choose a Whisper model",
     "subtitle": "Whisper runs entirely on your device — no internet required for transcription.",
-    "nextBlocked": "Download a model to continue"
+    "nextBlocked": "No model installed yet",
+    "skip": "Skip — download later",
+    "skipHint": "You can download a model any time from the transcription panel. Transcription won't work until one is installed."
   },
   "apiKeys": {
     "title": "API keys (optional)",

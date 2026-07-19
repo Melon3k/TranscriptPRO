@@ -90,30 +90,38 @@ Follow-ups:
 
 ## P2 — soon, before wider release
 
-- **Partial results on API error.** *(Translation — low/medium effort)* Providers return
-  partial translations on user *cancel*; a mid-batch API error still drops the whole batch.
-  Keep the already-translated chunks on error too — the partial-results plumbing from the
-  cancel path already exists, this extends it to the error path. Saves paid API calls on
-  large batches.
+Done in the 2026-07-17 pass (branch `claude/backlog-implementation-399bde`):
+
+- ✅ **Partial results on API error** — turned out to be already shipped in PR #19
+  (the "partial-results-on-error for all translation providers" fix); the entry here
+  was stale.
+- ✅ **Inverted-time feedback** — rows with start ≥ end get a red border + warning line
+  and red timestamps (non-blocking, so the "edit start first" flow still works), and
+  exporting any timed format (SRT / Word SRT / VTT / ASS) with inverted cues asks for
+  confirmation with the count and first offending index.
+- ✅ **Model / ffmpeg checksums** — Whisper model downloads are now verified against
+  SHA-256 pins taken from the HuggingFace LFS metadata (the pin table doubles as the
+  download whitelist); `download-ffmpeg.sh` pins the SHA-256 of all three upstream
+  archives (macOS pins confirmed bit-identical to the binaries shipped since May 2026;
+  Windows pin is gyan.dev's published checksum, URL switched from the floating
+  `release-essentials` alias to the versioned 8.1.2 package). The inline PowerShell
+  ffmpeg steps in `ci.yml`/`release.yml` got the same pinned URL + hash check.
+  The TranslateGemma GGUF was already pinned.
+
+Still open:
+
 - **Cmd+Q guard on Windows.** *(Platform — verification task)* The unsaved-changes guard was
   verified on macOS (custom menu intercepting Quit). Verify the window-close / quit paths on
   Windows before shipping Windows builds — it protects against data loss on a shipped target.
   (Linux is not a shipping target; verify opportunistically.)
-- **Inverted-time feedback.** *(Editor / UX — low/medium effort)* The blocking start<end
-  validation was removed (it blocked the legitimate "move a segment by editing start first"
-  flow). Replace with a non-blocking signal: highlight rows where start ≥ end, and/or validate
-  at export time so broken timings can't ship silently.
-- **Model / ffmpeg checksums.** *(Security — low/medium effort)* Verify SHA-256 of downloaded
-  Whisper models (published on HuggingFace) and the bundled ffmpeg sidecar (pin at build/CI
-  time). Currently HTTPS-trust only. Applies to the future TranslateGemma GGUF download too.
 
 ## P3 — nice to have / wait for a signal
 
+- ✅ **Offline onboarding** *(done 2026-07-17)* — the model step now has a
+  "Skip — download later" action, so the wizard completes with no network.
 - **Virtualize the subtitle list.** *(Editor / UX — high effort)* `React.memo` is in place and
   covers current sizes; virtualization (react-window / virtuoso) needs care around auto-scroll
   and word drag & drop. Pick up when real transcripts show measurable lag, not before.
-- **Offline onboarding.** *(Platform — low effort, niche)* The onboarding wizard's model step
-  currently requires a download; allow completing it offline.
 - **ffmpeg WAV cleanup on quit.** *(Reliability — cosmetic)* If the app quits mid-extraction,
   the killed ffmpeg child can leave a 0-byte WAV — harmless, already cleaned at next startup
   via `cleanup_stale_audio`. Optionally remove the in-progress output on the exit path too.
