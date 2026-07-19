@@ -129,53 +129,47 @@ Still open:
   arbitrary user-chosen paths; a file-open app can't easily narrow this without breaking the
   core flow. Revisit only if Tauri grows a dynamic-scope API; otherwise document the decision.
 
-## New design (redesign UI) — features present in the UI but not yet implemented
+## New design (redesign UI) — SHIPPED (items A–G, 2026-07 AI-agent pass)
 
-The `feat/new-design` redesign (PR #23) ships the full new UI, but some panels
-are **built and rendered disabled/grayed** because there is no backend for them
-yet (per the brief: build the UI, gray it out, add no behaviour). This section
-tracks what it would take to make each one real.
+The `feat/new-design` redesign (PR #23) shipped the full new UI with the styling
+panels **built but grayed**. The 2026-07 AI-agent pass (branch
+`claude/new-design-features`, one workflow run per item: spec → implement →
+verify → adversarial review) made all of them real. Accepted decisions:
+**one global `CaptionStyle`/`CaptionAnimation`** (per-segment overrides remain a
+future additive field), and **honest export** — only fields ASS can faithfully
+carry are exported; the rest are marked "preview only" in the UI.
 
-### A. Caption styling — "Inspector" panel (disabled) *(LARGE)*
-- [ ] Font family picker (applied), size, letter-spacing, line-height sliders
-- [ ] Alignment L/C/R, bold / italic / uppercase (TT)
-- [ ] Outline / shadow / glow toggles + glow strength
-- [ ] Colours: text / outline / shadow / glow (no colour UI yet; model has the fields)
-- [ ] Caption-box position (3×3 grid), center H/V, width, distance-from-bottom
+- ✅ **F1 — Style foundation.** `CaptionStyle` type + persisted `styleStore`;
+  Player overlay bound to it (anchored to the video frame, no background pill);
+  Outfit/Inter/JetBrains Mono bundled locally via `@fontsource` (SIL OFL) with
+  `font-src 'self' data:` added to the CSP.
+- ✅ **F2 — ASS serialization.** `export_ass` generates `[V4+ Styles]` from the
+  style (Script Info `PlayResX/Y 1920×1080`, `ScaledBorderAndShadow`); uppercase
+  applied in Rust, braces escaped. `lineHeight`/`glow`/`align` are preview-only.
+- ✅ **A — Inspector tab live.** Font/size/spacing/line-height, L/C/R, B/I/TT,
+  outline/shadow/glow + strengths, four colour pickers, 3×3 box grid (visual→ASS
+  numpad map), width, distance, reset. Preview-only badges on glow/line-height/align.
+- ✅ **B — Draggable caption box.** "Position" mode on the player; drag snaps the
+  numpad column/row and sets `marginVPct`/`widthPct` live, syncing bidirectionally
+  with the Inspector (no free X — ASS Alignment is discrete, `\pos` out of scope).
+- ✅ **D — Effects/presets tab.** Named `CaptionStyle` snapshots: four built-ins +
+  user presets with live previews, New/Duplicate/Save/Delete/rename/search,
+  persisted; applying reuses `setStyle` so export stays faithful.
+- ✅ **C — Animations tab.** One global `CaptionAnimation`: fade (ASS `\fad`) and
+  karaoke (ASS `\k` + Primary/Secondary split) exported end-to-end; slide/pop/
+  typewriter/blur animate in-preview only. Default `none`. Animation editor modal
+  deliberately deferred.
+- ✅ **E — Export preview modal.** "Preview & export" opens SRT/VTT tabs rendering
+  the exact serializer output (read-only `preview_export` command) + Download;
+  inverted timings shown as an inline banner (no double prompt). Word SRT/ASS/TXT
+  keep their direct menu entries.
+- ✅ **G — Drag-and-drop regression fixed.** Word DnD reimplemented on pointer
+  events (`useWordDrag`), so native Tauri file drop is re-enabled
+  (`dragDropEnabled: true`) with a drop overlay.
 
-### B. Subtitle positioning on the player *(MEDIUM)*
-- [ ] Draggable caption box on the video (handles, `x%` / `bottom%`) — today the
-      overlay is static, only show/hide via the corner CC toggle
-- [ ] Bind position/width to the style model
-
-### C. Subtitle animations — "Animations" tab (disabled) *(LARGE)*
-- [ ] Types: fade / slide / pop / typewriter / karaoke / blur
-- [ ] Apply to selected / all
-- [ ] Duration, per-word delay, easing, highlight colour
-- [ ] Per-word animation
-- [ ] **Animation editor modal** (with live preview) — not built at all
-
-### D. Presets / effects — "Effects" tab (disabled) *(MEDIUM)*
-- [ ] Preset cards (Neon, Hard shadow, Thick outline, Soft)
-- [ ] New / Duplicate / Save / Delete + inline editor
-- [ ] Preset search
-- [ ] Persist presets
-
-### E. Design elements skipped in the implementation *(SMALL)*
-- [ ] **Export preview modal** (SRT/VTT tabs + text preview + Download) — export
-      currently goes straight to the native save dialog (functional, no preview)
-
-### F. Cross-cutting prerequisites for A–D
-- [ ] Extend `Subtitle` (or a new store) with style/animation data — global and/or per-segment
-- [ ] Render the style on the video overlay in `Player` (plain text today)
-- [ ] Backend: serialize style/animation into **ASS** (`export_ass`) and possibly karaoke/Word SRT
-- [ ] Persist style settings / presets (localStorage / settings / per project)
-- [ ] (CSP) No real Outfit/Inter webfonts — consider bundling `.woff2` locally so style previews are faithful
-
-### G. Regression to decide *(from the redesign)*
-- [ ] Drag-and-drop a **file** onto the window to open it — disabled (`dragDropEnabled: false`)
-      because the native Tauri drag-drop swallowed HTML5 word dragging on macOS. To have both,
-      reimplement word DnD on pointer events (mouse) and re-enable native file drop.
+**Deferred (out of scope this pass, noted for later):** per-segment style/animation
+overrides; the animation editor modal with live preview; free per-cue `\pos`
+positioning; preview tabs for Word SRT/ASS/TXT.
 
 Not on this list (these work): Whisper transcription + speaker detection, translation
 (Gemini/Claude/local Gemma), SRT import, SRT/VTT/ASS/TXT/Word SRT export, editing/segments,
