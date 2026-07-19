@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "react-i18next";
+import { Upload } from "lucide-react";
+import { COLORS, f } from "../../lib/ui";
 import {
   setDirty, exitApp, cancelAudioExtraction,
   openMediaFileDialog, openSrtFileDialog,
@@ -15,6 +17,7 @@ import { useRecentFilesStore, type RecentFile } from "../../stores/recentFilesSt
 import { useOnboardingStore } from "../../stores/onboardingStore";
 import { useNotifyStore } from "../../stores/notifyStore";
 import { routeFile, classifyFile, type FileRoutingCallbacks } from "../../lib/file-routing";
+import { useFileDrop } from "../../hooks/useFileDrop";
 import type { AppMode } from "./modes";
 import TitleBar from "./TitleBar";
 import Rail from "./Rail";
@@ -106,22 +109,30 @@ export default function MainLayout() {
 
   const handleOpenRecent = useCallback((file: RecentFile) => { void openPath(file.path); }, [openPath]);
 
-  // Native drag-drop is disabled on the window (so HTML5 word dragging in the
-  // segment list works). Swallow any stray OS file drop so the webview doesn't
-  // navigate to the file; opening is done from the buttons in the open view.
-  useEffect(() => {
-    const swallowFileDrop = (e: DragEvent) => {
-      if (e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files")) {
-        e.preventDefault();
+  // Native Tauri file drop → the same routing pipeline as the open buttons.
+  // routeFile already serializes overlapping media opens, so a drop during
+  // an in-flight extraction is safe.
+  const handleDroppedPaths = useCallback(
+    (paths: string[]) => {
+      const supported = paths.find((p) => classifyFile(p) !== "unsupported");
+      if (!supported) {
+        // Show the extension when there is one, otherwise just the basename —
+        // never the full path (folders / extensionless files have no dot).
+        const exts = paths
+          .map((p) => {
+            const name = p.split(/[/\\]/).pop() ?? p;
+            const dot = name.lastIndexOf(".");
+            return dot > 0 ? name.slice(dot + 1) : name;
+          })
+          .join(", ");
+        notify("error", t("common:unsupportedFileFormat", { exts }));
+        return;
       }
-    };
-    window.addEventListener("dragover", swallowFileDrop);
-    window.addEventListener("drop", swallowFileDrop);
-    return () => {
-      window.removeEventListener("dragover", swallowFileDrop);
-      window.removeEventListener("drop", swallowFileDrop);
-    };
-  }, []);
+      void openPath(supported);
+    },
+    [openPath, notify, t],
+  );
+  const { isDragging } = useFileDrop(handleDroppedPaths);
 
   // Rust `app-log` events → log store.
   useEffect(() => {
@@ -240,6 +251,38 @@ export default function MainLayout() {
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <KeyboardShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       {!onboardingCompleted && <OnboardingWizard />}
+
+      {isDragging && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 300,
+            pointerEvents: "none",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "rgba(37,99,255,.10)",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 10,
+              padding: "30px 44px",
+              borderRadius: 14,
+              border: `2px dashed ${COLORS.blue}`,
+              background: "var(--c-panel)",
+            }}
+          >
+            <Upload size={30} color={COLORS.blue} />
+            <span style={f(600, 15, "display")}>{t("common:dropFileToOpen")}</span>
+            <span style={f(400, 11, "body", { color: "var(--c-muted)" })}>{t("common:dropFileHint")}</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

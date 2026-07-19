@@ -2,7 +2,32 @@
   "permissions": {
     "allow": [
       "Bash(cat:*)",
-      "Bash(grep -E \"\\\\.\\(json|md|toml|yaml|yml|lock\\)$|Makefile\")"
+      "Bash(grep -E \"\\\\.\\(json|md|toml|yaml|yml|lock\\)$|Makefile\")",
+      "Bash(cd:*)",
+      "Bash(ls:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(rg:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(wc:*)",
+      "Bash(shasum:*)",
+      "Bash(node:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx vitest:*)",
+      "Bash(npm run:*)",
+      "Bash(npm test:*)",
+      "Bash(cargo:*)",
+      "Bash(mkdir:*)",
+      "Bash(touch:*)",
+      "Bash(rmdir:*)",
+      "Bash(rm -f src-tauri/binaries/*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ]
   }
 }
