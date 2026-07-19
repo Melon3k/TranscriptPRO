@@ -149,6 +149,22 @@ pub async fn export_ass(
     Ok(())
 }
 
+/// Read-only export preview: serialize subtitles to the requested lossless text format
+/// using the SAME pure serializers as the real export commands, so the in-app preview
+/// can never drift from the written file. Does not touch the filesystem.
+#[tauri::command]
+pub async fn preview_export(
+    subtitles: Vec<Subtitle>,
+    format: String,
+) -> Result<String, AppError> {
+    let content = match format.as_str() {
+        "srt" => write_srt(&subtitles),
+        "vtt" => write_vtt(&subtitles),
+        other => return Err(AppError::Other(format!("Unknown preview format: {}", other))),
+    };
+    Ok(content)
+}
+
 #[tauri::command]
 pub async fn save_version_history(
     app: AppHandle,

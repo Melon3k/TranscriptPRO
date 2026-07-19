@@ -23,5 +23,13 @@
   "animationPreviewOnly": "This animation is a preview only — the ASS export keeps fade and karaoke, other types are not baked in.",
   "invertedTimingsTitle": "Inverted timings",
   "invertedTimings_one": "1 subtitle (#{{first}}) has an end time that is not after its start time. Export anyway?",
-  "invertedTimings_other": "{{count}} subtitles have end times that are not after their start times (first: #{{first}}). Export anyway?"
+  "invertedTimings_other": "{{count}} subtitles have end times that are not after their start times (first: #{{first}}). Export anyway?",
+  "exportPreviewEntry": "Preview & export",
+  "exportPreviewFormats": "SRT / VTT",
+  "exportPreviewTitle": "Export preview",
+  "exportPreviewDownload": "Download",
+  "exportPreviewLoading": "Generating preview…",
+  "exportPreviewEmpty": "Nothing to preview.",
+  "invertedWarnInline_one": "1 subtitle (#{{first}}) has an end time that is not after its start time — it will still be written.",
+  "invertedWarnInline_other": "{{count}} subtitles have end times that are not after their start times (first: #{{first}}) — they will still be written."
 }

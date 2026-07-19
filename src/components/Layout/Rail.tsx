@@ -16,12 +16,9 @@ import { useStyleStore } from "../../stores/styleStore";
 import {
   saveSrtFileDialog,
   saveTxtFileDialog,
-  saveVttFileDialog,
   saveAssFileDialog,
-  exportSrt,
   exportWordSrt,
   exportTxt,
-  exportVtt,
   exportAss,
 } from "../../lib/tauri-commands";
 import { ask } from "@tauri-apps/plugin-dialog";
@@ -34,10 +31,11 @@ import type { AppMode } from "./modes";
 interface RailProps {
   mode: AppMode;
   setMode: (m: AppMode) => void;
+  onOpenExportPreview: () => void;
 }
 
 /** Left navigation rail: workspace switcher + export menu + logs toggle. */
-export default function Rail({ mode, setMode }: RailProps) {
+export default function Rail({ mode, setMode, onOpenExportPreview }: RailProps) {
   const { t } = useTranslation(["toolbar", "common"]);
   const logsOpen = useLogStore((s) => s.open);
   const toggleLogs = useLogStore((s) => s.togglePanel);
@@ -77,7 +75,7 @@ export default function Rail({ mode, setMode }: RailProps) {
 
       <div style={{ flex: 1 }} />
 
-      <ExportMenu />
+      <ExportMenu onOpenExportPreview={onOpenExportPreview} />
 
       <button
         onClick={toggleLogs}
@@ -96,7 +94,7 @@ function filename(path: string): string {
   return path.split(/[/\\]/).pop() ?? path;
 }
 
-function ExportMenu() {
+function ExportMenu({ onOpenExportPreview }: { onOpenExportPreview: () => void }) {
   const { t } = useTranslation(["toolbar", "errors"]);
   const subtitles = useSubtitleStore((s) => s.subtitles);
   const markSaved = useSubtitleStore((s) => s.markSaved);
@@ -168,16 +166,8 @@ function ExportMenu() {
     warn?: () => string | null;
   }[] = [
     {
-      label: "SRT", hint: "SubRip", faithful: true, timed: true,
-      handler: async () => { const p = await saveSrtFileDialog(); if (p) await exportSrt(p, subtitles); return p; },
-    },
-    {
       label: "Word SRT", hint: t("toolbar:exportKaraoke"), faithful: false, timed: true,
       handler: async () => { const p = await saveSrtFileDialog("subtitles-words.srt"); if (p) await exportWordSrt(p, subtitles); return p; },
-    },
-    {
-      label: "VTT", hint: "WebVTT", faithful: true, timed: true,
-      handler: async () => { const p = await saveVttFileDialog(); if (p) await exportVtt(p, subtitles); return p; },
     },
     {
       label: "ASS", hint: "SubStation", faithful: true, timed: true,
@@ -235,6 +225,28 @@ function ExportMenu() {
           <div style={{ ...f(600, 9), letterSpacing: ".1em", color: "var(--c-muted)", padding: "4px 10px 6px" }}>
             {t("toolbar:export").toUpperCase()}
           </div>
+          <button
+            onClick={() => { setOpen(false); onOpenExportPreview(); }}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              width: "100%",
+              height: 32,
+              padding: "0 10px",
+              borderRadius: 7,
+              cursor: "pointer",
+              background: "none",
+              border: "none",
+              color: "var(--c-text)",
+              ...f(600, 11),
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = "var(--c-hover)")}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+          >
+            {t("toolbar:exportPreviewEntry")}
+            <span style={{ ...f(400, 9), color: "var(--c-muted)" }}>{t("toolbar:exportPreviewFormats")}</span>
+          </button>
           {items.map((item) => (
             <button
               key={item.label}

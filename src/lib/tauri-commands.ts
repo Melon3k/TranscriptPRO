@@ -114,6 +114,15 @@ export async function exportAss(
   return invoke("export_ass", { path, subtitles, style, animation });
 }
 
+export type PreviewFormat = "srt" | "vtt";
+
+export async function previewExport(
+  subtitles: Subtitle[],
+  format: PreviewFormat,
+): Promise<string> {
+  return invoke<string>("preview_export", { subtitles, format });
+}
+
 export async function saveVersionHistory(
   projectKey: string,
   versions: SubtitleVersion[]
