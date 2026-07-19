@@ -1,9 +1,13 @@
 import { describe, it, expect } from "vitest";
 import type { CaptionStyle, CaptionBoxPosition } from "../types/captionStyle";
 import {
+  BOX_GRID,
   DEFAULT_CAPTION_STYLE,
+  STYLE_LIMITS,
   captionBoxCss,
   captionTextCss,
+  normalizeHexColor,
+  sanitizeCaptionStyle,
 } from "./caption-style";
 
 function style(patch: Partial<CaptionStyle> = {}): CaptionStyle {
@@ -140,5 +144,109 @@ describe("captionTextCss", () => {
   it("preserves embedded newlines via pre-line", () => {
     const css = captionTextCss(DEFAULT_CAPTION_STYLE);
     expect(css.whiteSpace).toBe("pre-line");
+  });
+});
+
+// ── style-control constants ──────────────────────────────────────────────────
+
+describe("style-control constants", () => {
+  it("BOX_GRID maps visual row-major cells to ASS numpad values", () => {
+    expect(BOX_GRID).toHaveLength(9);
+    expect([...BOX_GRID].sort()).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(BOX_GRID[0]).toBe(7); // top-left
+    expect(BOX_GRID[7]).toBe(2); // bottom-center
+  });
+
+  it("STYLE_LIMITS ranges are sane and contain the defaults", () => {
+    for (const [field, { min, max, step }] of Object.entries(STYLE_LIMITS)) {
+      expect(min, field).toBeLessThan(max);
+      expect(step, field).toBeGreaterThan(0);
+      const value = DEFAULT_CAPTION_STYLE[field as keyof typeof STYLE_LIMITS];
+      expect(value, field).toBeGreaterThanOrEqual(min);
+      expect(value, field).toBeLessThanOrEqual(max);
+    }
+  });
+
+  it("normalizeHexColor uppercases valid #RRGGBB values", () => {
+    expect(normalizeHexColor("#22d3ee")).toBe("#22D3EE");
+    expect(normalizeHexColor("#FFFFFF")).toBe("#FFFFFF");
+  });
+
+  it("normalizeHexColor returns malformed inputs unchanged", () => {
+    expect(normalizeHexColor("oops")).toBe("oops");
+    expect(normalizeHexColor("#12345")).toBe("#12345");
+    expect(normalizeHexColor("")).toBe("");
+  });
+});
+
+// ── sanitizeCaptionStyle ─────────────────────────────────────────────────────
+
+describe("sanitizeCaptionStyle", () => {
+  it("non-object / missing input rehydrates to the full defaults", () => {
+    expect(sanitizeCaptionStyle(undefined)).toEqual(DEFAULT_CAPTION_STYLE);
+    expect(sanitizeCaptionStyle(null)).toEqual(DEFAULT_CAPTION_STYLE);
+    expect(sanitizeCaptionStyle("garbage")).toEqual(DEFAULT_CAPTION_STYLE);
+  });
+
+  it("valid persisted values pass through untouched", () => {
+    const persisted = style({ fontSize: 72, bold: false, textColor: "#FACC15" });
+    expect(sanitizeCaptionStyle(persisted)).toEqual(persisted);
+  });
+
+  it("missing fields fall back to defaults (forward-compat contract)", () => {
+    const out = sanitizeCaptionStyle({ fontSize: 60 });
+    expect(out.fontSize).toBe(60);
+    expect(out.fontId).toBe(DEFAULT_CAPTION_STYLE.fontId);
+    expect(out.widthPct).toBe(DEFAULT_CAPTION_STYLE.widthPct);
+  });
+
+  it("non-numeric numeric fields reset to defaults (fontSize:null → no NaNem)", () => {
+    const out = sanitizeCaptionStyle({
+      fontSize: null,
+      letterSpacing: "wide",
+      lineHeight: NaN,
+      widthPct: Infinity,
+    } as never);
+    expect(out.fontSize).toBe(DEFAULT_CAPTION_STYLE.fontSize);
+    expect(out.letterSpacing).toBe(DEFAULT_CAPTION_STYLE.letterSpacing);
+    expect(out.lineHeight).toBe(DEFAULT_CAPTION_STYLE.lineHeight);
+    expect(out.widthPct).toBe(DEFAULT_CAPTION_STYLE.widthPct);
+    expect(captionTextCss(out).letterSpacing).not.toContain("NaN");
+  });
+
+  it("out-of-range numbers clamp to the slider limits", () => {
+    const out = sanitizeCaptionStyle({ widthPct: 400, fontSize: 4, marginVPct: -10 });
+    expect(out.widthPct).toBe(STYLE_LIMITS.widthPct.max);
+    expect(out.fontSize).toBe(STYLE_LIMITS.fontSize.min);
+    expect(out.marginVPct).toBe(STYLE_LIMITS.marginVPct.min);
+  });
+
+  it("non-boolean flags reset to defaults", () => {
+    const out = sanitizeCaptionStyle({ bold: "yes", glow: 1, shadow: null } as never);
+    expect(out.bold).toBe(DEFAULT_CAPTION_STYLE.bold);
+    expect(out.glow).toBe(DEFAULT_CAPTION_STYLE.glow);
+    expect(out.shadow).toBe(DEFAULT_CAPTION_STYLE.shadow);
+  });
+
+  it("malformed colors reset, valid ones are canonicalized to uppercase", () => {
+    const out = sanitizeCaptionStyle({
+      textColor: "red",
+      outlineColor: 7,
+      glowColor: "#22d3ee",
+    } as never);
+    expect(out.textColor).toBe(DEFAULT_CAPTION_STYLE.textColor);
+    expect(out.outlineColor).toBe(DEFAULT_CAPTION_STYLE.outlineColor);
+    expect(out.glowColor).toBe("#22D3EE");
+  });
+
+  it("unknown enums reset to defaults", () => {
+    const out = sanitizeCaptionStyle({
+      fontId: "poppins",
+      align: "justify",
+      boxPosition: 12,
+    } as never);
+    expect(out.fontId).toBe(DEFAULT_CAPTION_STYLE.fontId);
+    expect(out.align).toBe(DEFAULT_CAPTION_STYLE.align);
+    expect(out.boxPosition).toBe(DEFAULT_CAPTION_STYLE.boxPosition);
   });
 });

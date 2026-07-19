@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { CaptionStyle } from "../types/captionStyle";
-import { CAPTION_FONTS, DEFAULT_CAPTION_STYLE } from "../lib/caption-style";
+import { DEFAULT_CAPTION_STYLE, sanitizeCaptionStyle } from "../lib/caption-style";
 
 // Accepted decisions (item F1): v1 holds ONE global style applied to all cues.
 // Per-segment overrides arrive later as an additive
@@ -30,25 +30,15 @@ export const useStyleStore = create<StyleState>()(
       name: "transcriptpro-caption-style",
       version: 1,
       partialize: ({ style }) => ({ style }),
-      merge: (persisted, current) => {
-        const style: CaptionStyle = {
-          ...DEFAULT_CAPTION_STYLE,
-          ...((persisted as Partial<StyleState> | undefined)?.style ?? {}),
-        };
-        // Enum VALUES aren't covered by the additive-fields contract: a newer
-        // build (or hand-edited localStorage) may persist ones this build
-        // doesn't know. Clamp them to defaults instead of throwing at render.
-        if (!(style.fontId in CAPTION_FONTS)) {
-          style.fontId = DEFAULT_CAPTION_STYLE.fontId;
-        }
-        if (!["left", "center", "right"].includes(style.align)) {
-          style.align = DEFAULT_CAPTION_STYLE.align;
-        }
-        if (!Number.isInteger(style.boxPosition) || style.boxPosition < 1 || style.boxPosition > 9) {
-          style.boxPosition = DEFAULT_CAPTION_STYLE.boxPosition;
-        }
-        return { ...current, style };
-      },
+      // Persisted VALUES aren't covered by the additive-fields contract: a
+      // newer build (or hand-edited localStorage) may persist enums this build
+      // doesn't know, or numbers/booleans/colors of the wrong type or range.
+      // sanitizeCaptionStyle clamps/defaults every field instead of letting a
+      // bad value break the live preview.
+      merge: (persisted, current) => ({
+        ...current,
+        style: sanitizeCaptionStyle((persisted as Partial<StyleState> | undefined)?.style),
+      }),
     }
   )
 );
