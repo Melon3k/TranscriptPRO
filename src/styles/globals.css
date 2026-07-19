@@ -11,8 +11,8 @@
  * default to the dark theme (`:root`); the app root carries data-th="dark|light"
  * (set in MainLayout from settingsStore.darkMode) so the light overrides win.
  * Names mirror the imported prototype (`--c-*`) so the ported inline styles map
- * 1:1. Fonts fall back to the system stack because the desktop CSP blocks the
- * Google Fonts CDN. */
+ * 1:1. Outfit, Inter and JetBrains Mono are bundled locally as Fontsource
+ * woff2 (imported in main.tsx) — no webfont CDN, so the closed CSP stays. */
 :root,
 :root [data-th="dark"] {
   --c-bg: #0D1117;

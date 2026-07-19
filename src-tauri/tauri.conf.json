@@ -22,7 +22,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: https://asset.localhost; media-src 'self' asset: https://asset.localhost blob:; connect-src 'self' https://api.deepl.com https://api-free.deepl.com https://translation.googleapis.com https://huggingface.co https://github.com https://objects.githubusercontent.com https://*.githubusercontent.com",
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' asset: https://asset.localhost; media-src 'self' asset: https://asset.localhost blob:; connect-src 'self' https://api.deepl.com https://api-free.deepl.com https://translation.googleapis.com https://huggingface.co https://github.com https://objects.githubusercontent.com https://*.githubusercontent.com",
       "assetProtocol": {
         "enable": true,
         "scope": ["**"]

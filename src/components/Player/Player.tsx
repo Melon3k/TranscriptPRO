@@ -4,7 +4,9 @@ import { useTranslation } from "react-i18next";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { usePlayerStore } from "../../stores/playerStore";
 import { useSubtitleStore } from "../../stores/subtitleStore";
+import { useStyleStore } from "../../stores/styleStore";
 import { formatDuration } from "../../lib/time-format";
+import { captionBoxCss, captionTextCss } from "../../lib/caption-style";
 import { COLORS, FONTS } from "../../lib/ui";
 
 /**
@@ -17,11 +19,40 @@ export default function Player() {
   const { filePath, currentTimeMs, duration, isPlaying, setCurrentTimeMs, setDuration, setIsPlaying } =
     usePlayerStore();
   const subtitles = useSubtitleStore((s) => s.subtitles);
+  const style = useStyleStore((s) => s.style);
   const [showSubs, setShowSubs] = useState(false);
   const hasSubtitles = subtitles.length > 0;
 
   const mediaRef = useRef<HTMLVideoElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+  // Rendered video content box inside the stage. Captions anchor to THIS
+  // rect, not the stage, so letterbox/pillarbox bars don't skew size or
+  // position vs. the ASS export (which is defined relative to the frame).
+  const [frame, setFrame] = useState<{ w: number; h: number } | null>(null);
+
+  const measureFrame = useCallback(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    const sw = stage.clientWidth;
+    const sh = stage.clientHeight;
+    const v = mediaRef.current;
+    if (v && v.videoWidth > 0 && v.videoHeight > 0) {
+      // Mirrors the video's maxWidth/maxHeight:100% sizing (no upscale).
+      const scale = Math.min(sw / v.videoWidth, sh / v.videoHeight, 1);
+      setFrame({ w: v.videoWidth * scale, h: v.videoHeight * scale });
+    } else {
+      setFrame({ w: sw, h: sh });
+    }
+  }, []);
+
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    const ro = new ResizeObserver(measureFrame);
+    ro.observe(stage);
+    return () => ro.disconnect();
+  }, [measureFrame]);
 
   useEffect(() => {
     const el = mediaRef.current;
@@ -39,7 +70,8 @@ export default function Player() {
   const handleLoadedMetadata = useCallback(() => {
     const el = mediaRef.current;
     if (el) setDuration(el.duration);
-  }, [setDuration]);
+    measureFrame(); // videoWidth/videoHeight are only known from here on
+  }, [setDuration, measureFrame]);
 
   const togglePlay = () => {
     const el = mediaRef.current;
@@ -72,6 +104,7 @@ export default function Player() {
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
       {/* stage */}
       <div
+        ref={stageRef}
         style={{
           flex: 1,
           minHeight: 0,
@@ -110,39 +143,36 @@ export default function Player() {
           </>
         )}
 
-        {/* Subtitle overlay — only rendered while enabled and a cue is active. */}
-        {showSubs && activeSub && (
+        {/* Subtitle overlay — only rendered while enabled and a cue is active.
+            No background pill: the box isn't part of the style model and the
+            preview must stay honest vs. the ASS export (F2). */}
+        {showSubs && activeSub && frame && (
+          // Wrapper matching the rendered video frame (videos center in the
+          // stage), so captionBoxCss percentages resolve against the frame.
           <div
             style={{
               position: "absolute",
               left: "50%",
-              transform: "translateX(-50%)",
-              bottom: "8%",
-              maxWidth: "80%",
-              padding: "6px 14px",
-              borderRadius: 6,
-              background: "rgba(8,12,18,.55)",
-              userSelect: "none",
+              top: "50%",
+              transform: "translate(-50%,-50%)",
+              width: frame.w,
+              height: frame.h,
               pointerEvents: "none",
             }}
           >
-            <span
-              style={{
-                fontFamily: FONTS.display,
-                fontWeight: 700,
-                fontSize: 22,
-                color: "#fff",
-                textAlign: "center",
-                display: "block",
-                lineHeight: 1.25,
-                // Clean outline via layered shadows — avoids the "chewed" look
-                // that -webkit-text-stroke produces when the stroke overlaps the fill.
-                textShadow:
-                  "-1px -1px 0 #0b0f16, 1px -1px 0 #0b0f16, -1px 1px 0 #0b0f16, 1px 1px 0 #0b0f16, 0 2px 5px rgba(0,0,0,.7)",
-              }}
-            >
-              {activeSub.text}
-            </span>
+            <div style={captionBoxCss(style)}>
+              <span
+                style={{
+                  ...captionTextCss(style),
+                  // fontSize is defined at a 1080-px-tall reference canvas;
+                  // scale it by the measured frame height (px, not cqh —
+                  // WKWebView on macOS 10.15 lacks container-query units).
+                  fontSize: `${((style.fontSize / 1080) * frame.h).toFixed(2)}px`,
+                }}
+              >
+                {activeSub.text}
+              </span>
+            </div>
           </div>
         )}
 
