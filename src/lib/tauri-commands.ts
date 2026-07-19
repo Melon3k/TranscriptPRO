@@ -7,7 +7,7 @@ import {
   WhisperModelInfo,
 } from "../types/subtitle";
 import { SubtitleVersion } from "../types/version";
-import type { CaptionStyle } from "../types/captionStyle";
+import type { CaptionStyle, CaptionAnimation } from "../types/captionStyle";
 
 // ── File dialogs ─────────────────────────────────────────────────────────────
 
@@ -108,9 +108,10 @@ export async function exportVtt(
 export async function exportAss(
   path: string,
   subtitles: Subtitle[],
-  style: CaptionStyle
+  style: CaptionStyle,
+  animation: CaptionAnimation
 ): Promise<void> {
-  return invoke("export_ass", { path, subtitles, style });
+  return invoke("export_ass", { path, subtitles, style, animation });
 }
 
 export async function saveVersionHistory(

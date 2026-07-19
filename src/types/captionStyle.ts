@@ -32,3 +32,33 @@ export interface CaptionStyle {
 // Subtitle.styleOverride?: Partial<CaptionStyle>) must not break persisted
 // state — the store merges persisted state over DEFAULT_CAPTION_STYLE, so
 // every missing field falls back to the default. Never rename fields; only add.
+
+// Item C: ONE global animation, a sibling of the global style in styleStore
+// (not per-segment). Two types export to ASS (fade → \fad, karaoke → \k +
+// Primary/Secondary colour split); the rest are preview-only.
+export type CaptionAnimationType =
+  | "none"
+  | "fade"
+  | "slide"
+  | "pop"
+  | "typewriter"
+  | "karaoke"
+  | "blur";
+export type CaptionEasing = "linear" | "ease" | "ease-in" | "ease-out" | "ease-in-out";
+export interface CaptionAnimation {
+  type: CaptionAnimationType; // default "none"
+  durationMs: number; // 400 — fade in+out length / entrance length
+  perWordDelayMs: number; // 40 — stagger; PREVIEW-ONLY (slide/pop/typewriter/blur)
+  easing: CaptionEasing; // "ease-out" — PREVIEW-ONLY (ASS \fad is linear)
+  highlightColor: string; // "#22D3EE" — karaoke sung-word colour → ASS PrimaryColour
+}
+// Same forward-compat contract as CaptionStyle above: the store merges persisted
+// animation over DEFAULT_CAPTION_ANIMATION, so later-added fields rehydrate to
+// their defaults. Never rename fields; only add.
+
+// Only these two serialize to ASS; the others animate in the Player overlay but
+// are explicitly NOT exported (item C decision).
+export const EXPORTED_ANIMATIONS: ReadonlySet<CaptionAnimationType> = new Set([
+  "fade",
+  "karaoke",
+]);

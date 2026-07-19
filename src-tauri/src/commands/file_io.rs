@@ -2,7 +2,7 @@ use crate::logger;
 use crate::subtitle::{
     ass::write_ass,
     srt::{parse_srt, write_srt, write_word_srt, write_txt},
-    style::CaptionStyle,
+    style::{CaptionAnimation, CaptionStyle},
     types::{AppError, Subtitle},
     vtt::write_vtt,
 };
@@ -137,8 +137,9 @@ pub async fn export_ass(
     path: String,
     subtitles: Vec<Subtitle>,
     style: CaptionStyle,
+    animation: CaptionAnimation,
 ) -> Result<(), AppError> {
-    let content = write_ass(&subtitles, &style);
+    let content = write_ass(&subtitles, &style, &animation);
     write_atomic(&path, &content)?;
     logger::info(
         &app,

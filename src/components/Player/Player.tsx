@@ -7,7 +7,10 @@ import { useSubtitleStore } from "../../stores/subtitleStore";
 import { useStyleStore } from "../../stores/styleStore";
 import { formatDuration } from "../../lib/time-format";
 import { captionBoxCss, captionTextCss, pointerToBoxPlacement, pointerToWidthPct } from "../../lib/caption-style";
+import { karaokeSegments } from "../../lib/caption-animation";
 import { COLORS, FONTS } from "../../lib/ui";
+import type { CaptionAnimation, CaptionStyle } from "../../types/captionStyle";
+import type { Subtitle } from "../../types/subtitle";
 
 /**
  * Center video/audio stage. Renders the media, an optional subtitle overlay
@@ -20,6 +23,7 @@ export default function Player() {
     usePlayerStore();
   const subtitles = useSubtitleStore((s) => s.subtitles);
   const style = useStyleStore((s) => s.style);
+  const animation = useStyleStore((s) => s.animation);
   const setStyle = useStyleStore((s) => s.setStyle);
   const [showSubs, setShowSubs] = useState(false);
   const [positioning, setPositioning] = useState(false);
@@ -278,17 +282,16 @@ export default function Player() {
               onPointerUp={positioning ? endDrag : undefined}
               onPointerCancel={positioning ? endDrag : undefined}
             >
-              <span
-                style={{
-                  ...captionTextCss(style),
-                  // fontSize is defined at a 1080-px-tall reference canvas;
-                  // scale it by the measured frame height (px, not cqh —
-                  // WKWebView on macOS 10.15 lacks container-query units).
-                  fontSize: `${((style.fontSize / 1080) * frame.h).toFixed(2)}px`,
-                }}
-              >
-                {activeSub ? activeSub.text : t("player:positionSample")}
-              </span>
+              <AnimatedCaption
+                // Key by cue id so CSS entrance animations restart each cue
+                // (a new element mounts). Undefined key (sample text) is stable.
+                key={activeSub?.id}
+                style={style}
+                animation={animation}
+                sub={activeSub ?? null}
+                nowMs={currentTimeMs}
+                frameH={frame.h}
+              />
               {positioning && (
                 <span
                   onPointerDown={onHandlePointerDown}
@@ -386,6 +389,97 @@ export default function Player() {
       </div>
     </div>
   );
+}
+
+// slide/pop/blur map to a one-shot entrance keyframe; fade/typewriter/karaoke
+// are JS-driven off nowMs so they track scrubbing, not just mount.
+const ENTRANCE_KEYFRAME: Record<"slide" | "pop" | "blur", string> = {
+  slide: "captionSlideUp",
+  pop: "captionPop",
+  blur: "captionBlurIn",
+};
+
+/** Animation-aware caption span. Honestly previews what fade/karaoke export
+ *  and animates the four preview-only types; `sub === null` is the positioning
+ *  sample, which renders plain (animation ignored). Mounted with a cue-id key
+ *  so entrance keyframes restart per cue. */
+function AnimatedCaption({
+  style,
+  animation,
+  sub,
+  nowMs,
+  frameH,
+}: {
+  style: CaptionStyle;
+  animation: CaptionAnimation;
+  sub: Subtitle | null;
+  nowMs: number;
+  frameH: number;
+}) {
+  const { t } = useTranslation(["player"]);
+  const base: React.CSSProperties = {
+    ...captionTextCss(style),
+    // fontSize is defined at a 1080-px-tall reference canvas; scale it by the
+    // measured frame height (px, not cqh — WKWebView on macOS 10.15 lacks
+    // container-query units).
+    fontSize: `${((style.fontSize / 1080) * frameH).toFixed(2)}px`,
+  };
+
+  // Positioning sample: no cue → plain text, no animation.
+  if (!sub) {
+    return <span style={base}>{t("player:positionSample")}</span>;
+  }
+
+  const type = animation.type;
+
+  if (type === "fade") {
+    // Fade-out overrides the mount fade-in near the cue end. Linear both ways
+    // to match the exported ASS \fad (which is linear).
+    const remaining = sub.endTime - nowMs;
+    const fadingOut = remaining < animation.durationMs;
+    const spanStyle: React.CSSProperties = fadingOut
+      ? { ...base, opacity: Math.max(0, remaining / animation.durationMs) }
+      : { ...base, animation: `captionFadeIn ${animation.durationMs}ms linear both` };
+    return <span style={spanStyle}>{sub.text}</span>;
+  }
+
+  if (type === "slide" || type === "pop" || type === "blur") {
+    return (
+      <span
+        style={{
+          ...base,
+          animation: `${ENTRANCE_KEYFRAME[type]} ${animation.durationMs}ms ${animation.easing} both`,
+        }}
+      >
+        {sub.text}
+      </span>
+    );
+  }
+
+  if (type === "typewriter") {
+    // Reveal by elapsed fraction of durationMs; slice avoids ch-unit reliance.
+    const chars = Math.round(
+      ((nowMs - sub.startTime) / Math.max(animation.durationMs, 1)) * sub.text.length,
+    );
+    return <span style={base}>{sub.text.slice(0, Math.max(0, chars))}</span>;
+  }
+
+  if (type === "karaoke") {
+    // Per-word spans override only color; the wrapper keeps the single
+    // captionTextCss textShadow (don't stack it per span).
+    return (
+      <span style={base}>
+        {karaokeSegments(sub, nowMs).map((seg, i) => (
+          <span key={i} style={{ color: seg.sung ? animation.highlightColor : style.textColor }}>
+            {seg.text}
+          </span>
+        ))}
+      </span>
+    );
+  }
+
+  // "none"
+  return <span style={base}>{sub.text}</span>;
 }
 
 function cornerBtn(active: boolean): React.CSSProperties {

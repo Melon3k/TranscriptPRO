@@ -81,6 +81,49 @@ impl Default for CaptionStyle {
     }
 }
 
+/// Global caption animation crossing IPC from the frontend styleStore.
+///
+/// Mirror of `CaptionAnimation` in `src/types/captionStyle.ts` +
+/// `DEFAULT_CAPTION_ANIMATION` in `src/lib/caption-animation.ts` — keep field
+/// names (camelCase over IPC) and defaults in sync on both sides.
+///
+/// Only `fade` (ASS `\fad`) and `karaoke` (ASS `\k` + Primary/Secondary colour
+/// split) are exported; `slide`/`pop`/`typewriter`/`blur` are preview-only and
+/// serialize to the plain cue body. `per_word_delay_ms` and `easing` are
+/// preview-only params (ASS `\fad` is linear) — carried for contract symmetry.
+///
+/// Container-level `#[serde(default)]` gives forward/backward compat, matching
+/// `CaptionStyle`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CaptionAnimation {
+    /// "none" | "fade" | "slide" | "pop" | "typewriter" | "karaoke" | "blur".
+    /// `type` is a Rust keyword → field renamed, serde maps it to "type".
+    #[serde(rename = "type")]
+    pub anim_type: String,
+    /// Fade in+out length / entrance length, in ms.
+    pub duration_ms: f64,
+    /// Per-word stagger in ms — PREVIEW-ONLY (slide/pop/typewriter/blur).
+    pub per_word_delay_ms: f64,
+    /// CSS easing — PREVIEW-ONLY (ASS `\fad` is linear).
+    pub easing: String,
+    /// "#RRGGBB" — karaoke sung-word colour → ASS PrimaryColour.
+    pub highlight_color: String,
+}
+
+impl Default for CaptionAnimation {
+    // MUST mirror DEFAULT_CAPTION_ANIMATION in src/lib/caption-animation.ts.
+    fn default() -> Self {
+        Self {
+            anim_type: "none".to_string(),
+            duration_ms: 400.0,
+            per_word_delay_ms: 40.0,
+            easing: "ease-out".to_string(),
+            highlight_color: "#22D3EE".to_string(),
+        }
+    }
+}
+
 /// ASS Fontname for a caption font id. Mirrors `CAPTION_FONTS[*].assName`
 /// in `src/lib/caption-style.ts` — keep in sync.
 pub fn ass_font_name(font_id: &str) -> &'static str {
@@ -115,6 +158,27 @@ mod tests {
         assert_eq!(s.font_size, 60.0);
         assert_eq!(s.font_id, "outfit");
         assert_eq!(s.box_position, 2);
+    }
+
+    #[test]
+    fn test_animation_default_matches_frontend_contract() {
+        let a = CaptionAnimation::default();
+        assert_eq!(a.anim_type, "none");
+        assert_eq!(a.duration_ms, 400.0);
+        assert_eq!(a.per_word_delay_ms, 40.0);
+        assert_eq!(a.easing, "ease-out");
+        assert_eq!(a.highlight_color, "#22D3EE");
+    }
+
+    #[test]
+    fn test_animation_serde_type_rename_and_defaults() {
+        // `type` maps to anim_type; missing fields fall back to defaults.
+        let a: CaptionAnimation =
+            serde_json::from_str(r#"{"type": "karaoke", "durationMs": 600}"#).unwrap();
+        assert_eq!(a.anim_type, "karaoke");
+        assert_eq!(a.duration_ms, 600.0);
+        assert_eq!(a.per_word_delay_ms, 40.0);
+        assert_eq!(a.highlight_color, "#22D3EE");
     }
 
     #[test]

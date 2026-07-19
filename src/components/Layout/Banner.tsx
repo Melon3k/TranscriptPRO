@@ -1,10 +1,10 @@
 import { useEffect } from "react";
-import { Check, X } from "lucide-react";
+import { Check, Info, X } from "lucide-react";
 import { useNotifyStore } from "../../stores/notifyStore";
 import { COLORS, f } from "../../lib/ui";
 
 /**
- * Transient top banner (success / error), driven by notifyStore. Auto-dismisses
+ * Transient top banner (success / error / info), driven by notifyStore. Auto-dismisses
  * after 4s; the ✕ dismisses immediately. Mirrors the design's banner strip.
  */
 export default function Banner() {
@@ -18,7 +18,12 @@ export default function Banner() {
   }, [banner, dismiss]);
 
   if (!banner) return null;
-  const ok = banner.kind === "success";
+  const bg =
+    banner.kind === "success"
+      ? COLORS.green
+      : banner.kind === "info"
+        ? COLORS.blue
+        : COLORS.red;
 
   return (
     <div
@@ -30,10 +35,16 @@ export default function Banner() {
         gap: 9,
         padding: "0 16px",
         color: "#fff",
-        background: ok ? COLORS.green : COLORS.red,
+        background: bg,
       }}
     >
-      {ok ? <Check size={15} /> : <X size={15} />}
+      {banner.kind === "success" ? (
+        <Check size={15} />
+      ) : banner.kind === "info" ? (
+        <Info size={15} />
+      ) : (
+        <X size={15} />
+      )}
       <span style={f(600, 12)}>{banner.message}</span>
       <div style={{ flex: 1 }} />
       <button

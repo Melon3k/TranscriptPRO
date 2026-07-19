@@ -1,7 +1,11 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { CaptionStyle } from "../types/captionStyle";
+import type { CaptionAnimation, CaptionStyle } from "../types/captionStyle";
 import { DEFAULT_CAPTION_STYLE, sanitizeCaptionStyle } from "../lib/caption-style";
+import {
+  DEFAULT_CAPTION_ANIMATION,
+  sanitizeCaptionAnimation,
+} from "../lib/caption-animation";
 import type { CaptionPreset } from "../lib/caption-presets";
 import { sanitizePreset, newPresetId } from "../lib/caption-presets";
 
@@ -23,6 +27,9 @@ interface StyleState {
   setStyle: (patch: Partial<CaptionStyle>) => void;
   applyPreset: (id: string, style: CaptionStyle) => void;
   resetStyle: () => void;
+  // Item C: ONE global animation, orthogonal to style and presets.
+  animation: CaptionAnimation;
+  setAnimation: (patch: Partial<CaptionAnimation>) => void;
   // USER presets only; built-ins are code constants (BUILTIN_PRESETS) and are
   // never persisted here.
   presets: CaptionPreset[];
@@ -39,8 +46,14 @@ export const useStyleStore = create<StyleState>()(
       // Any manual edit deselects the active preset: the live style no longer
       // matches a saved snapshot.
       setStyle: (patch) => set((s) => ({ style: { ...s.style, ...patch }, activePresetId: null })),
+      // Presets carry style only (see addPreset/updatePreset), so applyPreset
+      // leaves the animation unchanged — animation is independent of presets.
       applyPreset: (id, style) => set({ style, activePresetId: id }),
       resetStyle: () => set({ style: DEFAULT_CAPTION_STYLE, activePresetId: null }),
+      animation: DEFAULT_CAPTION_ANIMATION,
+      // Merges a patch; does NOT touch activePresetId — animation is orthogonal
+      // to the style/preset selection.
+      setAnimation: (patch) => set((s) => ({ animation: { ...s.animation, ...patch } })),
       presets: [],
       addPreset: (name, style) => {
         const id = newPresetId();
@@ -74,7 +87,12 @@ export const useStyleStore = create<StyleState>()(
       // F1-persisted shape (no presets key). A version bump would trigger a
       // migrate path that risks discarding that already-persisted state.
       version: 1,
-      partialize: ({ style, presets, activePresetId }) => ({ style, presets, activePresetId }),
+      partialize: ({ style, presets, activePresetId, animation }) => ({
+        style,
+        presets,
+        activePresetId,
+        animation,
+      }),
       // Persisted VALUES aren't covered by the additive-fields contract: a
       // newer build (or hand-edited localStorage) may persist enums this build
       // doesn't know, or numbers/booleans/colors of the wrong type or range.
@@ -86,6 +104,9 @@ export const useStyleStore = create<StyleState>()(
         return {
           ...current,
           style: sanitizeCaptionStyle(p?.style),
+          // A persisted shape without `animation` (pre-item-C) rehydrates to the
+          // default here — no migrate needed.
+          animation: sanitizeCaptionAnimation(p?.animation),
           activePresetId: typeof p?.activePresetId === "string" ? p.activePresetId : null,
           presets: Array.isArray(p?.presets)
             ? p.presets

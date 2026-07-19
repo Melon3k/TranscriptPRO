@@ -1,4 +1,4 @@
-use super::style::{ass_font_name, CaptionStyle};
+use super::style::{ass_font_name, CaptionAnimation, CaptionStyle};
 use super::types::Subtitle;
 
 // Reference canvas — matches the Player overlay, which scales fontSize/1080
@@ -6,7 +6,7 @@ use super::types::Subtitle;
 const PLAY_RES_X: f64 = 1920.0;
 const PLAY_RES_Y: f64 = 1080.0;
 
-pub fn write_ass(subtitles: &[Subtitle], style: &CaptionStyle) -> String {
+pub fn write_ass(subtitles: &[Subtitle], style: &CaptionStyle, animation: &CaptionAnimation) -> String {
     let mut output = String::new();
 
     output.push_str("[Script Info]\n");
@@ -21,40 +21,115 @@ pub fn write_ass(subtitles: &[Subtitle], style: &CaptionStyle) -> String {
 
     output.push_str("[V4+ Styles]\n");
     output.push_str("Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n");
-    output.push_str(&style_line(style));
+    output.push_str(&style_line(style, animation));
     output.push('\n');
 
     output.push_str("[Events]\n");
     output.push_str("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n");
 
     for sub in subtitles {
-        // Escape literal braces first — ASS renderers would otherwise parse
-        // {...} as an override-tag block and hide the text. \{ / \} render
-        // as literal braces in libass/VLC/Aegisub.
-        let text = escape_braces(&sub.text);
-        // ASS uses \N for line breaks
-        let text = text.replace('\n', "\\N");
-        let text = if let Some(ref speaker) = sub.speaker {
-            format!("[{}] {}", escape_braces(speaker), text)
-        } else {
-            text
-        };
-        // `uppercase: true` is honored by transforming the text payload itself
-        // (Unicode-aware) — the timestamps/format around it are untouched.
-        let text = if style.uppercase {
-            text.to_uppercase()
-        } else {
-            text
-        };
         output.push_str(&format!(
             "Dialogue: 0,{},{},Default,,0,0,0,,{}\n",
             format_ass_timestamp(sub.start_time),
             format_ass_timestamp(sub.end_time),
-            text
+            dialogue_text(sub, style, animation)
         ));
     }
 
     output
+}
+
+/// Build the Dialogue text payload for one cue, applying the animation.
+///
+/// The base body is always produced exactly as before: escape literal braces
+/// (renderers would otherwise parse `{...}` as an override-tag block), convert
+/// newlines to `\N`, add the optional `[Speaker]` prefix, and Unicode-uppercase
+/// when `style.uppercase` is set. Then per animation type:
+///   - `fade`      → prefix `{\fad(d,d)}` (in+out ms; ASS \fad is linear).
+///   - `karaoke`   → rebuild the body as `{\k<cs>}<token>` tokens with the
+///                   speaker prefix (if any) kept as leading plain text. Uses
+///                   real word timings when present, else an even centisecond
+///                   split of the raw cue text on whitespace (newlines
+///                   included, so they act as token boundaries) — mirroring the
+///                   frontend karaokeSegments fallback (`sub.text.split(/\s+/)`)
+///                   so preview and export agree.
+///   - everything else (none/slide/pop/typewriter/blur) → plain body.
+fn dialogue_text(sub: &Subtitle, style: &CaptionStyle, animation: &CaptionAnimation) -> String {
+    let maybe_upper = |s: String| -> String {
+        if style.uppercase {
+            s.to_uppercase()
+        } else {
+            s
+        }
+    };
+
+    // Base body without the speaker prefix (braces escaped, \n -> \N).
+    let body = maybe_upper(escape_braces(&sub.text).replace('\n', "\\N"));
+    // Speaker prefix "[Speaker] " (with trailing space), escaped + uppercased
+    // the same way, kept separate so karaoke can lead with it as plain text.
+    let speaker_prefix = sub
+        .speaker
+        .as_ref()
+        .map(|sp| maybe_upper(format!("[{}] ", escape_braces(sp))));
+
+    let plain = || match &speaker_prefix {
+        Some(p) => format!("{}{}", p, body),
+        None => body.clone(),
+    };
+
+    match animation.anim_type.as_str() {
+        "fade" => {
+            let d = animation.duration_ms.round().max(0.0) as i64;
+            format!("{{\\fad({},{})}}{}", d, d, plain())
+        }
+        "karaoke" => {
+            // (centiseconds, token-text) pairs.
+            let tokens: Vec<(i64, String)> = if !sub.words.is_empty() {
+                sub.words
+                    .iter()
+                    .map(|w| {
+                        let dur_ms = w.end_time.saturating_sub(w.start_time);
+                        let cs = ((dur_ms as f64) / 10.0).round() as i64;
+                        (cs.max(0), maybe_upper(escape_braces(&w.text)))
+                    })
+                    .collect()
+            } else {
+                // Split the RAW cue text (not `body`, whose newlines are already
+                // the literal two-char `\N`): `split_whitespace` treats real
+                // newlines/tabs/spaces as boundaries, matching the frontend's
+                // `sub.text.split(/\s+/)`. Braces are escaped and uppercase is
+                // applied per token, as in the word-timings branch above.
+                let toks: Vec<&str> = sub.text.split_whitespace().collect();
+                let n = toks.len() as i64;
+                if n == 0 {
+                    return speaker_prefix.unwrap_or_default().trim_end().to_string();
+                }
+                // Distribute the cue duration (centiseconds) evenly across
+                // tokens; the remainder goes to the leading tokens so the \k
+                // durations sum to exactly round((end-start)/10).
+                let total_cs =
+                    (((sub.end_time.saturating_sub(sub.start_time)) as f64) / 10.0).round() as i64;
+                let total_cs = total_cs.max(0);
+                let base = total_cs / n;
+                let rem = total_cs % n;
+                toks.iter()
+                    .enumerate()
+                    .map(|(i, tk)| {
+                        let cs = base + if (i as i64) < rem { 1 } else { 0 };
+                        (cs.max(0), maybe_upper(escape_braces(tk)))
+                    })
+                    .collect()
+            };
+
+            let mut out = speaker_prefix.unwrap_or_default();
+            for (cs, tok) in &tokens {
+                out.push_str(&format!("{{\\k{}}}{} ", cs, tok));
+            }
+            out.trim_end().to_string()
+        }
+        // none / slide / pop / typewriter / blur — preview-only, plain body.
+        _ => plain(),
+    }
 }
 
 /// Escape literal `{` / `}` so ASS renderers show them instead of parsing an
@@ -66,7 +141,7 @@ fn escape_braces(text: &str) -> String {
 /// Generate the Style line from a CaptionStyle. lineHeight, glow*, and align
 /// are intentionally ignored — they are preview-only per the decision in
 /// docs/new-design-agents.md (no honest ASS mapping exists for them).
-fn style_line(style: &CaptionStyle) -> String {
+fn style_line(style: &CaptionStyle, animation: &CaptionAnimation) -> String {
     // Clamp everything crossing IPC before use.
     let box_position = if (1..=9).contains(&style.box_position) {
         style.box_position
@@ -79,9 +154,18 @@ fn style_line(style: &CaptionStyle) -> String {
     let outline_width = style.outline_width.max(0.0);
     let shadow_depth = style.shadow_depth.max(0.0);
 
-    let primary = hex_to_ass_color(&style.text_color, "FFFFFF");
-    // SecondaryColour = PrimaryColour for now; item C karaoke differentiates.
-    let secondary = primary.clone();
+    // Karaoke uses ASS \k semantics: unsung text is SecondaryColour (the base
+    // text colour) and sweeps to PrimaryColour (the highlight) as it's "sung".
+    // Every other type keeps Primary = Secondary = base text colour.
+    let (primary, secondary) = if animation.anim_type == "karaoke" {
+        (
+            hex_to_ass_color(&animation.highlight_color, "FFFFFF"),
+            hex_to_ass_color(&style.text_color, "FFFFFF"),
+        )
+    } else {
+        let p = hex_to_ass_color(&style.text_color, "FFFFFF");
+        (p.clone(), p)
+    };
     let outline_colour = hex_to_ass_color(&style.outline_color, "000000");
     let back_colour = hex_to_ass_color(&style.shadow_color, "000000");
 
@@ -190,7 +274,7 @@ mod tests {
     #[test]
     fn test_ass_structure() {
         let subs = vec![make_sub(1, 1000, 3500, "Hello world")];
-        let out = write_ass(&subs, &CaptionStyle::default());
+        let out = write_ass(&subs, &CaptionStyle::default(), &CaptionAnimation::default());
         assert!(out.contains("[Script Info]"));
         assert!(out.contains("[V4+ Styles]"));
         assert!(out.contains("[Events]"));
@@ -207,13 +291,13 @@ mod tests {
     #[test]
     fn test_ass_newline_escape() {
         let subs = vec![make_sub(1, 0, 1000, "line one\nline two")];
-        let out = write_ass(&subs, &CaptionStyle::default());
+        let out = write_ass(&subs, &CaptionStyle::default(), &CaptionAnimation::default());
         assert!(out.contains("line one\\Nline two"));
     }
 
     #[test]
     fn test_default_style_golden_line() {
-        let out = write_ass(&[], &CaptionStyle::default());
+        let out = write_ass(&[], &CaptionStyle::default(), &CaptionAnimation::default());
         assert!(out.contains(
             "Style: Default,Outfit,48,&H00FFFFFF,&H00FFFFFF,&H00160F0B,&H00000000,-1,0,0,0,100,100,0,0,1,2,0,2,365,365,86,1"
         ));
@@ -221,7 +305,7 @@ mod tests {
 
     #[test]
     fn test_script_info_play_res() {
-        let out = write_ass(&[], &CaptionStyle::default());
+        let out = write_ass(&[], &CaptionStyle::default(), &CaptionAnimation::default());
         assert!(out.contains("PlayResX: 1920\n"));
         assert!(out.contains("PlayResY: 1080\n"));
         assert!(out.contains("WrapStyle: 0\n"));
@@ -235,11 +319,11 @@ mod tests {
             italic: true,
             ..CaptionStyle::default()
         };
-        let line = style_line(&style);
+        let line = style_line(&style, &CaptionAnimation::default());
         // Bold 0, Italic -1, Underline 0, StrikeOut 0
         assert!(line.contains(",0,-1,0,0,"));
 
-        let default_line = style_line(&CaptionStyle::default());
+        let default_line = style_line(&CaptionStyle::default(), &CaptionAnimation::default());
         // Bold -1, Italic 0
         assert!(default_line.contains(",-1,0,0,0,"));
     }
@@ -261,7 +345,7 @@ mod tests {
             shadow_depth: 3.0,
             ..CaptionStyle::default()
         };
-        let line = style_line(&style);
+        let line = style_line(&style, &CaptionAnimation::default());
         // ...Angle,BorderStyle,Outline,Shadow,Alignment...
         assert!(line.contains(",0,1,0,3,2,"));
     }
@@ -273,28 +357,28 @@ mod tests {
             ..CaptionStyle::default()
         };
         let subs = vec![make_sub(1, 0, 1000, "żółć gęś")];
-        let out = write_ass(&subs, &style);
+        let out = write_ass(&subs, &style, &CaptionAnimation::default());
         assert!(out.contains("ŻÓŁĆ GĘŚ"));
         // Timestamps stay untouched.
         assert!(out.contains("Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,ŻÓŁĆ GĘŚ"));
 
         let mut with_speaker = make_sub(1, 0, 1000, "hello");
         with_speaker.speaker = Some("Speaker 1".to_string());
-        let out = write_ass(&[with_speaker], &style);
+        let out = write_ass(&[with_speaker], &style, &CaptionAnimation::default());
         assert!(out.contains("[SPEAKER 1] HELLO"));
     }
 
     #[test]
     fn test_brace_escaping() {
         let subs = vec![make_sub(1, 0, 1000, "{whispers} come here")];
-        let out = write_ass(&subs, &CaptionStyle::default());
+        let out = write_ass(&subs, &CaptionStyle::default(), &CaptionAnimation::default());
         assert!(out.contains(",,\\{whispers\\} come here\n"));
         assert!(!out.contains(",,{whispers}"));
 
         // Speaker names with braces are escaped too.
         let mut sub = make_sub(1, 0, 1000, "use {x} here");
         sub.speaker = Some("{Narrator}".to_string());
-        let out = write_ass(&[sub], &CaptionStyle::default());
+        let out = write_ass(&[sub], &CaptionStyle::default(), &CaptionAnimation::default());
         assert!(out.contains("[\\{Narrator\\}] use \\{x\\} here"));
 
         // Escaping survives the uppercase transform.
@@ -303,7 +387,7 @@ mod tests {
             ..CaptionStyle::default()
         };
         let subs = vec![make_sub(1, 0, 1000, "{quiet} ok")];
-        let out = write_ass(&subs, &style);
+        let out = write_ass(&subs, &style, &CaptionAnimation::default());
         assert!(out.contains("\\{QUIET\\} OK"));
 
         assert_eq!(escape_braces("plain"), "plain");
@@ -317,7 +401,7 @@ mod tests {
             margin_v_pct: 8.0,
             ..CaptionStyle::default()
         };
-        let line = style_line(&style);
+        let line = style_line(&style, &CaptionAnimation::default());
         // Alignment 7 (top-left column), MarginL 38 (2% side inset),
         // MarginR = round(1920*(98-62)/100) = 691, MarginV 86.
         assert!(line.contains(",7,38,691,86,1"));
@@ -326,14 +410,14 @@ mod tests {
             box_position: 1,
             ..CaptionStyle::default()
         };
-        assert!(style_line(&left).contains(",1,38,691,86,1"));
+        assert!(style_line(&left, &CaptionAnimation::default()).contains(",1,38,691,86,1"));
 
         // Out-of-range boxPosition clamps to 2 (bottom-center).
         let bad = CaptionStyle {
             box_position: 0,
             ..CaptionStyle::default()
         };
-        assert!(style_line(&bad).contains(",2,365,365,86,1"));
+        assert!(style_line(&bad, &CaptionAnimation::default()).contains(",2,365,365,86,1"));
     }
 
     #[test]
@@ -342,7 +426,7 @@ mod tests {
             font_id: "nonsense".to_string(),
             ..CaptionStyle::default()
         };
-        assert!(style_line(&style).starts_with("Style: Default,Outfit,"));
+        assert!(style_line(&style, &CaptionAnimation::default()).starts_with("Style: Default,Outfit,"));
     }
 
     #[test]
@@ -351,10 +435,124 @@ mod tests {
             font_size: 48.5,
             ..CaptionStyle::default()
         };
-        assert!(style_line(&style).contains("Style: Default,Outfit,48.5,"));
+        assert!(style_line(&style, &CaptionAnimation::default()).contains("Style: Default,Outfit,48.5,"));
         assert_eq!(fmt_num(48.5), "48.5");
         assert_eq!(fmt_num(48.0), "48");
         assert_eq!(fmt_num(48.50), "48.5");
         assert_eq!(fmt_num(1.25), "1.25");
+    }
+
+    #[test]
+    fn test_animation_fade_prefixes_fad_tag() {
+        let subs = vec![make_sub(1, 0, 2000, "hello world")];
+        let anim = CaptionAnimation {
+            anim_type: "fade".to_string(),
+            duration_ms: 400.0,
+            ..CaptionAnimation::default()
+        };
+        let out = write_ass(&subs, &CaptionStyle::default(), &anim);
+        assert!(out.contains(",,{\\fad(400,400)}hello world\n"));
+        // Rounds the duration and applies in+out symmetrically.
+        let anim = CaptionAnimation {
+            anim_type: "fade".to_string(),
+            duration_ms: 249.6,
+            ..CaptionAnimation::default()
+        };
+        let out = write_ass(&subs, &CaptionStyle::default(), &anim);
+        assert!(out.contains("{\\fad(250,250)}hello world"));
+    }
+
+    #[test]
+    fn test_animation_karaoke_even_split_and_style_colours() {
+        // No word timings → even centisecond split across whitespace tokens.
+        // 2000 ms = 200 cs over 2 tokens = 100 cs each.
+        let subs = vec![make_sub(1, 0, 2000, "hello world")];
+        let anim = CaptionAnimation {
+            anim_type: "karaoke".to_string(),
+            highlight_color: "#22D3EE".to_string(),
+            ..CaptionAnimation::default()
+        };
+        let out = write_ass(&subs, &CaptionStyle::default(), &anim);
+        assert!(out.contains(",,{\\k100}hello {\\k100}world\n"));
+
+        // Style line: PrimaryColour = highlight (#22D3EE → &H00EED322),
+        // SecondaryColour = base text colour (#FFFFFF → &H00FFFFFF).
+        let line = style_line(&CaptionStyle::default(), &anim);
+        assert!(line.contains(",&H00EED322,&H00FFFFFF,"));
+    }
+
+    #[test]
+    fn test_animation_karaoke_fallback_splits_on_newline() {
+        // Multi-line cue with no word timings (common after translation, which
+        // empties sub.words). The newline must act as a token boundary — two
+        // \k tokens, matching the frontend karaokeSegments fallback which splits
+        // sub.text on /\s+/ — not one fused "hello\Nworld" token.
+        let subs = vec![make_sub(1, 0, 2000, "hello\nworld")];
+        let anim = CaptionAnimation {
+            anim_type: "karaoke".to_string(),
+            ..CaptionAnimation::default()
+        };
+        let out = write_ass(&subs, &CaptionStyle::default(), &anim);
+        assert!(
+            out.contains(",,{\\k100}hello {\\k100}world\n"),
+            "newline should split into two tokens; got: {out}"
+        );
+        // The fused single-token form must not appear.
+        assert!(!out.contains("\\Nworld"), "tokens must not fuse across \\N");
+    }
+
+    #[test]
+    fn test_animation_karaoke_uses_word_timings() {
+        let mut sub = make_sub(1, 0, 1000, "hi there");
+        sub.words = vec![
+            crate::subtitle::types::Word {
+                text: "hi".to_string(),
+                start_time: 0,
+                end_time: 300,
+            },
+            crate::subtitle::types::Word {
+                text: "there".to_string(),
+                start_time: 300,
+                end_time: 1000,
+            },
+        ];
+        let anim = CaptionAnimation {
+            anim_type: "karaoke".to_string(),
+            ..CaptionAnimation::default()
+        };
+        let out = write_ass(&[sub], &CaptionStyle::default(), &anim);
+        // 300 ms = 30 cs, 700 ms = 70 cs.
+        assert!(out.contains(",,{\\k30}hi {\\k70}there\n"));
+    }
+
+    #[test]
+    fn test_animation_karaoke_keeps_speaker_prefix_and_escapes() {
+        let mut sub = make_sub(1, 0, 2000, "{a} b");
+        sub.speaker = Some("Speaker 1".to_string());
+        let anim = CaptionAnimation {
+            anim_type: "karaoke".to_string(),
+            ..CaptionAnimation::default()
+        };
+        let out = write_ass(&[sub], &CaptionStyle::default(), &anim);
+        // Speaker prefix leads as plain text; braces escaped per token.
+        assert!(out.contains(",,[Speaker 1] {\\k100}\\{a\\} {\\k100}b\n"));
+    }
+
+    #[test]
+    fn test_animation_preview_only_types_yield_plain_body() {
+        let subs = vec![make_sub(1, 0, 2000, "hello world")];
+        for t in ["none", "slide", "pop", "typewriter", "blur"] {
+            let anim = CaptionAnimation {
+                anim_type: t.to_string(),
+                ..CaptionAnimation::default()
+            };
+            let out = write_ass(&subs, &CaptionStyle::default(), &anim);
+            assert!(out.contains(",,hello world\n"), "type {t} should be plain");
+            assert!(!out.contains("\\fad"), "type {t} must not emit \\fad");
+            assert!(!out.contains("\\k"), "type {t} must not emit \\k");
+            // Preview-only types keep Primary = Secondary = base text colour.
+            let line = style_line(&CaptionStyle::default(), &anim);
+            assert!(line.contains(",&H00FFFFFF,&H00FFFFFF,"));
+        }
     }
 }

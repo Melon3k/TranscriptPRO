@@ -26,6 +26,23 @@
   "glow": "Poświata (glow)",
   "glowStrength": "Siła poświaty",
   "previewOnly": "tylko podgląd",
+  "anim": {
+    "appliesAll": "Dotyczy wszystkich napisów",
+    "exported": "eksport",
+    "duration": "Czas trwania",
+    "perWordDelay": "Opóźnienie na słowo",
+    "easing": "Wygładzanie",
+    "highlightColor": "Podświetlenie karaoke",
+    "types": {
+      "none": "Brak",
+      "fade": "Zanikanie",
+      "slide": "Wjazd w górę",
+      "pop": "Pop",
+      "typewriter": "Maszyna do pisania",
+      "karaoke": "Karaoke",
+      "blur": "Rozmycie"
+    }
+  },
   "colors": "KOLORY",
   "textColor": "Tekst",
   "captionBox": "BOX NAPISÓW",
@@ -45,8 +62,6 @@
   "bottomDistance": "Odległość od dołu",
   "topDistance": "Odległość od góry",
   "reset": "Przywróć domyślne",
-  "applyToSelected": "Zastosuj do zaznaczonych",
-  "applyToAll": "Wszystkie",
   "searchPreset": "Szukaj presetu…",
   "newPreset": "Nowy",
   "presets": {

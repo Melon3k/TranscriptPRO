@@ -27,6 +27,7 @@ import {
 import { ask } from "@tauri-apps/plugin-dialog";
 import { hasInvertedTiming } from "../../lib/subtitle-ops";
 import { formatError } from "../../lib/error-format";
+import { EXPORTED_ANIMATIONS } from "../../types/captionStyle";
 import { navStyle, f } from "../../lib/ui";
 import type { AppMode } from "./modes";
 
@@ -121,6 +122,7 @@ function ExportMenu() {
     handler: () => Promise<string | null>,
     faithful: boolean,
     timed: boolean,
+    warn?: () => string | null,
   ) {
     setOpen(false);
     if (timed) {
@@ -140,7 +142,17 @@ function ExportMenu() {
       const savedPath = await handler();
       if (savedPath) {
         if (faithful) markSaved();
-        notify("success", t("toolbar:exportSuccess", { name: filename(savedPath) }));
+        const success = t("toolbar:exportSuccess", { name: filename(savedPath) });
+        // notifyStore holds a single banner (last write wins), so a warning
+        // can't be a second notify — it would clobber, or be clobbered by, the
+        // success banner. Fold it into one info banner that both confirms the
+        // export and carries the caveat.
+        const warning = warn?.();
+        if (warning) {
+          notify("info", `${success} — ${warning}`);
+        } else {
+          notify("success", success);
+        }
       }
     } catch (e) {
       notify("error", formatError(t, e));
@@ -153,6 +165,7 @@ function ExportMenu() {
     faithful: boolean;
     timed: boolean;
     handler: () => Promise<string | null>;
+    warn?: () => string | null;
   }[] = [
     {
       label: "SRT", hint: "SubRip", faithful: true, timed: true,
@@ -171,11 +184,21 @@ function ExportMenu() {
       handler: async () => {
         const p = await saveAssFileDialog();
         if (p) {
-          // Read at click time — subscribing would re-render the Rail on every style tweak.
-          const { style } = useStyleStore.getState();
-          await exportAss(p, subtitles, style);
+          // Read at click time — subscribing would re-render the Rail on every
+          // style/animation tweak (same reasoning as the style read).
+          const { style, animation } = useStyleStore.getState();
+          await exportAss(p, subtitles, style, animation);
         }
         return p;
+      },
+      // fade/karaoke are baked into the .ass; preview-only types are not. run()
+      // folds this into the success banner (a bare notify here would be
+      // overwritten by the success banner — single-slot notifyStore).
+      warn: () => {
+        const { animation } = useStyleStore.getState();
+        return animation.type !== "none" && !EXPORTED_ANIMATIONS.has(animation.type)
+          ? t("toolbar:animationPreviewOnly")
+          : null;
       },
     },
     {
@@ -215,7 +238,7 @@ function ExportMenu() {
           {items.map((item) => (
             <button
               key={item.label}
-              onClick={() => run(item.handler, item.faithful, item.timed)}
+              onClick={() => run(item.handler, item.faithful, item.timed, item.warn)}
               style={{
                 display: "flex",
                 alignItems: "center",

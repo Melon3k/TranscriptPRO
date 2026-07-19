@@ -1,5 +1,5 @@
 import { useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
-import { Sparkles, Layers, ChevronDown, Lock, Search, Plus, RotateCcw, Copy, Trash2, Pencil, Check, X } from "lucide-react";
+import { Sparkles, Layers, ChevronDown, Search, Plus, RotateCcw, Copy, Trash2, Pencil, Check, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { COLORS, f, FONTS, tabStyle, sectionLabel, selectStyle, toggle } from "../../lib/ui";
 import { useStyleStore } from "../../stores/styleStore";
@@ -11,15 +11,27 @@ import {
   captionTextCss,
   type NumericStyleField,
 } from "../../lib/caption-style";
+import {
+  ANIMATION_TYPES,
+  ANIMATION_LIMITS,
+  EASINGS,
+  type NumericAnimationField,
+} from "../../lib/caption-animation";
 import { BUILTIN_PRESETS, uniquePresetName } from "../../lib/caption-presets";
-import type { CaptionAlign, CaptionFontId, CaptionStyle } from "../../types/captionStyle";
+import type {
+  CaptionAlign,
+  CaptionEasing,
+  CaptionFontId,
+  CaptionStyle,
+} from "../../types/captionStyle";
+import { EXPORTED_ANIMATIONS } from "../../types/captionStyle";
 
 type StyleTab = "inspector" | "anim" | "effects";
 
 /**
- * Caption STYLING workspace. The Inspector tab is live (item A) and edits the
- * global CaptionStyle in styleStore; Animations (item C) and Effects (item D)
- * are still non-interactive previews, kept grayed behind the lock notice.
+ * Caption STYLING workspace. All three tabs are live: Inspector (item A) edits
+ * the global CaptionStyle, Animations (item C) edits the global CaptionAnimation,
+ * Effects (item D) manages style presets — all in styleStore.
  */
 export default function StylePanel() {
   const { t } = useTranslation(["style", "common"]);
@@ -50,27 +62,9 @@ export default function StylePanel() {
           <Effects t={t} />
         </div>
       ) : (
-        <>
-          {/* Disabled notice — Animations only; Inspector and Effects are live. */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              margin: "12px 14px 0",
-              padding: "9px 11px",
-              background: "rgba(245,165,36,.1)",
-              border: `1px solid ${COLORS.amber}55`,
-              borderRadius: 8,
-            }}
-          >
-            <Lock size={13} color={COLORS.amber} />
-            <span style={f(600, 10, "body", { color: COLORS.amber, lineHeight: 1.4 })}>{t("style:comingSoon")}</span>
-          </div>
-          <div style={{ flex: 1, overflowY: "auto", padding: 16, opacity: 0.45, pointerEvents: "none", userSelect: "none" }}>
-            <Animations t={t} />
-          </div>
-        </>
+        <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
+          <Animations t={t} />
+        </div>
       )}
     </div>
   );
@@ -320,27 +314,142 @@ function IconBtn({ on, label, onClick, children }: { on: boolean; label: string;
 }
 
 function Animations({ t }: { t: TFn }) {
-  const anims = ["Fade in", "Slide up", "Pop", "Typewriter", "Karaoke", "Blur in"];
+  const animation = useStyleStore((s) => s.animation);
+  const setAnimation = useStyleStore((s) => s.setAnimation);
+
+  const type = animation.type;
+  // Preview-only stagger + easing apply to the CSS-driven entrance types; ASS
+  // export ignores them (see item C decision), so they hide for none/karaoke.
+  const isEntrance = type === "slide" || type === "pop" || type === "typewriter" || type === "blur";
+
   return (
     <>
-      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-        <div style={{ ...pill, flex: 1, justifyContent: "center", background: "rgba(124,58,237,.16)", border: `1px solid ${COLORS.violet}`, color: "#c4b5fd" }}>
-          {t("style:applyToSelected")}
-        </div>
-        <div style={{ ...pill, background: "var(--c-raised)", border: "1px solid var(--c-border)", color: "var(--c-text2)" }}>
-          {t("style:applyToAll")}
-        </div>
+      {/* Animation is global (accepted scope decision) — no per-segment "apply
+          to selected" pills; a static note replaces the mock's pill row. */}
+      <div style={sectionLabel}>{t("style:anim.appliesAll")}</div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
+        {ANIMATION_TYPES.map((at) => {
+          const active = type === at;
+          const exported = EXPORTED_ANIMATIONS.has(at);
+          return (
+            <button
+              key={at}
+              onClick={() => setAnimation({ type: at })}
+              aria-pressed={active}
+              style={{
+                position: "relative",
+                display: "block",
+                textAlign: "left",
+                padding: 0,
+                cursor: "pointer",
+                border: `1px solid ${active ? COLORS.violet : "var(--c-border)"}`,
+                borderRadius: 8,
+                overflow: "hidden",
+                background: "#0c1017",
+              }}
+            >
+              <div style={{ height: 48, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <span style={{ fontFamily: FONTS.display, fontWeight: 800, fontSize: 14, color: "#fff", WebkitTextStroke: "0.5px #0D1117" }}>Aa</span>
+              </div>
+              {at !== "none" && (
+                <span style={{ position: "absolute", top: 4, right: 4, ...badge(exported ? COLORS.cyan : COLORS.amber) }}>
+                  {exported ? t("style:anim.exported") : t("style:previewOnly")}
+                </span>
+              )}
+              <div style={{ ...f(600, 9), padding: "5px 8px", borderTop: "1px solid var(--c-border)", color: active ? COLORS.violetLight : "var(--c-text)" }}>
+                {t(`style:anim.types.${at}`)}
+              </div>
+            </button>
+          );
+        })}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-        {anims.map((name, i) => (
-          <div key={name} style={{ border: `1px solid ${i === 0 ? COLORS.violet : "var(--c-border)"}`, borderRadius: 8, overflow: "hidden", background: "#0c1017" }}>
-            <div style={{ height: 48, display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <span style={{ fontFamily: FONTS.display, fontWeight: 800, fontSize: 14, color: "#fff", WebkitTextStroke: "0.5px #0D1117" }}>Aa</span>
-            </div>
-            <div style={{ ...f(600, 9), padding: "5px 8px", borderTop: "1px solid var(--c-border)", color: "var(--c-text)" }}>{name}</div>
+
+      {/* Duration drives fade's \fad and the entrance types' CSS transitions.
+          Karaoke derives its \k sweep from word/cue timings and ignores
+          durationMs in both preview and export, so the slider is hidden there
+          rather than shown as an inert control. */}
+      {type !== "none" && type !== "karaoke" && (
+        <AnimSlider label={t("style:anim.duration")} field="durationMs" value={animation.durationMs} onChange={(v) => setAnimation({ durationMs: v })} unit=" ms" />
+      )}
+      {isEntrance && (
+        <AnimSlider label={t("style:anim.perWordDelay")} field="perWordDelayMs" value={animation.perWordDelayMs} onChange={(v) => setAnimation({ perWordDelayMs: v })} unit=" ms" badge={t("style:previewOnly")} />
+      )}
+      {type !== "none" && type !== "karaoke" && (
+        <>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, ...f(400, 10, "body", { color: "var(--c-text2)" }) }}>
+            {t("style:anim.easing")}
+            <span style={f(600, 8, "body", { color: COLORS.amber, border: `1px solid ${COLORS.amber}55`, borderRadius: 4, padding: "1px 5px", letterSpacing: ".06em", textTransform: "uppercase" })}>
+              {t("style:previewOnly")}
+            </span>
           </div>
-        ))}
+          <div style={{ position: "relative", marginBottom: 12 }}>
+            <select
+              value={animation.easing}
+              onChange={(e) => setAnimation({ easing: e.target.value as CaptionEasing })}
+              style={selectStyle}
+              aria-label={t("style:anim.easing")}
+            >
+              {EASINGS.map((ez) => (
+                <option key={ez} value={ez}>
+                  {ez}
+                </option>
+              ))}
+            </select>
+            <ChevronDown size={13} color="var(--c-muted)" style={{ position: "absolute", right: 10, top: 10, pointerEvents: "none" }} />
+          </div>
+        </>
+      )}
+      {type === "karaoke" && (
+        <ColorRow label={t("style:anim.highlightColor")} value={animation.highlightColor} onChange={(v) => setAnimation({ highlightColor: v })} badge={t("style:anim.exported")} />
+      )}
+    </>
+  );
+}
+
+// Mirrors StyleSlider but reads ANIMATION_LIMITS instead of STYLE_LIMITS.
+function AnimSlider({
+  label,
+  field,
+  value,
+  onChange,
+  unit = "",
+  badge: badgeText,
+}: {
+  label: string;
+  field: NumericAnimationField;
+  value: number;
+  onChange: (v: number) => void;
+  unit?: string;
+  badge?: string;
+}) {
+  const lim = ANIMATION_LIMITS[field];
+  return (
+    <>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, ...f(400, 10, "body", { color: "var(--c-text2)" }) }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {label}
+          {badgeText && (
+            <span style={f(600, 8, "body", { color: COLORS.amber, border: `1px solid ${COLORS.amber}55`, borderRadius: 4, padding: "1px 5px", letterSpacing: ".06em", textTransform: "uppercase" })}>
+              {badgeText}
+            </span>
+          )}
+        </span>
+        <span style={{ fontFamily: FONTS.mono, fontWeight: 600, fontSize: 10, color: "var(--c-text)" }}>
+          {value}
+          {unit}
+        </span>
       </div>
+      <input
+        type="range"
+        min={lim.min}
+        max={lim.max}
+        step={lim.step}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        style={{ width: "100%", marginBottom: 12, accentColor: COLORS.blue }}
+        aria-label={label}
+      />
     </>
   );
 }
@@ -624,15 +733,6 @@ function badge(color: string): CSSProperties {
     textTransform: "uppercase",
   });
 }
-
-const pill: CSSProperties = {
-  height: 28,
-  padding: "0 11px",
-  display: "flex",
-  alignItems: "center",
-  borderRadius: 7,
-  ...f(600, 10),
-};
 
 function iconBtn(on: boolean): CSSProperties {
   return {

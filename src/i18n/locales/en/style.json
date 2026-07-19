@@ -26,6 +26,23 @@
   "glow": "Glow",
   "glowStrength": "Glow strength",
   "previewOnly": "preview only",
+  "anim": {
+    "appliesAll": "Applies to all captions",
+    "exported": "exported",
+    "duration": "Duration",
+    "perWordDelay": "Per-word delay",
+    "easing": "Easing",
+    "highlightColor": "Karaoke highlight",
+    "types": {
+      "none": "None",
+      "fade": "Fade",
+      "slide": "Slide up",
+      "pop": "Pop",
+      "typewriter": "Typewriter",
+      "karaoke": "Karaoke",
+      "blur": "Blur in"
+    }
+  },
   "colors": "COLORS",
   "textColor": "Text",
   "captionBox": "CAPTION BOX",
@@ -45,8 +62,6 @@
   "bottomDistance": "Distance from bottom",
   "topDistance": "Distance from top",
   "reset": "Reset to defaults",
-  "applyToSelected": "Apply to selected",
-  "applyToAll": "All",
   "searchPreset": "Search preset…",
   "newPreset": "New",
   "presets": {

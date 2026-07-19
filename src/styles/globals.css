@@ -78,6 +78,13 @@ button, [role="button"] {
 @keyframes an-blur { from { opacity: 0; filter: blur(9px); } to { opacity: 1; filter: blur(0); } }
 @keyframes an-type { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
 @keyframes an-kar { 0% { color: #22D3EE; text-shadow: 0 0 12px #22D3EE; } 100% { color: #fff; text-shadow: none; } }
+/* Item C caption entrances — transform/opacity/filter only (WKWebView-safe),
+   no container-query units. The Player keys the caption span by cue id so each
+   cue restarts these on mount. */
+@keyframes captionFadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes captionSlideUp { from { opacity: 0; transform: translateY(18%); } to { opacity: 1; transform: none; } }
+@keyframes captionPop { from { opacity: 0; transform: scale(.7); } to { opacity: 1; transform: scale(1); } }
+@keyframes captionBlurIn { from { opacity: 0; filter: blur(8px); } to { opacity: 1; filter: blur(0); } }
 
 /* ── Range sliders (subtitle inspector) ──────────────────────────────────── */
 input[type=range] {

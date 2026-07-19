@@ -20,6 +20,7 @@
   "exportKaraoke": "karaoke",
   "exportText": "tekst",
   "exportSuccess": "Wyeksportowano do {{name}}",
+  "animationPreviewOnly": "Ta animacja to tylko podgląd — eksport ASS zachowuje zanikanie i karaoke, pozostałe typy nie są zapisywane.",
   "invertedTimingsTitle": "Odwrócone czasy",
   "invertedTimings_one": "1 napis (#{{first}}) ma czas końca nie późniejszy niż czas początku. Wyeksportować mimo to?",
   "invertedTimings_few": "{{count}} napisy mają czas końca nie późniejszy niż czas początku (pierwszy: #{{first}}). Wyeksportować mimo to?",
