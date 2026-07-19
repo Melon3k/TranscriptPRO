@@ -12,6 +12,7 @@ import { useTranslation } from "react-i18next";
 import { useSubtitleStore } from "../../stores/subtitleStore";
 import { useLogStore } from "../../stores/logStore";
 import { useNotifyStore } from "../../stores/notifyStore";
+import { useStyleStore } from "../../stores/styleStore";
 import {
   saveSrtFileDialog,
   saveTxtFileDialog,
@@ -167,7 +168,15 @@ function ExportMenu() {
     },
     {
       label: "ASS", hint: "SubStation", faithful: true, timed: true,
-      handler: async () => { const p = await saveAssFileDialog(); if (p) await exportAss(p, subtitles); return p; },
+      handler: async () => {
+        const p = await saveAssFileDialog();
+        if (p) {
+          // Read at click time — subscribing would re-render the Rail on every style tweak.
+          const { style } = useStyleStore.getState();
+          await exportAss(p, subtitles, style);
+        }
+        return p;
+      },
     },
     {
       label: "TXT", hint: t("toolbar:exportText"), faithful: false, timed: false,
