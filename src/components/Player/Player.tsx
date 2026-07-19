@@ -1,12 +1,12 @@
 import { useRef, useEffect, useCallback, useState } from "react";
-import { Play, Pause, SkipBack, SkipForward, Film, Captions, CaptionsOff } from "lucide-react";
+import { Play, Pause, SkipBack, SkipForward, Film, Captions, CaptionsOff, Move } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { usePlayerStore } from "../../stores/playerStore";
 import { useSubtitleStore } from "../../stores/subtitleStore";
 import { useStyleStore } from "../../stores/styleStore";
 import { formatDuration } from "../../lib/time-format";
-import { captionBoxCss, captionTextCss } from "../../lib/caption-style";
+import { captionBoxCss, captionTextCss, pointerToBoxPlacement, pointerToWidthPct } from "../../lib/caption-style";
 import { COLORS, FONTS } from "../../lib/ui";
 
 /**
@@ -20,12 +20,21 @@ export default function Player() {
     usePlayerStore();
   const subtitles = useSubtitleStore((s) => s.subtitles);
   const style = useStyleStore((s) => s.style);
+  const setStyle = useStyleStore((s) => s.setStyle);
   const [showSubs, setShowSubs] = useState(false);
+  const [positioning, setPositioning] = useState(false);
+  // Set during an active "move" drag so the snap guides re-render; the drag
+  // gesture itself is tracked on dragRef (no re-render needed for it).
+  const [showGuides, setShowGuides] = useState(false);
   const hasSubtitles = subtitles.length > 0;
 
   const mediaRef = useRef<HTMLVideoElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+  // Frame-sized wrapper — drag math reads its rect to derive pointer ratios.
+  const frameRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<null | "move" | "resize">(null);
+  const rafRef = useRef<number | null>(null);
   // Rendered video content box inside the stage. Captions anchor to THIS
   // rect, not the stage, so letterbox/pillarbox bars don't skew size or
   // position vs. the ASS export (which is defined relative to the frame).
@@ -61,6 +70,16 @@ export default function Player() {
       el.currentTime = currentTimeMs / 1000;
     }
   }, [currentTimeMs]);
+
+  // When subtitles disappear the corner toggles unmount, so exit positioning
+  // (and hide the overlay) — otherwise the sample box stays on screen with no
+  // control to dismiss it.
+  useEffect(() => {
+    if (!hasSubtitles) {
+      setPositioning(false);
+      setShowSubs(false);
+    }
+  }, [hasSubtitles]);
 
   const handleTimeUpdate = useCallback(() => {
     const el = mediaRef.current;
@@ -99,6 +118,78 @@ export default function Player() {
   const mediaSrc = filePath ? convertFileSrc(filePath) : undefined;
 
   const activeSub = subtitles.find((s) => currentTimeMs >= s.startTime && currentTimeMs < s.endTime);
+
+  const ratiosFromEvent = useCallback((e: React.PointerEvent) => {
+    const r = frameRef.current!.getBoundingClientRect();
+    return { rx: (e.clientX - r.left) / r.width, ry: (e.clientY - r.top) / r.height };
+  }, []);
+
+  const endDrag = useCallback((e: React.PointerEvent) => {
+    dragRef.current = null;
+    setShowGuides(false);
+    if (rafRef.current != null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    // On pointercancel the capture is already implicitly dropped, so guard the
+    // release to avoid a NotFoundError.
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+  }, []);
+
+  const onBoxPointerDown = useCallback((e: React.PointerEvent) => {
+    if (!positioning) return;
+    e.preventDefault();
+    dragRef.current = "move";
+    setShowGuides(true);
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }, [positioning]);
+
+  const onBoxPointerMove = useCallback((e: React.PointerEvent) => {
+    if (dragRef.current !== "move" || !frameRef.current) return;
+    const { rx, ry } = ratiosFromEvent(e);
+    if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+    // Read the freshest style inside the rAF so successive drags compose off
+    // committed state, not a stale render-time closure (mirrors the Inspector).
+    rafRef.current = requestAnimationFrame(() => {
+      setStyle(pointerToBoxPlacement(rx, ry, useStyleStore.getState().style));
+    });
+  }, [ratiosFromEvent, setStyle]);
+
+  const onHandlePointerDown = useCallback((e: React.PointerEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    dragRef.current = "resize";
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }, []);
+
+  const onHandlePointerMove = useCallback((e: React.PointerEvent) => {
+    if (dragRef.current !== "resize" || !frameRef.current) return;
+    const { rx } = ratiosFromEvent(e);
+    if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(() => {
+      setStyle({ widthPct: pointerToWidthPct(rx, useStyleStore.getState().style) });
+    });
+  }, [ratiosFromEvent, setStyle]);
+
+  const col = (style.boxPosition - 1) % 3;
+  const boxStyle: React.CSSProperties = {
+    ...captionBoxCss(style),
+    ...(positioning
+      ? {
+          pointerEvents: "auto" as const,
+          cursor: "move",
+          outline: `1px dashed ${COLORS.blue}`,
+          outlineOffset: 4,
+          borderRadius: 4,
+          // Pin the box to the full widthPct so the resize handle sits on the
+          // real width boundary (not the shrink-to-fit sample-text edge) and
+          // dragging gives visible feedback that matches the persisted width.
+          width: `${style.widthPct}%`,
+        }
+      : null),
+  };
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
@@ -146,10 +237,11 @@ export default function Player() {
         {/* Subtitle overlay — only rendered while enabled and a cue is active.
             No background pill: the box isn't part of the style model and the
             preview must stay honest vs. the ASS export (F2). */}
-        {showSubs && activeSub && frame && (
+        {showSubs && frame && (activeSub || positioning) && (
           // Wrapper matching the rendered video frame (videos center in the
           // stage), so captionBoxCss percentages resolve against the frame.
           <div
+            ref={frameRef}
             style={{
               position: "absolute",
               left: "50%",
@@ -160,7 +252,32 @@ export default function Player() {
               pointerEvents: "none",
             }}
           >
-            <div style={captionBoxCss(style)}>
+            {showGuides && (
+              // Column/row snap hints (33%/66%) shown only during a move drag.
+              <>
+                {[1 / 3, 2 / 3].map((f) => (
+                  <span
+                    key={`v${f}`}
+                    style={{ position: "absolute", top: 0, bottom: 0, left: `${f * 100}%`, width: 1, background: `${COLORS.blue}33` }}
+                  />
+                ))}
+                {[1 / 3, 2 / 3].map((f) => (
+                  <span
+                    key={`h${f}`}
+                    style={{ position: "absolute", left: 0, right: 0, top: `${f * 100}%`, height: 1, background: `${COLORS.blue}33` }}
+                  />
+                ))}
+              </>
+            )}
+            <div
+              style={boxStyle}
+              title={positioning ? t("player:moveCaption") : undefined}
+              aria-label={positioning ? t("player:moveCaption") : undefined}
+              onPointerDown={positioning ? onBoxPointerDown : undefined}
+              onPointerMove={positioning ? onBoxPointerMove : undefined}
+              onPointerUp={positioning ? endDrag : undefined}
+              onPointerCancel={positioning ? endDrag : undefined}
+            >
               <span
                 style={{
                   ...captionTextCss(style),
@@ -170,35 +287,53 @@ export default function Player() {
                   fontSize: `${((style.fontSize / 1080) * frame.h).toFixed(2)}px`,
                 }}
               >
-                {activeSub.text}
+                {activeSub ? activeSub.text : t("player:positionSample")}
               </span>
+              {positioning && (
+                <span
+                  onPointerDown={onHandlePointerDown}
+                  onPointerMove={onHandlePointerMove}
+                  onPointerUp={endDrag}
+                  onPointerCancel={endDrag}
+                  title={t("player:resizeWidth")}
+                  aria-label={t("player:resizeWidth")}
+                  style={{
+                    position: "absolute",
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    ...(col === 2 ? { left: -5 } : { right: -5 }),
+                    width: 10,
+                    height: 22,
+                    borderRadius: 3,
+                    background: COLORS.blue,
+                    cursor: "ew-resize",
+                    pointerEvents: "auto",
+                  }}
+                />
+              )}
             </div>
           </div>
         )}
 
-        {/* Corner toggle — enabled only when there are subtitles to show. */}
+        {/* Corner toggles — enabled only when there are subtitles to show. */}
         {hasSubtitles && (
-          <button
-            onClick={() => setShowSubs((v) => !v)}
-            title={showSubs ? t("player:hideSubtitles") : t("player:showSubtitles")}
-            style={{
-              position: "absolute",
-              top: 10,
-              right: 10,
-              width: 32,
-              height: 32,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              borderRadius: 8,
-              cursor: "pointer",
-              background: showSubs ? COLORS.blue : "rgba(8,12,18,.6)",
-              border: `1px solid ${showSubs ? COLORS.blue : "var(--c-border)"}`,
-              color: "#fff",
-            }}
-          >
-            {showSubs ? <Captions size={16} /> : <CaptionsOff size={16} />}
-          </button>
+          <div style={{ position: "absolute", top: 10, right: 10, display: "flex", gap: 6 }}>
+            <button
+              onClick={() => { setShowSubs(true); setPositioning((p) => !p); }}
+              title={positioning ? t("player:exitEditPosition") : t("player:editPosition")}
+              aria-label={positioning ? t("player:exitEditPosition") : t("player:editPosition")}
+              style={cornerBtn(positioning)}
+            >
+              <Move size={16} />
+            </button>
+            <button
+              onClick={() => { if (showSubs) setPositioning(false); setShowSubs(!showSubs); }}
+              title={showSubs ? t("player:hideSubtitles") : t("player:showSubtitles")}
+              style={cornerBtn(showSubs)}
+            >
+              {showSubs ? <Captions size={16} /> : <CaptionsOff size={16} />}
+            </button>
+          </div>
         )}
       </div>
 
@@ -251,6 +386,21 @@ export default function Player() {
       </div>
     </div>
   );
+}
+
+function cornerBtn(active: boolean): React.CSSProperties {
+  return {
+    width: 32,
+    height: 32,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 8,
+    cursor: "pointer",
+    background: active ? COLORS.blue : "rgba(8,12,18,.6)",
+    border: `1px solid ${active ? COLORS.blue : "var(--c-border)"}`,
+    color: "#fff",
+  };
 }
 
 function ctrlIcon(disabled: boolean): React.CSSProperties {

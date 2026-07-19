@@ -184,6 +184,54 @@ export function captionBoxCss(style: CaptionStyle): CSSProperties {
   return css;
 }
 
+const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
+const clamp01 = (v: number) => clamp(v, 0, 1);
+
+/** Convert a pointer position (ratios 0..1 inside the video frame) into the
+ *  existing exportable placement fields. No free X: horizontal snaps to the
+ *  ASS numpad columns and vertical to the rows, so preview == export. */
+export function pointerToBoxPlacement(
+  rx: number,
+  ry: number,
+  current: CaptionStyle,
+): Pick<CaptionStyle, "boxPosition" | "marginVPct"> {
+  const cx = clamp01(rx);
+  const cy = clamp01(ry);
+  const col = cx < 1 / 3 ? 0 : cx < 2 / 3 ? 1 : 2; // 0=left 1=center 2=right
+  const band = cy < 1 / 3 ? "top" : cy < 2 / 3 ? "middle" : "bottom";
+  const lim = STYLE_LIMITS.marginVPct;
+
+  let boxPosition: CaptionBoxPosition;
+  let marginVPct: number;
+  if (band === "top") {
+    boxPosition = (7 + col) as CaptionBoxPosition; // css.top = marginVPct%
+    marginVPct = clamp(cy * 100, lim.min, lim.max);
+  } else if (band === "bottom") {
+    boxPosition = (1 + col) as CaptionBoxPosition; // css.bottom = marginVPct%
+    marginVPct = clamp((1 - cy) * 100, lim.min, lim.max);
+  } else {
+    // captionBoxCss centers rows 4–6 and ignores marginVPct — keep current so
+    // it survives dragging back out of the middle band.
+    boxPosition = (4 + col) as CaptionBoxPosition;
+    marginVPct = current.marginVPct;
+  }
+  marginVPct = Math.round(marginVPct / lim.step) * lim.step;
+  return { boxPosition, marginVPct };
+}
+
+/** Convert a horizontal edge-drag ratio into widthPct, honoring where
+ *  captionBoxCss anchors the box for the current column. */
+export function pointerToWidthPct(rx: number, current: CaptionStyle): number {
+  const cx = clamp01(rx);
+  const col = (current.boxPosition - 1) % 3;
+  let w: number;
+  if (col === 1) w = Math.abs(cx - 0.5) * 2 * 100; // symmetric about center
+  else if (col === 0) w = (cx - 0.02) * 100; // box left edge at 2%
+  else w = (0.98 - cx) * 100; // box right edge at 2%
+  const lim = STYLE_LIMITS.widthPct;
+  return clamp(Math.round(w / lim.step) * lim.step, lim.min, lim.max);
+}
+
 /** Text styling for the caption. fontSize is NOT set here — the Player owns
  *  scaling; all derived lengths are in em so they follow it. */
 export function captionTextCss(style: CaptionStyle): CSSProperties {

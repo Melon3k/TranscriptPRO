@@ -7,6 +7,8 @@ import {
   captionBoxCss,
   captionTextCss,
   normalizeHexColor,
+  pointerToBoxPlacement,
+  pointerToWidthPct,
   sanitizeCaptionStyle,
 } from "./caption-style";
 
@@ -176,6 +178,80 @@ describe("style-control constants", () => {
     expect(normalizeHexColor("oops")).toBe("oops");
     expect(normalizeHexColor("#12345")).toBe("#12345");
     expect(normalizeHexColor("")).toBe("");
+  });
+});
+
+// ── pointerToBoxPlacement ────────────────────────────────────────────────────
+
+describe("pointerToBoxPlacement", () => {
+  it("snaps X to the three ASS columns at each vertical band", () => {
+    // bottom band (rows 1–3)
+    expect(pointerToBoxPlacement(0.1, 0.9, DEFAULT_CAPTION_STYLE).boxPosition).toBe(1);
+    expect(pointerToBoxPlacement(0.5, 0.9, DEFAULT_CAPTION_STYLE).boxPosition).toBe(2);
+    expect(pointerToBoxPlacement(0.9, 0.9, DEFAULT_CAPTION_STYLE).boxPosition).toBe(3);
+    // middle band (rows 4–6)
+    expect(pointerToBoxPlacement(0.1, 0.5, DEFAULT_CAPTION_STYLE).boxPosition).toBe(4);
+    expect(pointerToBoxPlacement(0.5, 0.5, DEFAULT_CAPTION_STYLE).boxPosition).toBe(5);
+    expect(pointerToBoxPlacement(0.9, 0.5, DEFAULT_CAPTION_STYLE).boxPosition).toBe(6);
+    // top band (rows 7–9)
+    expect(pointerToBoxPlacement(0.1, 0.1, DEFAULT_CAPTION_STYLE).boxPosition).toBe(7);
+    expect(pointerToBoxPlacement(0.5, 0.1, DEFAULT_CAPTION_STYLE).boxPosition).toBe(8);
+    expect(pointerToBoxPlacement(0.9, 0.1, DEFAULT_CAPTION_STYLE).boxPosition).toBe(9);
+  });
+
+  it("bottom band derives marginVPct from distance to the bottom edge, clamped", () => {
+    expect(pointerToBoxPlacement(0.5, 0.95, DEFAULT_CAPTION_STYLE).marginVPct).toBe(5);
+    // bottom band is cy >= 2/3; (1-0.68)*100 = 32 → clamps to max 30
+    expect(pointerToBoxPlacement(0.5, 0.68, DEFAULT_CAPTION_STYLE).marginVPct).toBe(30);
+  });
+
+  it("top band derives marginVPct from distance to the top edge, clamped", () => {
+    expect(pointerToBoxPlacement(0.5, 0.05, DEFAULT_CAPTION_STYLE).marginVPct).toBe(5);
+    // top band is cy < 1/3; 0.32*100 = 32 → clamps to max 30
+    expect(pointerToBoxPlacement(0.5, 0.32, DEFAULT_CAPTION_STYLE).marginVPct).toBe(30);
+  });
+
+  it("middle band preserves the current marginVPct unchanged", () => {
+    expect(pointerToBoxPlacement(0.5, 0.5, style({ marginVPct: 12 })).marginVPct).toBe(12);
+  });
+
+  it("marginVPct is always a multiple of the slider step", () => {
+    const step = STYLE_LIMITS.marginVPct.step;
+    for (const ry of [0.02, 0.17, 0.29, 0.71, 0.83, 0.96]) {
+      const { marginVPct } = pointerToBoxPlacement(0.5, ry, DEFAULT_CAPTION_STYLE);
+      expect(Number.isInteger(marginVPct / step)).toBe(true);
+    }
+  });
+});
+
+// ── pointerToWidthPct ────────────────────────────────────────────────────────
+
+describe("pointerToWidthPct", () => {
+  it("center column widens symmetrically about the frame center", () => {
+    expect(pointerToWidthPct(0.75, DEFAULT_CAPTION_STYLE)).toBe(50);
+    // |0.5-0.5|*2*100 = 0 → clamps to min 20
+    expect(pointerToWidthPct(0.5, DEFAULT_CAPTION_STYLE)).toBe(STYLE_LIMITS.widthPct.min);
+    // near right edge → clamps to max 100
+    expect(pointerToWidthPct(1, DEFAULT_CAPTION_STYLE)).toBe(STYLE_LIMITS.widthPct.max);
+  });
+
+  it("left column measures from the 2% left anchor", () => {
+    // (0.62-0.02)*100 = 60
+    expect(pointerToWidthPct(0.62, style({ boxPosition: 1 }))).toBe(60);
+  });
+
+  it("right column measures back to the 2% right anchor", () => {
+    // (0.98-0.38)*100 = 60
+    expect(pointerToWidthPct(0.38, style({ boxPosition: 3 }))).toBe(60);
+  });
+
+  it("result is always an integer within 20–100", () => {
+    for (const rx of [0, 0.13, 0.37, 0.62, 0.88, 1]) {
+      const w = pointerToWidthPct(rx, DEFAULT_CAPTION_STYLE);
+      expect(Number.isInteger(w)).toBe(true);
+      expect(w).toBeGreaterThanOrEqual(STYLE_LIMITS.widthPct.min);
+      expect(w).toBeLessThanOrEqual(STYLE_LIMITS.widthPct.max);
+    }
   });
 });
 

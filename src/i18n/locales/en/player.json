@@ -2,5 +2,10 @@
   "back5s": "Back 5 seconds",
   "forward5s": "Forward 5 seconds",
   "showSubtitles": "Show subtitles",
-  "hideSubtitles": "Hide subtitles"
+  "hideSubtitles": "Hide subtitles",
+  "editPosition": "Edit caption position",
+  "exitEditPosition": "Done positioning",
+  "positionSample": "Sample subtitle",
+  "resizeWidth": "Drag to resize width",
+  "moveCaption": "Drag to move caption"
 }
