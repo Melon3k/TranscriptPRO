@@ -13,10 +13,12 @@ import { useSubtitleStore } from "../../stores/subtitleStore";
 import { useLogStore } from "../../stores/logStore";
 import { useNotifyStore } from "../../stores/notifyStore";
 import { useStyleStore } from "../../stores/styleStore";
+import { usePlayerStore } from "../../stores/playerStore";
 import {
   saveSrtFileDialog,
   saveTxtFileDialog,
   saveAssFileDialog,
+  saveMp4FileDialog,
   exportWordSrt,
   exportTxt,
   exportAss,
@@ -32,10 +34,11 @@ interface RailProps {
   mode: AppMode;
   setMode: (m: AppMode) => void;
   onOpenExportPreview: () => void;
+  onStartVideoExport: (outputPath: string) => void;
 }
 
 /** Left navigation rail: workspace switcher + export menu + logs toggle. */
-export default function Rail({ mode, setMode, onOpenExportPreview }: RailProps) {
+export default function Rail({ mode, setMode, onOpenExportPreview, onStartVideoExport }: RailProps) {
   const { t } = useTranslation(["toolbar", "common"]);
   const logsOpen = useLogStore((s) => s.open);
   const toggleLogs = useLogStore((s) => s.togglePanel);
@@ -75,7 +78,7 @@ export default function Rail({ mode, setMode, onOpenExportPreview }: RailProps) 
 
       <div style={{ flex: 1 }} />
 
-      <ExportMenu onOpenExportPreview={onOpenExportPreview} />
+      <ExportMenu onOpenExportPreview={onOpenExportPreview} onStartVideoExport={onStartVideoExport} />
 
       <button
         onClick={toggleLogs}
@@ -94,14 +97,41 @@ function filename(path: string): string {
   return path.split(/[/\\]/).pop() ?? path;
 }
 
-function ExportMenu({ onOpenExportPreview }: { onOpenExportPreview: () => void }) {
+// Burn-in needs an actual video track; an audio-only project (filePath set to a
+// .mp3/.wav) has nothing to render subtitles onto, so gate on the extension.
+const VIDEO_EXT = /\.(mp4|mkv|avi|mov|webm|m4v)$/i;
+
+function ExportMenu({
+  onOpenExportPreview,
+  onStartVideoExport,
+}: {
+  onOpenExportPreview: () => void;
+  onStartVideoExport: (outputPath: string) => void;
+}) {
   const { t } = useTranslation(["toolbar", "errors"]);
   const subtitles = useSubtitleStore((s) => s.subtitles);
   const markSaved = useSubtitleStore((s) => s.markSaved);
   const notify = useNotifyStore((s) => s.notify);
+  const filePath = usePlayerStore((s) => s.filePath);
+  const videoLoaded = !!filePath && VIDEO_EXT.test(filePath);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const disabled = subtitles.length === 0;
+
+  // MP4 burn-in additionally requires a loaded video. Opens a save dialog, then
+  // hands the chosen path to the VideoExportModal (which reads style/animation
+  // and runs the ffmpeg job); it does NOT go through run() — burning in is not
+  // a project-save.
+  async function startVideoExport() {
+    setOpen(false);
+    try {
+      const base = (filePath!.split(/[/\\]/).pop() ?? "video").replace(/\.[^.]+$/, "");
+      const out = await saveMp4FileDialog(`${base}.mp4`);
+      if (out) onStartVideoExport(out);
+    } catch (e) {
+      notify("error", formatError(t, e));
+    }
+  }
 
   useEffect(() => {
     function onDown(e: MouseEvent) {
@@ -246,6 +276,30 @@ function ExportMenu({ onOpenExportPreview }: { onOpenExportPreview: () => void }
           >
             {t("toolbar:exportPreviewEntry")}
             <span style={{ ...f(400, 9), color: "var(--c-muted)" }}>{t("toolbar:exportPreviewFormats")}</span>
+          </button>
+          <button
+            onClick={() => videoLoaded && void startVideoExport()}
+            disabled={!videoLoaded}
+            title={videoLoaded ? undefined : t("toolbar:exportVideoDisabledNoVideo")}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              width: "100%",
+              height: 32,
+              padding: "0 10px",
+              borderRadius: 7,
+              cursor: videoLoaded ? "pointer" : "not-allowed",
+              background: "none",
+              border: "none",
+              color: videoLoaded ? "var(--c-text)" : "var(--c-muted)",
+              ...f(600, 11),
+            }}
+            onMouseEnter={(e) => videoLoaded && (e.currentTarget.style.background = "var(--c-hover)")}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+          >
+            {t("toolbar:exportVideo")}
+            <span style={{ ...f(400, 9), color: "var(--c-muted)" }}>{t("toolbar:exportVideoHint")}</span>
           </button>
           {items.map((item) => (
             <button

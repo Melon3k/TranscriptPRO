@@ -71,6 +71,15 @@ export async function saveAssFileDialog(
   });
 }
 
+export async function saveMp4FileDialog(
+  defaultName = "video.mp4"
+): Promise<string | null> {
+  return save({
+    filters: [{ name: "MP4 Video", extensions: ["mp4"] }],
+    defaultPath: defaultName,
+  });
+}
+
 // ── File I/O commands ────────────────────────────────────────────────────────
 
 export async function importSrt(path: string): Promise<Subtitle[]> {
@@ -144,6 +153,39 @@ export async function loadVersionHistory(
 
 export async function extractAudio(inputPath: string): Promise<string> {
   return invoke<string>("extract_audio", { inputPath });
+}
+
+// ── Video export (MP4 subtitle burn-in) ──────────────────────────────────────
+
+/**
+ * Burn the currently-loaded video's styled + animated subtitles into an MP4.
+ * Progress is reported 0..1 over a Channel, mirroring downloadModel.
+ * Only STYLE + FADE + KARAOKE burn in; slide/pop/typewriter/blur render as
+ * plain (un-animated) captions. Fonts fall back to a system face (libass +
+ * fontconfig can't read the app's bundled woff2 webview fonts).
+ */
+export async function exportVideo(
+  videoPath: string,
+  subtitles: Subtitle[],
+  style: CaptionStyle,
+  animation: CaptionAnimation,
+  outputPath: string,
+  onProgress: (progress: number) => void
+): Promise<void> {
+  const channel = new Channel<number>();
+  channel.onmessage = onProgress;
+  return invoke("export_video", {
+    videoPath,
+    subtitles,
+    style,
+    animation,
+    outputPath,
+    onProgress: channel,
+  });
+}
+
+export async function cancelVideoExport(): Promise<void> {
+  return invoke("cancel_video_export");
 }
 
 // ── Whisper model management ─────────────────────────────────────────────────

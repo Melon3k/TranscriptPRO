@@ -7,6 +7,7 @@
   "API_KEY_UNREADABLE": "Nie można odczytać zapisanego klucza API ({{detail}}) — systemowy magazyn kluczy mógł się zmienić. Usuń klucz w Ustawieniach i wpisz go ponownie.",
   "FILE_ERROR": "Błąd pliku: {{detail}}",
   "INVALID_SRT_FORMAT": "Niepoprawny format SRT: {{detail}}",
+  "VIDEO_EXPORT_FAILED": "Eksport wideo nie powiódł się: {{detail}}",
   "CANCELLED": "Operacja przerwana",
   "UNKNOWN_ERROR": "Nieoczekiwany błąd: {{detail}}"
 }

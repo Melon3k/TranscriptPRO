@@ -34,6 +34,7 @@ import LogPanel from "../LogPanel/LogPanel";
 import SettingsModal from "../Settings/SettingsModal";
 import KeyboardShortcutsModal from "../KeyboardShortcutsModal";
 import ExportPreviewModal from "./ExportPreviewModal";
+import VideoExportModal from "./VideoExportModal";
 import OnboardingWizard from "../Onboarding/OnboardingWizard";
 
 export default function MainLayout() {
@@ -54,6 +55,7 @@ export default function MainLayout() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [exportPreviewOpen, setExportPreviewOpen] = useState(false);
+  const [videoExportOut, setVideoExportOut] = useState<string | null>(null);
   const [audioPath, setAudioPath] = useState<string | null>(null);
   const [extracting, setExtracting] = useState(false);
 
@@ -207,7 +209,12 @@ export default function MainLayout() {
       <Banner />
 
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
-        <Rail mode={mode} setMode={setMode} onOpenExportPreview={() => setExportPreviewOpen(true)} />
+        <Rail
+          mode={mode}
+          setMode={setMode}
+          onOpenExportPreview={() => setExportPreviewOpen(true)}
+          onStartVideoExport={(out) => setVideoExportOut(out)}
+        />
 
         {mode === "media" ? (
           <OpenView onOpenMedia={handleOpenMedia} onImportSrt={handleImportSrt} onOpenRecent={handleOpenRecent} />
@@ -253,6 +260,7 @@ export default function MainLayout() {
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <KeyboardShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       <ExportPreviewModal open={exportPreviewOpen} onClose={() => setExportPreviewOpen(false)} />
+      <VideoExportModal outputPath={videoExportOut} onClose={() => setVideoExportOut(null)} />
       {!onboardingCompleted && <OnboardingWizard />}
 
       {isDragging && (
