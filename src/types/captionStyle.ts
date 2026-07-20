@@ -34,8 +34,10 @@ export interface CaptionStyle {
 // every missing field falls back to the default. Never rename fields; only add.
 
 // Item C: ONE global animation, a sibling of the global style in styleStore
-// (not per-segment). Two types export to ASS (fade → \fad, karaoke → \k +
-// Primary/Secondary colour split); the rest are preview-only.
+// (not per-segment). Every animation type now serializes to ASS override tags
+// (fade → \fad, karaoke → \k, pop → \fscx/\fscy \t, blur → \blur \t, slide →
+// \move, typewriter → per-char \alpha \t); only easing and perWordDelayMs stay
+// preview-only.
 export type CaptionAnimationType =
   | "none"
   | "fade"
@@ -56,9 +58,26 @@ export interface CaptionAnimation {
 // animation over DEFAULT_CAPTION_ANIMATION, so later-added fields rehydrate to
 // their defaults. Never rename fields; only add.
 
-// Only these two serialize to ASS; the others animate in the Player overlay but
-// are explicitly NOT exported (item C decision).
+// Every animation type except "none" serializes to ASS override tags; this set
+// only gates UI badges and the Rail export warning (the Rust serializer keys off
+// animation.anim_type strings directly). easing and perWordDelayMs remain
+// preview-only (ASS \t is linear; per-word entrance stagger is out of scope).
 export const EXPORTED_ANIMATIONS: ReadonlySet<CaptionAnimationType> = new Set([
   "fade",
   "karaoke",
+  "slide",
+  "pop",
+  "typewriter",
+  "blur",
+]);
+
+// Types whose entrance is exported but only approximately: they animate via ASS
+// \t (linear only), and their perWordDelayMs / easing are preview-only, so the
+// exported motion differs from the CSS preview. fade (\fad) and karaoke (\k
+// timings) map faithfully and are excluded. Gates the Rail export notice.
+export const APPROXIMATE_ANIMATIONS: ReadonlySet<CaptionAnimationType> = new Set([
+  "slide",
+  "pop",
+  "typewriter",
+  "blur",
 ]);

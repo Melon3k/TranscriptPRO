@@ -41,10 +41,10 @@ impl Drop for TempBurnDir {
 /// `resource_dir()` quirk under `tauri dev`), the burn degrades to libass
 /// system substitution (`fontsdir` omitted) rather than failing the export.
 ///
-/// Only STYLE + FADE + KARAOKE burn in — exactly what `write_ass` emits. The
-/// four preview-only animations (slide/pop/typewriter/blur) serialize to a
-/// plain body just as they do for the .ass text export, so they are silently
-/// not-animated in the burn (accepted decision).
+/// Whatever `write_ass` emits burns in — style plus every animation type
+/// (fade/karaoke and the entrance animations slide/pop/typewriter/blur, which
+/// serialize to libass override tags); only `none` is transform-free. easing
+/// and per-word delay stay preview-only (no ASS equivalent).
 #[tauri::command]
 pub async fn export_video(
     app: AppHandle,

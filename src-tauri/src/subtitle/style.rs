@@ -87,10 +87,12 @@ impl Default for CaptionStyle {
 /// `DEFAULT_CAPTION_ANIMATION` in `src/lib/caption-animation.ts` — keep field
 /// names (camelCase over IPC) and defaults in sync on both sides.
 ///
-/// Only `fade` (ASS `\fad`) and `karaoke` (ASS `\k` + Primary/Secondary colour
-/// split) are exported; `slide`/`pop`/`typewriter`/`blur` are preview-only and
-/// serialize to the plain cue body. `per_word_delay_ms` and `easing` are
-/// preview-only params (ASS `\fad` is linear) — carried for contract symmetry.
+/// Every type except `none` is exported to ASS override tags by
+/// `ass::dialogue_text`: `fade`→`\fad`, `karaoke`→`\k` + Primary/Secondary
+/// colour split, `pop`→`\fscx/\fscy \t`, `blur`→`\blur \t`, `slide`→`\move`,
+/// `typewriter`→ per-char `\alpha \t`. `per_word_delay_ms` and `easing` remain
+/// preview-only (ASS `\t`/`\fad` transitions are linear; the per-word entrance
+/// stagger is out of scope) — carried for contract symmetry.
 ///
 /// Container-level `#[serde(default)]` gives forward/backward compat, matching
 /// `CaptionStyle`.

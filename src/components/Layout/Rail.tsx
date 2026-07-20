@@ -26,7 +26,7 @@ import {
 import { ask } from "@tauri-apps/plugin-dialog";
 import { hasInvertedTiming } from "../../lib/subtitle-ops";
 import { formatError } from "../../lib/error-format";
-import { EXPORTED_ANIMATIONS } from "../../types/captionStyle";
+import { APPROXIMATE_ANIMATIONS } from "../../types/captionStyle";
 import { navStyle, f } from "../../lib/ui";
 import type { AppMode } from "./modes";
 
@@ -211,12 +211,14 @@ function ExportMenu({
         }
         return p;
       },
-      // fade/karaoke are baked into the .ass; preview-only types are not. run()
-      // folds this into the success banner (a bare notify here would be
-      // overwritten by the success banner — single-slot notifyStore).
+      // Every type is baked into the .ass now, but the \t-based entrances
+      // (slide/pop/typewriter/blur) are only approximate — linear, no per-word
+      // stagger. Notify for those. run() folds this into the success banner (a
+      // bare notify here would be overwritten by the success banner —
+      // single-slot notifyStore).
       warn: () => {
         const { animation } = useStyleStore.getState();
-        return animation.type !== "none" && !EXPORTED_ANIMATIONS.has(animation.type)
+        return APPROXIMATE_ANIMATIONS.has(animation.type)
           ? t("toolbar:animationPreviewOnly")
           : null;
       },

@@ -26,8 +26,15 @@ describe("animation constants", () => {
     expect(EASINGS).toContain(DEFAULT_CAPTION_ANIMATION.easing);
   });
 
-  it("only fade and karaoke export to ASS", () => {
-    expect([...EXPORTED_ANIMATIONS].sort()).toEqual(["fade", "karaoke"]);
+  it("all types except none export to ASS", () => {
+    expect([...EXPORTED_ANIMATIONS].sort()).toEqual([
+      "blur",
+      "fade",
+      "karaoke",
+      "pop",
+      "slide",
+      "typewriter",
+    ]);
   });
 });
 
