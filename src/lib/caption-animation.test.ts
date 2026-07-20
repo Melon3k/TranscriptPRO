@@ -46,7 +46,7 @@ describe("sanitizeCaptionAnimation", () => {
       durationMs: 600,
       perWordDelayMs: 80,
       easing: "linear" as const,
-      highlightColor: "#FACC15",
+      highlightColor: "#FACC15FF",
     };
     expect(sanitizeCaptionAnimation(persisted)).toEqual(persisted);
   });
@@ -87,7 +87,16 @@ describe("sanitizeCaptionAnimation", () => {
       DEFAULT_CAPTION_ANIMATION.highlightColor,
     );
     expect(sanitizeCaptionAnimation({ highlightColor: "#22d3ee" }).highlightColor).toBe(
-      "#22D3EE",
+      "#22D3EEFF",
+    );
+  });
+
+  it("migrates 6-digit highlightColor to opaque and preserves an 8-digit alpha", () => {
+    expect(sanitizeCaptionAnimation({ highlightColor: "#facc15" }).highlightColor).toBe(
+      "#FACC15FF",
+    );
+    expect(sanitizeCaptionAnimation({ highlightColor: "#22d3ee80" }).highlightColor).toBe(
+      "#22D3EE80",
     );
   });
 });

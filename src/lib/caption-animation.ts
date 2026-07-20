@@ -11,7 +11,7 @@ export const DEFAULT_CAPTION_ANIMATION: CaptionAnimation = {
   durationMs: 400,
   perWordDelayMs: 40,
   easing: "ease-out",
-  highlightColor: "#22D3EE",
+  highlightColor: "#22D3EEFF",
 };
 
 export type NumericAnimationField = "durationMs" | "perWordDelayMs";
@@ -70,8 +70,10 @@ export function sanitizeCaptionAnimation(persisted: unknown): CaptionAnimation {
         ? clamp(v, min, max)
         : DEFAULT_CAPTION_ANIMATION[field];
   }
+  // Accept 6- or 8-digit hex; normalizeHexColor migrates 6-digit → +FF.
   anim.highlightColor =
-    typeof anim.highlightColor === "string" && /^#[0-9a-fA-F]{6}$/.test(anim.highlightColor)
+    typeof anim.highlightColor === "string" &&
+    /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(anim.highlightColor)
       ? normalizeHexColor(anim.highlightColor)
       : DEFAULT_CAPTION_ANIMATION.highlightColor;
 

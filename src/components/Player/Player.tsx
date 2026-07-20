@@ -6,7 +6,7 @@ import { usePlayerStore } from "../../stores/playerStore";
 import { useSubtitleStore } from "../../stores/subtitleStore";
 import { useStyleStore } from "../../stores/styleStore";
 import { formatDuration } from "../../lib/time-format";
-import { captionBoxCss, captionTextCss, pointerToBoxPlacement, pointerToWidthPct } from "../../lib/caption-style";
+import { captionBoxCss, captionTextCss, hexToCssColor, pointerToBoxPlacement, pointerToWidthPct } from "../../lib/caption-style";
 import { karaokeSegments } from "../../lib/caption-animation";
 import { COLORS, FONTS } from "../../lib/ui";
 import type { CaptionAnimation, CaptionStyle } from "../../types/captionStyle";
@@ -504,7 +504,7 @@ function AnimatedCaption({
     return (
       <span style={base}>
         {karaokeSegments(sub, nowMs).map((seg, i) => (
-          <span key={i} style={{ color: seg.sung ? animation.highlightColor : style.textColor }}>
+          <span key={i} style={{ color: hexToCssColor(seg.sung ? animation.highlightColor : style.textColor) }}>
             {seg.text}
           </span>
         ))}

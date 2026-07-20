@@ -86,6 +86,11 @@ export const useStyleStore = create<StyleState>()(
       // defaults presets to [] when absent, which is safe for the existing
       // F1-persisted shape (no presets key). A version bump would trigger a
       // migrate path that risks discarding that already-persisted state.
+      // The 6-digit -> 8-digit #RRGGBBAA color migration is likewise handled
+      // by the sanitizers on the merge path below (sanitizeCaptionStyle /
+      // sanitizeCaptionAnimation append opaque FF to legacy 6-digit colors),
+      // NOT by a persist migrate(): a pre-alpha payload rehydrates and
+      // migrates to opaque 8-digit on load with zero data loss.
       version: 1,
       partialize: ({ style, presets, activePresetId, animation }) => ({
         style,

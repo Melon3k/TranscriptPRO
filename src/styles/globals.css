@@ -123,3 +123,16 @@ select, input, textarea { color-scheme: light dark; }
   font-size: 0.75rem;
   letter-spacing: 0.02em;
 }
+
+/* ── react-colorful (ColorField popover) ─────────────────────────────────── */
+/* The library needs class-based sizing that inline styles can't provide. It
+   bakes its own neutral-gray checkerboard into .react-colorful__alpha — we
+   only size it, never override the background (reads fine in both themes). */
+.tpro-colorful .react-colorful { width: 180px; height: auto; }
+.tpro-colorful .react-colorful__saturation {
+  border-radius: 6px 6px 0 0;
+  height: 130px;
+}
+.tpro-colorful .react-colorful__hue,
+.tpro-colorful .react-colorful__alpha { height: 18px; }
+.tpro-colorful .react-colorful__last-control { border-radius: 0 0 6px 6px; }

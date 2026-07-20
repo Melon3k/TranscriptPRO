@@ -42,10 +42,10 @@ export const DEFAULT_CAPTION_STYLE: CaptionStyle = {
   shadowDepth: 2,
   glow: false,
   glowStrength: 12,
-  textColor: "#FFFFFF",
-  outlineColor: "#0B0F16",
-  shadowColor: "#000000",
-  glowColor: "#22D3EE",
+  textColor: "#FFFFFFFF",
+  outlineColor: "#0B0F16FF",
+  shadowColor: "#000000FF",
+  glowColor: "#22D3EEFF",
   boxPosition: 2,
   widthPct: 62,
   marginVPct: 8,
@@ -81,10 +81,51 @@ export const STYLE_LIMITS: Record<
   marginVPct: { min: 0, max: 30, step: 0.5 },
 };
 
-/** Uppercase a native color-input value so persisted values stay canonical
- *  ("#22d3ee" → "#22D3EE"); non-#RRGGBB inputs are returned unchanged. */
+const COLOR_HEX_RE = /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/;
+
+/** Parse `#RRGGBB` (a=255) or `#RRGGBBAA` (case-insensitive) into 0–255 bytes.
+ *  Returns null for anything else so callers never build NaN color strings. */
+export function parseHexColor(
+  v: string,
+): { r: number; g: number; b: number; a: number } | null {
+  const m = /^#([0-9a-fA-F]{6})([0-9a-fA-F]{2})?$/.exec(v);
+  if (!m) return null;
+  const hex = m[1];
+  return {
+    r: parseInt(hex.slice(0, 2), 16),
+    g: parseInt(hex.slice(2, 4), 16),
+    b: parseInt(hex.slice(4, 6), 16),
+    a: m[2] ? parseInt(m[2], 16) : 255,
+  };
+}
+
+/** Compose four channels into an uppercase, zero-padded `#RRGGBBAA`. Each is
+ *  clamped to 0–255; non-finite inputs collapse to 0 (never emits NaN). */
+export function rgbaToHex8(r: number, g: number, b: number, a: number): string {
+  const byte = (n: number): string => {
+    const c = Math.min(255, Math.max(0, n));
+    const v = Number.isFinite(c) ? Math.round(c) : 0; // NaN → 0; ±Infinity saturates
+    return v.toString(16).padStart(2, "0").toUpperCase();
+  };
+  return `#${byte(r)}${byte(g)}${byte(b)}${byte(a)}`;
+}
+
+/** Convert a hex color to an `rgba()` string for the live overlay so alpha
+ *  renders even on older WebKit. Invalid input falls back to opaque black. */
+export function hexToCssColor(v: string): string {
+  const c = parseHexColor(v);
+  if (!c) return "rgba(0,0,0,1)";
+  const alpha = Math.round((c.a / 255) * 1000) / 1000;
+  return `rgba(${c.r},${c.g},${c.b},${alpha})`;
+}
+
+/** Canonicalize a color value: `#RRGGBB` → uppercase + `FF` (opaque migration),
+ *  `#RRGGBBAA` → uppercase, anything else returned unchanged (draft passthrough
+ *  current callers rely on while a value is still being edited). */
 export function normalizeHexColor(v: string): string {
-  return /^#[0-9a-fA-F]{6}$/.test(v) ? v.toUpperCase() : v;
+  if (/^#[0-9a-fA-F]{6}$/.test(v)) return `${v.toUpperCase()}FF`;
+  if (/^#[0-9a-fA-F]{8}$/.test(v)) return v.toUpperCase();
+  return v;
 }
 
 const BOOL_STYLE_FIELDS = [
@@ -141,8 +182,9 @@ export function sanitizeCaptionStyle(persisted: unknown): CaptionStyle {
   }
   for (const field of COLOR_STYLE_FIELDS) {
     const v: unknown = style[field];
+    // Accept 6- or 8-digit hex; normalizeHexColor migrates 6-digit → +FF.
     style[field] =
-      typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v)
+      typeof v === "string" && COLOR_HEX_RE.test(v)
         ? normalizeHexColor(v)
         : DEFAULT_CAPTION_STYLE[field];
   }
@@ -241,7 +283,7 @@ export function captionTextCss(style: CaptionStyle): CSSProperties {
     // Clean outline via layered shadows — avoids the "chewed" look
     // that -webkit-text-stroke produces when the stroke overlaps the fill.
     const w = em(style.outlineWidth, style.fontSize);
-    const c = style.outlineColor;
+    const c = hexToCssColor(style.outlineColor);
     layers.push(
       `-${w} -${w} 0 ${c}`,
       `${w} -${w} 0 ${c}`,
@@ -251,11 +293,13 @@ export function captionTextCss(style: CaptionStyle): CSSProperties {
   }
   if (style.shadow) {
     layers.push(
-      `0 ${em(style.shadowDepth, style.fontSize)} ${em(style.shadowDepth * 2, style.fontSize)} ${style.shadowColor}`,
+      `0 ${em(style.shadowDepth, style.fontSize)} ${em(style.shadowDepth * 2, style.fontSize)} ${hexToCssColor(style.shadowColor)}`,
     );
   }
   if (style.glow) {
-    layers.push(`0 0 ${em(style.glowStrength, style.fontSize)} ${style.glowColor}`);
+    layers.push(
+      `0 0 ${em(style.glowStrength, style.fontSize)} ${hexToCssColor(style.glowColor)}`,
+    );
   }
 
   // Persisted state can carry a fontId this build doesn't know (newer build,
@@ -273,7 +317,7 @@ export function captionTextCss(style: CaptionStyle): CSSProperties {
     // where the ASS export (\N) will — F2 honesty guarantee.
     whiteSpace: "pre-line",
     lineHeight: style.lineHeight,
-    color: style.textColor,
+    color: hexToCssColor(style.textColor),
     letterSpacing: em(style.letterSpacing, style.fontSize),
     textShadow: layers.length > 0 ? layers.join(", ") : undefined,
   };

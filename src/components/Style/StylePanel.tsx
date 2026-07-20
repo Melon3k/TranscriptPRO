@@ -1,13 +1,13 @@
-import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { Sparkles, Layers, ChevronDown, Search, Plus, RotateCcw, Copy, Trash2, Pencil, Check, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { COLORS, f, FONTS, tabStyle, sectionLabel, selectStyle, toggle } from "../../lib/ui";
 import { useStyleStore } from "../../stores/styleStore";
+import ColorField from "./ColorField";
 import {
   BOX_GRID,
   CAPTION_FONTS,
   STYLE_LIMITS,
-  normalizeHexColor,
   captionTextCss,
   type NumericStyleField,
 } from "../../lib/caption-style";
@@ -143,10 +143,10 @@ function Inspector({ t }: { t: TFn }) {
       )}
 
       <div style={{ ...sectionLabel, marginTop: 6 }}>{t("style:colors")}</div>
-      <ColorRow label={t("style:textColor")} value={style.textColor} onChange={(v) => setStyle({ textColor: v })} />
-      <ColorRow label={t("style:outline")} value={style.outlineColor} onChange={(v) => setStyle({ outlineColor: v })} />
-      <ColorRow label={t("style:shadow")} value={style.shadowColor} onChange={(v) => setStyle({ shadowColor: v })} />
-      <ColorRow label={t("style:glow")} value={style.glowColor} onChange={(v) => setStyle({ glowColor: v })} badge={t("style:previewOnly")} />
+      <ColorField label={t("style:textColor")} value={style.textColor} onChange={(v) => setStyle({ textColor: v })} hint={t("style:alphaTextHint")} />
+      <ColorField label={t("style:outline")} value={style.outlineColor} onChange={(v) => setStyle({ outlineColor: v })} />
+      <ColorField label={t("style:shadow")} value={style.shadowColor} onChange={(v) => setStyle({ shadowColor: v })} />
+      <ColorField label={t("style:glow")} value={style.glowColor} onChange={(v) => setStyle({ glowColor: v })} badge={t("style:previewOnly")} />
 
       <div style={{ ...sectionLabel, marginTop: 12 }}>{t("style:captionBox")}</div>
       <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12 }}>
@@ -285,47 +285,6 @@ function ToggleRow({ label, on, onClick, badge }: { label: string; on: boolean; 
   );
 }
 
-function ColorRow({ label, value, onChange, badge }: { label: string; value: string; onChange: (v: string) => void; badge?: string }) {
-  const { t } = useTranslation(["style"]);
-  // Draft holds in-progress (possibly invalid) text; only fully-valid #RRGGBB
-  // is committed to the store, and the effect resyncs when value flows back in.
-  const [draft, setDraft] = useState(value);
-  useEffect(() => setDraft(value), [value]);
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 9 }}>
-      <input
-        type="color"
-        value={value}
-        onChange={(e) => onChange(normalizeHexColor(e.target.value))}
-        aria-label={label}
-        style={{ width: 30, height: 22, padding: 0, border: "1px solid var(--c-border)", borderRadius: 5, background: "var(--c-input)", cursor: "pointer" }}
-      />
-      <span style={f(500, 11, "body", { color: "var(--c-text)", flex: "none" })}>{label}</span>
-      <input
-        type="text"
-        value={draft}
-        onChange={(e) => {
-          const v = e.target.value;
-          setDraft(v);
-          if (/^#[0-9a-fA-F]{6}$/.test(v)) onChange(normalizeHexColor(v));
-        }}
-        onBlur={() => {
-          if (!/^#[0-9a-fA-F]{6}$/.test(draft)) setDraft(value);
-        }}
-        maxLength={7}
-        spellCheck={false}
-        aria-label={t("style:hexInputLabel")}
-        style={{ width: 72, fontFamily: FONTS.mono, fontSize: 10, background: "var(--c-input)", border: "1px solid var(--c-border)", borderRadius: 5, color: "var(--c-text)", padding: "2px 5px", outline: "none" }}
-      />
-      {badge && (
-        <span style={f(600, 8, "body", { color: COLORS.amber, border: `1px solid ${COLORS.amber}55`, borderRadius: 4, padding: "1px 5px", letterSpacing: ".06em", textTransform: "uppercase" })}>
-          {badge}
-        </span>
-      )}
-    </div>
-  );
-}
-
 function IconBtn({ on, label, onClick, children }: { on: boolean; label: string; onClick: () => void; children: ReactNode }) {
   return (
     <button onClick={onClick} aria-pressed={on} aria-label={label} title={label} style={{ ...iconBtn(on), cursor: "pointer", padding: 0 }}>
@@ -422,7 +381,7 @@ function Animations({ t }: { t: TFn }) {
         </>
       )}
       {type === "karaoke" && (
-        <ColorRow label={t("style:anim.highlightColor")} value={animation.highlightColor} onChange={(v) => setAnimation({ highlightColor: v })} badge={t("style:anim.exported")} />
+        <ColorField label={t("style:anim.highlightColor")} value={animation.highlightColor} onChange={(v) => setAnimation({ highlightColor: v })} badge={t("style:anim.exported")} />
       )}
     </>
   );
@@ -735,11 +694,11 @@ function ActionBtn({ label, onClick, danger, children }: { label: string; onClic
   );
 }
 
-/** True if a #RRGGBB color is light enough to need a dark backdrop (Rec. 601
- *  luma). Used only to pick a contrasting preview surface; non-#RRGGBB inputs
- *  are treated as dark. */
+/** True if a color is light enough to need a dark backdrop (Rec. 601 luma).
+ *  Used only to pick a contrasting preview surface; alpha (if present) is
+ *  ignored and non-hex inputs are treated as dark. */
 function isLightColor(hex: string): boolean {
-  const m = /^#([0-9a-fA-F]{6})$/.exec(hex);
+  const m = /^#([0-9a-fA-F]{6})([0-9a-fA-F]{2})?$/.exec(hex);
   if (!m) return false;
   const n = parseInt(m[1], 16);
   const r = (n >> 16) & 255;

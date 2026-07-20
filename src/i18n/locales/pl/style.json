@@ -45,6 +45,14 @@
   },
   "colors": "KOLORY",
   "textColor": "Tekst",
+  "fields": {
+    "hex": "Hex",
+    "r": "R",
+    "g": "G",
+    "b": "B",
+    "alpha": "Alfa"
+  },
+  "alphaTextHint": "Zmniejszenie alfy koloru tekstu pogarsza czytelność — alfa najlepiej działa na cieniu, poświacie i obrysie.",
   "captionBox": "BOX NAPISÓW",
   "boxPosition": "Pozycja boxa",
   "boxPos": {
@@ -62,7 +70,6 @@
   "bottomDistance": "Odległość od dołu",
   "topDistance": "Odległość od góry",
   "reset": "Przywróć domyślne",
-  "hexInputLabel": "Wartość koloru HEX",
   "searchPreset": "Szukaj presetu…",
   "newPreset": "Nowy",
   "presets": {

@@ -45,6 +45,14 @@
   },
   "colors": "COLORS",
   "textColor": "Text",
+  "fields": {
+    "hex": "Hex",
+    "r": "R",
+    "g": "G",
+    "b": "B",
+    "alpha": "Alpha"
+  },
+  "alphaTextHint": "Lowering the text color's alpha hurts readability — alpha works best on shadow, glow and outline.",
   "captionBox": "CAPTION BOX",
   "boxPosition": "Box position",
   "boxPos": {
@@ -62,7 +70,6 @@
   "bottomDistance": "Distance from bottom",
   "topDistance": "Distance from top",
   "reset": "Reset to defaults",
-  "hexInputLabel": "Hex color value",
   "searchPreset": "Search preset…",
   "newPreset": "New",
   "presets": {

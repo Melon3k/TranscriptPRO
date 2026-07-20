@@ -215,19 +215,40 @@ fn style_line(style: &CaptionStyle, animation: &CaptionAnimation) -> String {
     )
 }
 
-/// Parse "#RRGGBB" (case-insensitive) into ASS "&H00BBGGRR" (alpha 00 =
-/// opaque, BGR byte order). On malformed input returns "&H00" + `fallback`,
-/// where `fallback` is already in BGR order (e.g. "FFFFFF" / "000000").
+/// Parse "#RRGGBB" or "#RRGGBBAA" (case-insensitive) into ASS
+/// "&HAABBGGRR" (alpha first, BGR byte order). ASS transparency is the
+/// INVERSE of RGBA alpha: 00 = fully opaque, FF = fully transparent, so
+/// `ass_alpha = 255 - rgba_alpha`. A 6-digit value is treated as opaque
+/// (rgba_alpha = 255 → ass_alpha 00), keeping opaque defaults byte-identical.
+/// On malformed input returns "&H00" + `fallback` (opaque), where `fallback`
+/// is already in BGR order (e.g. "FFFFFF" / "000000").
+///
+/// Used for PrimaryColour, SecondaryColour (karaoke), OutlineColour and
+/// BackColour in `style_line`, so alpha encodes for all four with no other
+/// changes. Because F2's `write_ass` also feeds the MP4 burn-in
+/// (video_export.rs:83), alpha burns into the MP4 for free via this function.
 fn hex_to_ass_color(hex: &str, fallback: &str) -> String {
     let parsed = hex.strip_prefix('#').and_then(|h| {
-        if h.len() == 6 && h.chars().all(|c| c.is_ascii_hexdigit()) {
-            let r = u8::from_str_radix(&h[0..2], 16).ok()?;
-            let g = u8::from_str_radix(&h[2..4], 16).ok()?;
-            let b = u8::from_str_radix(&h[4..6], 16).ok()?;
-            Some(format!("&H00{:02X}{:02X}{:02X}", b, g, r))
-        } else {
-            None
+        if !h.chars().all(|c| c.is_ascii_hexdigit()) {
+            return None;
         }
+        let (r, g, b, rgba_alpha) = match h.len() {
+            6 => (
+                u8::from_str_radix(&h[0..2], 16).ok()?,
+                u8::from_str_radix(&h[2..4], 16).ok()?,
+                u8::from_str_radix(&h[4..6], 16).ok()?,
+                255u8,
+            ),
+            8 => (
+                u8::from_str_radix(&h[0..2], 16).ok()?,
+                u8::from_str_radix(&h[2..4], 16).ok()?,
+                u8::from_str_radix(&h[4..6], 16).ok()?,
+                u8::from_str_radix(&h[6..8], 16).ok()?,
+            ),
+            _ => return None,
+        };
+        let ass_alpha = 255 - rgba_alpha;
+        Some(format!("&H{:02X}{:02X}{:02X}{:02X}", ass_alpha, b, g, r))
     });
     parsed.unwrap_or_else(|| format!("&H00{}", fallback))
 }
@@ -330,11 +351,41 @@ mod tests {
 
     #[test]
     fn test_hex_to_ass_color() {
+        // 6-digit treated as opaque (ass_alpha 00).
         assert_eq!(hex_to_ass_color("#22D3EE", "FFFFFF"), "&H00EED322");
         assert_eq!(hex_to_ass_color("#ffffff", "000000"), "&H00FFFFFF");
         // Malformed input falls back (fallback is already BGR).
         assert_eq!(hex_to_ass_color("oops", "FFFFFF"), "&H00FFFFFF");
         assert_eq!(hex_to_ass_color("#12345", "000000"), "&H00000000");
+    }
+
+    #[test]
+    fn test_hex_to_ass_color_alpha() {
+        // 8-digit opaque: AA=FF → ass_alpha 255-255=0 → &H00.
+        assert_eq!(hex_to_ass_color("#22D3EEFF", "FFFFFF"), "&H00EED322");
+        // 50%-ish: AA=0x80=128 → ass_alpha 255-128=127=0x7F.
+        assert_eq!(hex_to_ass_color("#22D3EE80", "FFFFFF"), "&H7FEED322");
+        // Fully transparent: AA=00 → ass_alpha 255=FF.
+        assert_eq!(hex_to_ass_color("#22D3EE00", "FFFFFF"), "&HFFEED322");
+        // Case-insensitive 8-digit.
+        assert_eq!(hex_to_ass_color("#22d3ee80", "FFFFFF"), "&H7FEED322");
+        // 7-digit is malformed → fallback.
+        assert_eq!(hex_to_ass_color("#22D3EE8", "000000"), "&H00000000");
+    }
+
+    #[test]
+    fn test_style_line_alpha_encodes_primary_and_back() {
+        // Semi-transparent text and shadow colours (AA=0x80 → ass_alpha 0x7F).
+        let style = CaptionStyle {
+            shadow: true,
+            shadow_color: "#00000080".to_string(),
+            text_color: "#FFFFFF80".to_string(),
+            ..CaptionStyle::default()
+        };
+        let line = style_line(&style, &CaptionAnimation::default());
+        // PrimaryColour = &H7FFFFFFF, BackColour = &H7F000000.
+        assert!(line.contains("&H7FFFFFFF"), "PrimaryColour alpha; got: {line}");
+        assert!(line.contains("&H7F000000"), "BackColour alpha; got: {line}");
     }
 
     #[test]

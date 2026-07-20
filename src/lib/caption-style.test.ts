@@ -6,9 +6,12 @@ import {
   STYLE_LIMITS,
   captionBoxCss,
   captionTextCss,
+  hexToCssColor,
   normalizeHexColor,
+  parseHexColor,
   pointerToBoxPlacement,
   pointerToWidthPct,
+  rgbaToHex8,
   sanitizeCaptionStyle,
 } from "./caption-style";
 
@@ -78,28 +81,33 @@ describe("captionBoxCss", () => {
 describe("captionTextCss", () => {
   it("default has the 4-layer outline shadow and no glow/shadow layer", () => {
     const css = captionTextCss(DEFAULT_CAPTION_STYLE);
-    // 2px outline / 48px font ≈ 0.0417em
+    // 2px outline / 48px font ≈ 0.0417em; colors emit as rgba() for alpha.
     expect(css.textShadow).toBe(
-      `-0.0417em -0.0417em 0 #0B0F16, 0.0417em -0.0417em 0 #0B0F16, ` +
-        `-0.0417em 0.0417em 0 #0B0F16, 0.0417em 0.0417em 0 #0B0F16`,
+      `-0.0417em -0.0417em 0 rgba(11,15,22,1), 0.0417em -0.0417em 0 rgba(11,15,22,1), ` +
+        `-0.0417em 0.0417em 0 rgba(11,15,22,1), 0.0417em 0.0417em 0 rgba(11,15,22,1)`,
     );
-    expect(css.textShadow).not.toContain("#22D3EE");
-    expect(css.textShadow).not.toContain("#000000");
+    expect(css.textShadow).not.toContain("rgba(34,211,238");
+    expect(css.textShadow).not.toContain("rgba(0,0,0");
   });
 
   it("glow:true appends the cyan glow layer last", () => {
     const css = captionTextCss(style({ glow: true }));
     const layers = String(css.textShadow).split(", ");
     expect(layers).toHaveLength(5);
-    expect(layers[4]).toBe("0 0 0.25em #22D3EE");
+    expect(layers[4]).toBe("0 0 0.25em rgba(34,211,238,1)");
   });
 
   it("shadow layer sits between outline and glow", () => {
     const css = captionTextCss(style({ shadow: true, glow: true }));
     const layers = String(css.textShadow).split(", ");
     expect(layers).toHaveLength(6);
-    expect(layers[4]).toBe("0 0.0417em 0.0833em #000000");
-    expect(layers[5]).toBe("0 0 0.25em #22D3EE");
+    expect(layers[4]).toBe("0 0.0417em 0.0833em rgba(0,0,0,1)");
+    expect(layers[5]).toBe("0 0 0.25em rgba(34,211,238,1)");
+  });
+
+  it("honors alpha in the outline color via rgba()", () => {
+    const css = captionTextCss(style({ outlineColor: "#0B0F1680" }));
+    expect(String(css.textShadow)).toContain("rgba(11,15,22,0.502)");
   });
 
   it("all effects off → textShadow undefined", () => {
@@ -134,7 +142,7 @@ describe("captionTextCss", () => {
     expect(css.fontFamily).toBe('"JetBrains Mono", ui-monospace, Menlo, monospace');
     expect(css.textAlign).toBe("center");
     expect(css.lineHeight).toBe(1.15);
-    expect(css.color).toBe("#FFFFFF");
+    expect(css.color).toBe("rgba(255,255,255,1)");
     expect(css.display).toBe("block");
   });
 
@@ -169,15 +177,69 @@ describe("style-control constants", () => {
     }
   });
 
-  it("normalizeHexColor uppercases valid #RRGGBB values", () => {
-    expect(normalizeHexColor("#22d3ee")).toBe("#22D3EE");
-    expect(normalizeHexColor("#FFFFFF")).toBe("#FFFFFF");
+  it("normalizeHexColor migrates #RRGGBB to opaque 8-digit uppercase", () => {
+    expect(normalizeHexColor("#22d3ee")).toBe("#22D3EEFF");
+    expect(normalizeHexColor("#FFFFFF")).toBe("#FFFFFFFF");
+  });
+
+  it("normalizeHexColor uppercases 8-digit values without touching alpha", () => {
+    expect(normalizeHexColor("#22d3ee80")).toBe("#22D3EE80");
+    expect(normalizeHexColor("#0b0f16ff")).toBe("#0B0F16FF");
   });
 
   it("normalizeHexColor returns malformed inputs unchanged", () => {
     expect(normalizeHexColor("oops")).toBe("oops");
     expect(normalizeHexColor("#12345")).toBe("#12345");
     expect(normalizeHexColor("")).toBe("");
+  });
+});
+
+// ── color-model helpers ──────────────────────────────────────────────────────
+
+describe("parseHexColor", () => {
+  it("parses 6-digit as fully opaque (a=255)", () => {
+    expect(parseHexColor("#22D3EE")).toEqual({ r: 34, g: 211, b: 238, a: 255 });
+  });
+
+  it("parses 8-digit including the alpha byte, case-insensitive", () => {
+    expect(parseHexColor("#22d3ee80")).toEqual({ r: 34, g: 211, b: 238, a: 128 });
+    expect(parseHexColor("#00000000")).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+  });
+
+  it("returns null for malformed input", () => {
+    expect(parseHexColor("red")).toBeNull();
+    expect(parseHexColor("#12345")).toBeNull();
+    expect(parseHexColor("#1234567")).toBeNull();
+    expect(parseHexColor("")).toBeNull();
+  });
+});
+
+describe("rgbaToHex8", () => {
+  it("composes an uppercase zero-padded #RRGGBBAA", () => {
+    expect(rgbaToHex8(34, 211, 238, 255)).toBe("#22D3EEFF");
+    expect(rgbaToHex8(0, 0, 0, 0)).toBe("#00000000");
+    expect(rgbaToHex8(1, 2, 3, 4)).toBe("#01020304");
+  });
+
+  it("clamps out-of-range channels to 0–255", () => {
+    expect(rgbaToHex8(-10, 300, 128, 999)).toBe("#00FF80FF");
+  });
+
+  it("never emits NaN for non-finite channels", () => {
+    expect(rgbaToHex8(NaN, Infinity, -Infinity, NaN)).toBe("#00FF0000");
+  });
+});
+
+describe("hexToCssColor", () => {
+  it("emits rgba() with alpha as a 0..1 decimal", () => {
+    expect(hexToCssColor("#22D3EE80")).toBe("rgba(34,211,238,0.502)");
+    expect(hexToCssColor("#FFFFFFFF")).toBe("rgba(255,255,255,1)");
+    expect(hexToCssColor("#22D3EE")).toBe("rgba(34,211,238,1)");
+  });
+
+  it("falls back to opaque black on invalid input", () => {
+    expect(hexToCssColor("garbage")).toBe("rgba(0,0,0,1)");
+    expect(hexToCssColor("")).toBe("rgba(0,0,0,1)");
   });
 });
 
@@ -265,8 +327,26 @@ describe("sanitizeCaptionStyle", () => {
   });
 
   it("valid persisted values pass through untouched", () => {
-    const persisted = style({ fontSize: 72, bold: false, textColor: "#FACC15" });
+    const persisted = style({ fontSize: 72, bold: false, textColor: "#FACC15FF" });
     expect(sanitizeCaptionStyle(persisted)).toEqual(persisted);
+  });
+
+  it("migrates persisted 6-digit colors to opaque 8-digit (no version bump)", () => {
+    const out = sanitizeCaptionStyle({
+      textColor: "#FACC15",
+      outlineColor: "#0b0f16",
+      shadowColor: "#000000",
+      glowColor: "#22d3ee",
+    });
+    expect(out.textColor).toBe("#FACC15FF");
+    expect(out.outlineColor).toBe("#0B0F16FF");
+    expect(out.shadowColor).toBe("#000000FF");
+    expect(out.glowColor).toBe("#22D3EEFF");
+  });
+
+  it("preserves an explicit alpha byte on 8-digit colors", () => {
+    const out = sanitizeCaptionStyle({ textColor: "#ffffff80" });
+    expect(out.textColor).toBe("#FFFFFF80");
   });
 
   it("missing fields fall back to defaults (forward-compat contract)", () => {
@@ -312,7 +392,7 @@ describe("sanitizeCaptionStyle", () => {
     } as never);
     expect(out.textColor).toBe(DEFAULT_CAPTION_STYLE.textColor);
     expect(out.outlineColor).toBe(DEFAULT_CAPTION_STYLE.outlineColor);
-    expect(out.glowColor).toBe("#22D3EE");
+    expect(out.glowColor).toBe("#22D3EEFF");
   });
 
   it("unknown enums reset to defaults", () => {
