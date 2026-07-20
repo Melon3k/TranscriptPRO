@@ -46,12 +46,16 @@ export default function VideoExportModal({ outputPath, onClose }: Props) {
     exportVideo(filePath, subtitles, style, animation, outputPath, (p) => {
       if (alive.current) setProgress(p);
     })
-      .then(() => {
+      .then((fontsEmbedded) => {
         // Burning in is not a project-save, so we do NOT markSaved().
-        notify(
-          "success",
-          t("toolbar:videoExportSuccess", { name: outputPath.split(/[/\\]/).pop() ?? outputPath }),
-        );
+        const name = outputPath.split(/[/\\]/).pop() ?? outputPath;
+        // fontsEmbedded === false is the backend degrade path (libass
+        // substituted a system face); tell the user rather than claim a match.
+        if (fontsEmbedded) {
+          notify("success", t("toolbar:videoExportSuccess", { name }));
+        } else {
+          notify("info", t("toolbar:videoExportSuccessSubstituted", { name }));
+        }
       })
       .catch((e) => {
         // User-initiated cancel closes quietly — no error banner.

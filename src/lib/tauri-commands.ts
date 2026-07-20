@@ -161,8 +161,13 @@ export async function extractAudio(inputPath: string): Promise<string> {
  * Burn the currently-loaded video's styled + animated subtitles into an MP4.
  * Progress is reported 0..1 over a Channel, mirroring downloadModel.
  * Only STYLE + FADE + KARAOKE burn in; slide/pop/typewriter/blur render as
- * plain (un-animated) captions. Fonts fall back to a system face (libass +
- * fontconfig can't read the app's bundled woff2 webview fonts).
+ * plain (un-animated) captions.
+ *
+ * Resolves to whether the bundled caption fonts were embedded: `true` = burned
+ * with the app's own faces (matches the preview); `false` = the bundled TTFs
+ * couldn't be resolved/copied (e.g. a `resource_dir()` quirk under `tauri dev`)
+ * so libass substituted a system face. The caller uses this to avoid telling
+ * the user the fonts match when they don't.
  */
 export async function exportVideo(
   videoPath: string,
@@ -171,10 +176,10 @@ export async function exportVideo(
   animation: CaptionAnimation,
   outputPath: string,
   onProgress: (progress: number) => void
-): Promise<void> {
+): Promise<boolean> {
   const channel = new Channel<number>();
   channel.onmessage = onProgress;
-  return invoke("export_video", {
+  return invoke<boolean>("export_video", {
     videoPath,
     subtitles,
     style,

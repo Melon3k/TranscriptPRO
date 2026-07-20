@@ -4,37 +4,42 @@ use crate::subtitle::types::{AppError, Subtitle};
 use crate::VideoExport;
 use std::sync::atomic::Ordering;
 use tauri::ipc::Channel;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
 use uuid::Uuid;
 
-/// RAII guard that removes the temp .ass on EVERY exit path (success, error,
-/// cancel, panic). The .ass is invisible internal plumbing — never surfaced.
-struct TempAss(std::path::PathBuf);
-impl Drop for TempAss {
+/// RAII guard that recursively removes the per-export temp directory on EVERY
+/// exit path (success, error, cancel, panic). One shot covers the .ass AND the
+/// copied TTFs — all invisible internal plumbing, never surfaced.
+struct TempBurnDir(std::path::PathBuf);
+impl Drop for TempBurnDir {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
+        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 
 /// Burn the styled + animated subtitles into an MP4 using the existing ASS
 /// serializer plus the bundled ffmpeg sidecar.
 ///
-/// Path-escaping is resolved by ELIMINATION: the .ass is written into the OS
-/// temp dir under an ASCII-only basename (`tpro_burn_<uuid>.ass`), the ffmpeg
-/// child's working directory is set to that temp dir, and only the bare
-/// basename is passed to the `ass=` filtergraph. The filtergraph therefore
-/// never sees a directory path, colon, backslash, space, apostrophe, or quote.
-/// The video input and output are ordinary argv entries (array args, no shell)
-/// so they handle spaces / apostrophes / Polish chars natively.
+/// Path-escaping is resolved by ELIMINATION: a per-export temp SUBDIRECTORY
+/// (`<tmp>/tpro_burn_<uuid>/`) holds both the ASCII-named `.ass` and the copied
+/// font TTFs, the ffmpeg child's working directory is set to that subdir, and
+/// only the bare `.ass` basename plus `fontsdir=.` (the bare current dir) go
+/// into the `ass=` filtergraph. The filtergraph therefore never sees a
+/// directory path, colon, backslash, space, apostrophe, or quote. The video
+/// input and output are ordinary argv entries (array args, no shell) so they
+/// handle spaces / apostrophes / Polish chars natively.
 ///
-/// FONTS (v1): libass reads TTF/OTF via fontconfig and cannot read the app's
-/// bundled woff2 webview fonts; Outfit/Inter/JetBrains Mono are not installed
-/// system-wide (especially on macOS), so libass substitutes a system face for
-/// the Style Fontname. This is accepted for v1 and surfaced in the progress
-/// modal. Bundling real TTF/OTF + `fontsdir=` is a deliberately deferred
-/// follow-up (it would re-introduce a path-escaping surface for fontsdir).
+/// FONTS: the burn resolves the bundled Regular+Bold TTFs from
+/// `resource_dir()/fonts`, copies them into the per-export temp subdir, and
+/// passes `fontsdir=.` so libass renders the real Outfit / Inter / JetBrains
+/// Mono faces (each TTF's name-table family equals the ASS Style Fontname, so
+/// libass matches instead of substituting). Only Regular+Bold ship, so italic
+/// is faux-synthesized by libass — matching the CSS-synthesized italic in the
+/// on-screen preview. If the bundled fonts can't be resolved or copied (e.g. a
+/// `resource_dir()` quirk under `tauri dev`), the burn degrades to libass
+/// system substitution (`fontsdir` omitted) rather than failing the export.
 ///
 /// Only STYLE + FADE + KARAOKE burn in — exactly what `write_ass` emits. The
 /// four preview-only animations (slide/pop/typewriter/blur) serialize to a
@@ -50,7 +55,7 @@ pub async fn export_video(
     animation: CaptionAnimation,
     output_path: String,
     on_progress: Channel<f32>,
-) -> Result<(), AppError> {
+) -> Result<bool, AppError> {
     // 1. Validate inputs up front.
     if subtitles.is_empty() {
         return Err(AppError::VideoExportFailed("no subtitles".to_string()));
@@ -77,14 +82,50 @@ pub async fn export_video(
     // 2. Serialize ASS via the EXISTING serializer (no duplicated ASS logic).
     let ass = crate::subtitle::ass::write_ass(&subtitles, &style, &animation);
 
-    // 3. Temp .ass — ASCII-only basename in the temp dir; the RAII guard
-    //    removes it on every exit path.
-    let temp_dir = std::env::temp_dir();
-    let ass_name = format!("tpro_burn_{}.ass", Uuid::new_v4().simple());
-    let ass_path = temp_dir.join(&ass_name);
+    // 3. Per-export temp subdir holding both the .ass and the copied font
+    //    TTFs; the RAII guard removes the whole dir on every exit path.
+    let burn_dir = std::env::temp_dir().join(format!("tpro_burn_{}", Uuid::new_v4().simple()));
+    std::fs::create_dir_all(&burn_dir).map_err(|e| {
+        AppError::VideoExportFailed(format!("Failed to create temp export dir: {e}"))
+    })?;
+    let _burn_guard = TempBurnDir(burn_dir.clone());
+
+    let ass_name = "subs.ass";
+    let ass_path = burn_dir.join(ass_name);
     std::fs::write(&ass_path, ass)
         .map_err(|e| AppError::VideoExportFailed(format!("Failed to write temp subtitles: {e}")))?;
-    let _ass_guard = TempAss(ass_path);
+
+    // 3b. Copy the bundled Regular+Bold TTFs next to the .ass so libass can
+    //     match them by internal family name via `fontsdir=.`. Best-effort:
+    //     any failure degrades to libass system substitution, never fatal.
+    //     Filenames are irrelevant to libass (it matches by name-table family),
+    //     so originals are preserved as-is.
+    let mut have_fonts = false;
+    if let Ok(res_dir) = app.path().resource_dir() {
+        if let Ok(entries) = std::fs::read_dir(res_dir.join("fonts")) {
+            for entry in entries.flatten() {
+                let src = entry.path();
+                let is_ttf = src
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| e.eq_ignore_ascii_case("ttf"));
+                if is_ttf {
+                    if let Some(name) = src.file_name() {
+                        if std::fs::copy(&src, burn_dir.join(name)).is_ok() {
+                            have_fonts = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if !have_fonts {
+        logger::info(
+            &app,
+            "video",
+            "bundled caption fonts unavailable; libass will substitute",
+        );
+    }
 
     // 4. Encode to a sibling temp `.part` so an existing destination is
     //    untouched until success.
@@ -109,7 +150,14 @@ pub async fn export_video(
         .sidecar("ffmpeg")
         .map_err(|e| AppError::VideoExportFailed(format!("Bundled FFmpeg sidecar unavailable: {e}")))?;
 
-    let vf = format!("ass={}", ass_name);
+    // fontsdir=. is a bare current-dir reference (no path chars), so it
+    // preserves the escape-by-elimination property. Omitted when no fonts were
+    // copied so libass falls back to system substitution.
+    let vf = if have_fonts {
+        format!("ass={}:fontsdir=.", ass_name)
+    } else {
+        format!("ass={}", ass_name)
+    };
     let tmp_out_str = tmp_out.to_string_lossy().to_string();
     let args: Vec<&str> = vec![
         "-nostdin",
@@ -142,7 +190,7 @@ pub async fn export_video(
     ];
 
     let (mut rx, child) = sidecar
-        .current_dir(&temp_dir)
+        .current_dir(&burn_dir)
         .args(args)
         .spawn()
         .map_err(|e: tauri_plugin_shell::Error| {
@@ -261,8 +309,11 @@ pub async fn export_video(
             output_path
         ),
     );
-    Ok(())
-    // _ass_guard drops here, removing the temp .ass.
+    // Return whether the bundled fonts were embedded so the UI can tell the
+    // user the truth: `true` = burned with the app's own faces (matches the
+    // preview), `false` = libass substituted a system face (degrade path).
+    Ok(have_fonts)
+    // _burn_guard drops here, recursively removing the temp subdir (.ass + TTFs).
 }
 
 /// Cancel an in-progress video export by killing the ffmpeg child process.
