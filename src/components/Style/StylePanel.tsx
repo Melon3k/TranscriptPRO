@@ -326,10 +326,13 @@ function Animations({ t }: { t: TFn }) {
                 border: `1px solid ${active ? COLORS.violet : "var(--c-border)"}`,
                 borderRadius: 8,
                 overflow: "hidden",
-                background: "#0c1017",
+                background: "var(--c-panel)",
               }}
             >
-              <div style={{ height: 60, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              {/* Dark tone only on the preview tile (so the white sample reads),
+                  NOT the whole card — the label row below must follow the theme
+                  or its var(--c-text) goes invisible in light mode. */}
+              <div style={{ height: 60, display: "flex", alignItems: "center", justifyContent: "center", background: "#0c1017" }}>
                 <span style={{ fontFamily: FONTS.display, fontWeight: 800, fontSize: 22, color: "#fff", WebkitTextStroke: "0.5px #0D1117" }}>Aa</span>
               </div>
               {at !== "none" && (
