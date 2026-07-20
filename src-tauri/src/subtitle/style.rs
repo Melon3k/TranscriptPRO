@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct CaptionStyle {
-    /// "outfit" | "inter" | "jetbrains-mono"; unknown -> Outfit.
+    /// Font FAMILY name (e.g. "Outfit", "Arial"); empty -> Outfit.
     pub font_id: String,
     /// px at the 1080p reference canvas.
     pub font_size: f64,
@@ -56,7 +56,7 @@ impl Default for CaptionStyle {
     // MUST mirror DEFAULT_CAPTION_STYLE in src/lib/caption-style.ts.
     fn default() -> Self {
         Self {
-            font_id: "outfit".to_string(),
+            font_id: "Outfit".to_string(),
             font_size: 48.0,
             letter_spacing: 0.0,
             line_height: 1.15,
@@ -126,15 +126,26 @@ impl Default for CaptionAnimation {
     }
 }
 
-/// ASS Fontname for a caption font id. Mirrors `CAPTION_FONTS[*].assName`
-/// in `src/lib/caption-style.ts` — keep in sync.
-pub fn ass_font_name(font_id: &str) -> &'static str {
-    match font_id {
-        "outfit" => "Outfit",
-        "inter" => "Inter",
-        "jetbrains-mono" => "JetBrains Mono",
-        _ => "Outfit",
-    }
+/// ASS Fontname is the caption font FAMILY name written straight through
+/// (the frontend stores the resolved family). The value is written verbatim
+/// into the comma-delimited, newline-terminated ASS `Style:` line, which has
+/// NO escaping for those separators — a family name may legally contain a
+/// comma (fontdb name-table strings like "Foo, Condensed") or, if hand-edited,
+/// a control char. Any such character is stripped: a stray comma would shift
+/// every later Style field (libass then mis-parses size/colour/alignment or
+/// rejects the style) and a newline would terminate the line early. Whatever
+/// survives is what libass matches against installed faces; an empty result
+/// (or empty input) -> "Outfit" (the bundled default) so the line is never
+/// malformed.
+pub fn ass_font_name(font_id: &str) -> String {
+    // `is_control()` covers CR/LF/NUL and other control chars; the comma is the
+    // Style-field separator and has no ASS escape.
+    let cleaned: String = font_id
+        .chars()
+        .filter(|&c| c != ',' && !c.is_control())
+        .collect();
+    let f = cleaned.trim();
+    if f.is_empty() { "Outfit".to_string() } else { f.to_string() }
 }
 
 #[cfg(test)]
@@ -144,7 +155,7 @@ mod tests {
     #[test]
     fn test_default_matches_frontend_contract() {
         let s = CaptionStyle::default();
-        assert_eq!(s.font_id, "outfit");
+        assert_eq!(s.font_id, "Outfit");
         assert_eq!(s.font_size, 48.0);
         assert_eq!(s.box_position, 2);
         assert_eq!(s.width_pct, 62.0);
@@ -158,7 +169,7 @@ mod tests {
         let s: CaptionStyle =
             serde_json::from_str(r#"{"fontSize": 60, "futureField": true}"#).unwrap();
         assert_eq!(s.font_size, 60.0);
-        assert_eq!(s.font_id, "outfit");
+        assert_eq!(s.font_id, "Outfit");
         assert_eq!(s.box_position, 2);
     }
 
@@ -185,9 +196,22 @@ mod tests {
 
     #[test]
     fn test_ass_font_name_mapping() {
-        assert_eq!(ass_font_name("outfit"), "Outfit");
-        assert_eq!(ass_font_name("inter"), "Inter");
-        assert_eq!(ass_font_name("jetbrains-mono"), "JetBrains Mono");
-        assert_eq!(ass_font_name("nonsense"), "Outfit");
+        assert_eq!(ass_font_name("Outfit"), "Outfit");
+        assert_eq!(ass_font_name("Arial"), "Arial");
+        assert_eq!(ass_font_name("  Helvetica Neue "), "Helvetica Neue");
+        assert_eq!(ass_font_name(""), "Outfit");
+    }
+
+    #[test]
+    fn test_ass_font_name_strips_style_line_breakers() {
+        // A comma would shift every later Style field; strip it.
+        assert_eq!(ass_font_name("Foo, Condensed"), "Foo Condensed");
+        // Newline / CR would terminate the Style line early.
+        assert_eq!(ass_font_name("Foo\nBar"), "FooBar");
+        assert_eq!(ass_font_name("Foo\r\nBar"), "FooBar");
+        // A NUL (and other control chars) are dropped too.
+        assert_eq!(ass_font_name("Foo\u{0}Bar"), "FooBar");
+        // A name consisting only of separators collapses to the default.
+        assert_eq!(ass_font_name(",,,"), "Outfit");
     }
 }

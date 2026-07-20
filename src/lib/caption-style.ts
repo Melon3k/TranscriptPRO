@@ -1,34 +1,34 @@
 import type { CSSProperties } from "react";
-import type {
-  CaptionBoxPosition,
-  CaptionFontId,
-  CaptionStyle,
-} from "../types/captionStyle";
+import type { CaptionBoxPosition, CaptionStyle } from "../types/captionStyle";
 
-// assName is consumed by F2 (ASS Fontname) and item A (picker labels).
-export const CAPTION_FONTS: Record<
-  CaptionFontId,
-  { label: string; css: string; assName: string }
-> = {
-  outfit: {
-    label: "Outfit",
-    css: '"Outfit", system-ui, sans-serif',
-    assName: "Outfit",
-  },
-  inter: {
-    label: "Inter",
-    css: '"Inter", system-ui, sans-serif',
-    assName: "Inter",
-  },
-  "jetbrains-mono": {
+// The three bundled quick-picks (guaranteed-faithful defaults + offline
+// fallback); the picker lists these under a "Bundled" heading, the full
+// installed-family list below. The stored fontId is now an arbitrary family
+// name, so this is a LIST keyed by family, not an id→font map.
+export const CAPTION_FONTS: { family: string; label: string; css: string }[] = [
+  { family: "Outfit", label: "Outfit", css: '"Outfit", system-ui, sans-serif' },
+  { family: "Inter", label: "Inter", css: '"Inter", system-ui, sans-serif' },
+  {
+    family: "JetBrains Mono",
     label: "JetBrains Mono",
     css: '"JetBrains Mono", ui-monospace, Menlo, monospace',
-    assName: "JetBrains Mono",
   },
-};
+];
+
+export const BUNDLED_FAMILIES: ReadonlySet<string> = new Set(
+  CAPTION_FONTS.map((f) => f.family),
+);
+
+/** CSS font-family stack for a caption family: the bundled stack when it's one
+ *  of the three, else the (installed) system family quoted with a generic
+ *  fallback so an unknown/uninstalled name still degrades gracefully. */
+export function fontFamilyCss(family: string): string {
+  const bundled = CAPTION_FONTS.find((f) => f.family === family);
+  return bundled ? bundled.css : `"${family}", system-ui, sans-serif`;
+}
 
 export const DEFAULT_CAPTION_STYLE: CaptionStyle = {
-  fontId: "outfit",
+  fontId: "Outfit",
   fontSize: 48,
   letterSpacing: 0,
   lineHeight: 1.15,
@@ -79,6 +79,13 @@ export const STYLE_LIMITS: Record<
   glowStrength: { min: 0, max: 40, step: 1 },
   widthPct: { min: 20, max: 100, step: 1 },
   marginVPct: { min: 0, max: 30, step: 0.5 },
+};
+
+// Legacy fontId union values (pre-system-fonts) → their bundled family names.
+const LEGACY_FONT_IDS: Record<string, string> = {
+  outfit: "Outfit",
+  inter: "Inter",
+  "jetbrains-mono": "JetBrains Mono",
 };
 
 const COLOR_HEX_RE = /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/;
@@ -156,9 +163,18 @@ export function sanitizeCaptionStyle(persisted: unknown): CaptionStyle {
       : {};
   const style: CaptionStyle = { ...DEFAULT_CAPTION_STYLE, ...raw };
 
-  if (!(style.fontId in CAPTION_FONTS)) {
-    style.fontId = DEFAULT_CAPTION_STYLE.fontId;
-  }
+  // fontId is now an arbitrary family name. Migrate legacy bundled ids to
+  // family names, accept any non-empty family verbatim, else default. No
+  // persist-version bump — rides the merge→sanitize path (cf. color-alpha).
+  const fid: unknown = style.fontId;
+  const legacy =
+    typeof fid === "string" &&
+    Object.prototype.hasOwnProperty.call(LEGACY_FONT_IDS, fid)
+      ? LEGACY_FONT_IDS[fid]
+      : undefined;
+  if (legacy !== undefined) style.fontId = legacy;
+  else if (typeof fid === "string" && fid.trim() !== "") style.fontId = fid.trim();
+  else style.fontId = DEFAULT_CAPTION_STYLE.fontId;
   if (!["left", "center", "right"].includes(style.align)) {
     style.align = DEFAULT_CAPTION_STYLE.align;
   }
@@ -302,13 +318,9 @@ export function captionTextCss(style: CaptionStyle): CSSProperties {
     );
   }
 
-  // Persisted state can carry a fontId this build doesn't know (newer build,
-  // hand-edited localStorage) — fall back to the default instead of throwing.
-  const font = CAPTION_FONTS[style.fontId] ?? CAPTION_FONTS[DEFAULT_CAPTION_STYLE.fontId];
-
   return {
     display: "block",
-    fontFamily: font.css,
+    fontFamily: fontFamilyCss(style.fontId),
     fontWeight: style.bold ? 700 : 400,
     fontStyle: style.italic ? "italic" : "normal",
     textTransform: style.uppercase ? "uppercase" : "none",

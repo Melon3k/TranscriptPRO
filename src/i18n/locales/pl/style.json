@@ -7,6 +7,13 @@
   "comingSoon": "Animacje i presety efektów pojawią się w przyszłej wersji. Ta zakładka to podgląd i nie jest jeszcze aktywna.",
   "text": "TEKST",
   "font": "Czcionka",
+  "fontPicker": {
+    "bundled": "Wbudowane",
+    "system": "Czcionki systemowe",
+    "search": "Szukaj czcionek…",
+    "loading": "Ładowanie czcionek…",
+    "empty": "Brak pasujących czcionek"
+  },
   "size": "Rozmiar",
   "letterSpacing": "Odstęp liter",
   "lineHeight": "Interlinia",

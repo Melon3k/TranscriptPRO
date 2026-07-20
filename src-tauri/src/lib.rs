@@ -228,6 +228,8 @@ pub fn run() {
             commands::file_io::preview_export,
             commands::file_io::save_version_history,
             commands::file_io::load_version_history,
+            // System fonts
+            commands::fonts::list_system_fonts,
             // Audio extraction
             commands::audio::extract_audio,
             commands::audio::cancel_audio_extraction,

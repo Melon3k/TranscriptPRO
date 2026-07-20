@@ -138,7 +138,7 @@ describe("captionTextCss", () => {
   });
 
   it("uses the selected font stack and other basics", () => {
-    const css = captionTextCss(style({ fontId: "jetbrains-mono" }));
+    const css = captionTextCss(style({ fontId: "JetBrains Mono" }));
     expect(css.fontFamily).toBe('"JetBrains Mono", ui-monospace, Menlo, monospace');
     expect(css.textAlign).toBe("center");
     expect(css.lineHeight).toBe(1.15);
@@ -146,9 +146,9 @@ describe("captionTextCss", () => {
     expect(css.display).toBe("block");
   });
 
-  it("unknown fontId falls back to the default font instead of throwing", () => {
-    const css = captionTextCss(style({ fontId: "poppins" as never }));
-    expect(css.fontFamily).toBe('"Outfit", system-ui, sans-serif');
+  it("an empty/garbage family sanitizes to the default font", () => {
+    // captionTextCss does not sanitize; sanitizeCaptionStyle owns the fallback.
+    expect(sanitizeCaptionStyle({ fontId: "" }).fontId).toBe("Outfit");
   });
 
   it("preserves embedded newlines via pre-line", () => {
@@ -401,8 +401,16 @@ describe("sanitizeCaptionStyle", () => {
       align: "justify",
       boxPosition: 12,
     } as never);
-    expect(out.fontId).toBe(DEFAULT_CAPTION_STYLE.fontId);
+    // fontId is now a free family name — a system family is valid, not reset.
+    expect(out.fontId).toBe("poppins");
     expect(out.align).toBe(DEFAULT_CAPTION_STYLE.align);
     expect(out.boxPosition).toBe(DEFAULT_CAPTION_STYLE.boxPosition);
+  });
+
+  it("migrates legacy fontId ids and validates family strings", () => {
+    expect(sanitizeCaptionStyle({ fontId: "outfit" }).fontId).toBe("Outfit");
+    expect(sanitizeCaptionStyle({ fontId: "jetbrains-mono" }).fontId).toBe("JetBrains Mono");
+    expect(sanitizeCaptionStyle({ fontId: "" }).fontId).toBe("Outfit");
+    expect(sanitizeCaptionStyle({ fontId: 7 as never }).fontId).toBe("Outfit");
   });
 });

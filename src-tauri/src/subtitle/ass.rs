@@ -620,12 +620,21 @@ mod tests {
     }
 
     #[test]
-    fn test_unknown_font_falls_back_to_outfit() {
+    fn test_empty_font_falls_back_to_outfit() {
         let style = CaptionStyle {
-            font_id: "nonsense".to_string(),
+            font_id: "".to_string(),
             ..CaptionStyle::default()
         };
         assert!(style_line(&style, &CaptionAnimation::default()).starts_with("Style: Default,Outfit,"));
+    }
+
+    #[test]
+    fn test_system_family_passes_through() {
+        let style = CaptionStyle {
+            font_id: "Arial".to_string(),
+            ..CaptionStyle::default()
+        };
+        assert!(style_line(&style, &CaptionAnimation::default()).starts_with("Style: Default,Arial,"));
     }
 
     #[test]

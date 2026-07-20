@@ -1,4 +1,3 @@
-export type CaptionFontId = "outfit" | "inter" | "jetbrains-mono";
 export type CaptionAlign = "left" | "center" | "right";
 /** Caption-box anchor on the video, ASS numpad convention:
  *  1|2|3 = bottom L/C/R, 4|5|6 = middle, 7|8|9 = top. F2 writes this number
@@ -6,7 +5,7 @@ export type CaptionAlign = "left" | "center" | "right";
 export type CaptionBoxPosition = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 
 export interface CaptionStyle {
-  fontId: CaptionFontId; // "outfit"
+  fontId: string; // resolved font FAMILY name, e.g. "Outfit" | "Arial"; default "Outfit"
   fontSize: number; // px at 1080p reference height; 48
   letterSpacing: number; // px at reference size; 0
   lineHeight: number; // unitless multiplier; 1.15

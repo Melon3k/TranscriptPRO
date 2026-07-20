@@ -157,17 +157,23 @@ export async function extractAudio(inputPath: string): Promise<string> {
 
 // ── Video export (MP4 subtitle burn-in) ──────────────────────────────────────
 
+/** How the burn-in resolved the caption font.
+ *  `bundled` = app TTFs (matches the preview); `system` = an OS font resolved
+ *  by fontconfig (faithful — the same installed font the preview used);
+ *  `substituted` = bundled TTFs couldn't be copied, so libass substituted. */
+export type FontOutcome = "bundled" | "system" | "substituted";
+
 /**
  * Burn the currently-loaded video's styled + animated subtitles into an MP4.
  * Progress is reported 0..1 over a Channel, mirroring downloadModel.
  * Only STYLE + FADE + KARAOKE burn in; slide/pop/typewriter/blur render as
  * plain (un-animated) captions.
  *
- * Resolves to whether the bundled caption fonts were embedded: `true` = burned
- * with the app's own faces (matches the preview); `false` = the bundled TTFs
- * couldn't be resolved/copied (e.g. a `resource_dir()` quirk under `tauri dev`)
- * so libass substituted a system face. The caller uses this to avoid telling
- * the user the fonts match when they don't.
+ * Resolves to how the burn resolved the font: `bundled` (app TTFs, matches the
+ * preview), `system` (OS font resolved by fontconfig, faithful — the same
+ * installed font the preview used), or `substituted` (bundled TTFs unavailable,
+ * libass substituted). The caller uses this to avoid claiming a match that
+ * didn't happen.
  */
 export async function exportVideo(
   videoPath: string,
@@ -176,10 +182,10 @@ export async function exportVideo(
   animation: CaptionAnimation,
   outputPath: string,
   onProgress: (progress: number) => void
-): Promise<boolean> {
+): Promise<FontOutcome> {
   const channel = new Channel<number>();
   channel.onmessage = onProgress;
-  return invoke<boolean>("export_video", {
+  return invoke<FontOutcome>("export_video", {
     videoPath,
     subtitles,
     style,
@@ -229,6 +235,18 @@ export async function downloadLocalModel(
 
 export async function cancelLocalModelDownload(): Promise<void> {
   return invoke("cancel_local_model_download");
+}
+
+// ── System fonts ─────────────────────────────────────────────────────────────
+
+/** DISTINCT, sorted, human-readable font family names installed on the machine.
+ *  Called lazily (font control open) and cached by the caller — can be a few
+ *  hundred entries. REJECTS on failure (rather than resolving []) so the caller
+ *  can tell a transient error apart from a genuinely empty list and retry
+ *  instead of caching the failure forever. The bundled quick-picks are shown
+ *  regardless, since they come from CAPTION_FONTS, not from this call. */
+export async function listSystemFonts(): Promise<string[]> {
+  return invoke<string[]>("list_system_fonts");
 }
 
 // ── Transcription ────────────────────────────────────────────────────────────

@@ -4,9 +4,9 @@ import { useTranslation } from "react-i18next";
 import { COLORS, f, FONTS, tabStyle, sectionLabel, selectStyle, toggle } from "../../lib/ui";
 import { useStyleStore } from "../../stores/styleStore";
 import ColorField from "./ColorField";
+import FontPicker from "./FontPicker";
 import {
   BOX_GRID,
-  CAPTION_FONTS,
   STYLE_LIMITS,
   captionTextCss,
   type NumericStyleField,
@@ -22,7 +22,6 @@ import { useNotifyStore } from "../../stores/notifyStore";
 import type {
   CaptionAlign,
   CaptionEasing,
-  CaptionFontId,
   CaptionStyle,
 } from "../../types/captionStyle";
 import { EXPORTED_ANIMATIONS } from "../../types/captionStyle";
@@ -87,20 +86,8 @@ function Inspector({ t }: { t: TFn }) {
   return (
     <>
       <div style={sectionLabel}>{t("style:text")}</div>
-      <div style={{ position: "relative", marginBottom: 12 }}>
-        <select
-          value={style.fontId}
-          onChange={(e) => setStyle({ fontId: e.target.value as CaptionFontId })}
-          style={{ ...selectStyle, fontFamily: FONTS.display, fontWeight: 600 }}
-          aria-label={t("style:font")}
-        >
-          {Object.entries(CAPTION_FONTS).map(([id, font]) => (
-            <option key={id} value={id}>
-              {font.label}
-            </option>
-          ))}
-        </select>
-        <ChevronDown size={13} color="var(--c-muted)" style={{ position: "absolute", right: 10, top: 10, pointerEvents: "none" }} />
+      <div style={{ marginBottom: 12 }}>
+        <FontPicker value={style.fontId} onChange={(family) => setStyle({ fontId: family })} t={t} />
       </div>
       <StyleSlider label={t("style:size")} field="fontSize" value={style.fontSize} onChange={setNum("fontSize")} unit=" px" />
       <div style={{ display: "flex", gap: 6, margin: "0 0 12px", alignItems: "center" }}>

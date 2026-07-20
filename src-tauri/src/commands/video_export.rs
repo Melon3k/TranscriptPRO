@@ -19,6 +19,54 @@ impl Drop for TempBurnDir {
     }
 }
 
+/// Best-effort: copy EVERY installed face belonging to `family` into `dest` so
+/// libass — pointed at the dir via `fontsdir=.` — can match the requested
+/// family by its name-table entry WITHOUT depending on the bundled ffmpeg's
+/// libass having a working fontconfig provider (a static build may lack one on
+/// some platforms). Uses the SAME fontdb enumeration the picker's
+/// `list_system_fonts` sourced the family from, so a family the user could pick
+/// is a family we can resolve here.
+///
+/// Returns true iff at least one matching face file was copied — the honest
+/// signal the burn will render the requested face. Files keep their original
+/// basenames (irrelevant to libass, which matches by name-table family) and
+/// never touch the filtergraph, so the escape-by-elimination invariant holds.
+fn copy_system_family_faces(family: &str, dest: &std::path::Path) -> bool {
+    let target = family.trim().to_lowercase();
+    if target.is_empty() {
+        return false;
+    }
+    let mut db = fontdb::Database::new();
+    db.load_system_fonts();
+    let mut copied = false;
+    let mut seen: std::collections::HashSet<std::path::PathBuf> = std::collections::HashSet::new();
+    for face in db.faces() {
+        let matches = face
+            .families
+            .iter()
+            .any(|(name, _lang)| name.trim().to_lowercase() == target);
+        if !matches {
+            continue;
+        }
+        // A single file can hold several faces (e.g. a TTC or a family's
+        // weights); copy each source file at most once.
+        let path = match &face.source {
+            fontdb::Source::File(p) => p.clone(),
+            fontdb::Source::SharedFile(p, _) => p.clone(),
+            fontdb::Source::Binary(_) => continue,
+        };
+        if !seen.insert(path.clone()) {
+            continue;
+        }
+        if let Some(name) = path.file_name() {
+            if std::fs::copy(&path, dest.join(name)).is_ok() {
+                copied = true;
+            }
+        }
+    }
+    copied
+}
+
 /// Burn the styled + animated subtitles into an MP4 using the existing ASS
 /// serializer plus the bundled ffmpeg sidecar.
 ///
@@ -31,20 +79,50 @@ impl Drop for TempBurnDir {
 /// input and output are ordinary argv entries (array args, no shell) so they
 /// handle spaces / apostrophes / Polish chars natively.
 ///
-/// FONTS: the burn resolves the bundled Regular+Bold TTFs from
-/// `resource_dir()/fonts`, copies them into the per-export temp subdir, and
-/// passes `fontsdir=.` so libass renders the real Outfit / Inter / JetBrains
-/// Mono faces (each TTF's name-table family equals the ASS Style Fontname, so
-/// libass matches instead of substituting). Only Regular+Bold ship, so italic
-/// is faux-synthesized by libass — matching the CSS-synthesized italic in the
-/// on-screen preview. If the bundled fonts can't be resolved or copied (e.g. a
-/// `resource_dir()` quirk under `tauri dev`), the burn degrades to libass
-/// system substitution (`fontsdir` omitted) rather than failing the export.
+/// FONTS: the picked family (`style.font_id`) is either one of the three
+/// bundled families (Outfit / Inter / JetBrains Mono) or an arbitrary system
+/// family the user selected. The two cases resolve differently:
+///   - BUNDLED family: the burn resolves the bundled Regular+Bold TTFs from
+///     `resource_dir()/fonts`, copies them into the per-export temp subdir, and
+///     passes `fontsdir=.` so libass renders the real bundled faces (each TTF's
+///     name-table family equals the ASS Style Fontname, so libass matches
+///     instead of substituting — a guaranteed match against the app's own
+///     faces). Only Regular+Bold ship, so italic is faux-synthesized by libass
+///     — matching the CSS-synthesized italic in the on-screen preview. If those
+///     TTFs can't be resolved or copied (e.g. a `resource_dir()` quirk under
+///     `tauri dev`), the burn degrades to libass system substitution
+///     (`fontsdir` omitted) rather than failing the export.
+///   - SYSTEM family: the installed face(s) for that family are located via the
+///     SAME fontdb enumeration the picker used and copied into the per-export
+///     temp subdir, then `fontsdir=.` makes libass match them by name-table
+///     family — the same installed font the on-screen preview (CSS) used, so
+///     the burn stays faithful and does NOT depend on the bundled libass having
+///     a working fontconfig provider. If no matching face file can be located
+///     or copied (uninstalled since, a name-table casing mismatch, a
+///     binary-only source), the copy is skipped, `fontsdir` is omitted, and the
+///     export is reported as `"substituted"` rather than falsely claiming a
+///     match.
+/// `fontsdir=.` is therefore always a bare current-dir reference (bundled OR
+/// system case), preserving the escape-by-elimination invariant (no path chars
+/// reach the filtergraph).
 ///
 /// Whatever `write_ass` emits burns in — style plus every animation type
 /// (fade/karaoke and the entrance animations slide/pop/typewriter/blur, which
 /// serialize to libass override tags); only `none` is transform-free. easing
 /// and per-word delay stay preview-only (no ASS equivalent).
+///
+/// RETURNS a three-way tag describing how the font resolved, so the UI can tell
+/// the user the truth:
+///   - `"bundled"`   — bundled family + embedded app TTFs (matches the preview
+///     exactly).
+///   - `"system"`    — non-bundled family whose installed face(s) were located
+///     and embedded so libass matches them by name (faithful: the same
+///     installed font the preview used).
+///   - `"substituted"` — the requested face couldn't be embedded (a bundled
+///     family whose TTFs couldn't be resolved/copied, OR a system family that
+///     couldn't be located on disk); `fontsdir` is omitted and libass may
+///     substitute a different face (the degrade path). Never reported as a
+///     match.
 #[tauri::command]
 pub async fn export_video(
     app: AppHandle,
@@ -55,7 +133,7 @@ pub async fn export_video(
     animation: CaptionAnimation,
     output_path: String,
     on_progress: Channel<f32>,
-) -> Result<bool, AppError> {
+) -> Result<String, AppError> {
     // 1. Validate inputs up front.
     if subtitles.is_empty() {
         return Err(AppError::VideoExportFailed("no subtitles".to_string()));
@@ -79,6 +157,10 @@ pub async fn export_video(
     );
     let started = std::time::Instant::now();
 
+    // Bundled families ship as TTFs we can embed for a guaranteed match; any
+    // other family is a system font libass must resolve via fontconfig by name.
+    let bundled_family = matches!(style.font_id.trim(), "Outfit" | "Inter" | "JetBrains Mono");
+
     // 2. Serialize ASS via the EXISTING serializer (no duplicated ASS logic).
     let ass = crate::subtitle::ass::write_ass(&subtitles, &style, &animation);
 
@@ -95,36 +177,56 @@ pub async fn export_video(
     std::fs::write(&ass_path, ass)
         .map_err(|e| AppError::VideoExportFailed(format!("Failed to write temp subtitles: {e}")))?;
 
-    // 3b. Copy the bundled Regular+Bold TTFs next to the .ass so libass can
-    //     match them by internal family name via `fontsdir=.`. Best-effort:
-    //     any failure degrades to libass system substitution, never fatal.
-    //     Filenames are irrelevant to libass (it matches by name-table family),
-    //     so originals are preserved as-is.
+    // 3b. For a BUNDLED family, copy the bundled Regular+Bold TTFs next to the
+    //     .ass so libass can match them by internal family name via
+    //     `fontsdir=.`. Best-effort: any failure degrades to libass system
+    //     substitution, never fatal. Filenames are irrelevant to libass (it
+    //     matches by name-table family), so originals are preserved as-is.
+    //     For a SYSTEM family the installed face(s) are located via fontdb and
+    //     copied instead, so libass matches by name from a dir we control.
     let mut have_fonts = false;
-    if let Ok(res_dir) = app.path().resource_dir() {
-        if let Ok(entries) = std::fs::read_dir(res_dir.join("fonts")) {
-            for entry in entries.flatten() {
-                let src = entry.path();
-                let is_ttf = src
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .is_some_and(|e| e.eq_ignore_ascii_case("ttf"));
-                if is_ttf {
-                    if let Some(name) = src.file_name() {
-                        if std::fs::copy(&src, burn_dir.join(name)).is_ok() {
-                            have_fonts = true;
+    if bundled_family {
+        if let Ok(res_dir) = app.path().resource_dir() {
+            if let Ok(entries) = std::fs::read_dir(res_dir.join("fonts")) {
+                for entry in entries.flatten() {
+                    let src = entry.path();
+                    let is_ttf = src
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .is_some_and(|e| e.eq_ignore_ascii_case("ttf"));
+                    if is_ttf {
+                        if let Some(name) = src.file_name() {
+                            if std::fs::copy(&src, burn_dir.join(name)).is_ok() {
+                                have_fonts = true;
+                            }
                         }
                     }
                 }
             }
         }
-    }
-    if !have_fonts {
-        logger::info(
-            &app,
-            "video",
-            "bundled caption fonts unavailable; libass will substitute",
-        );
+        if !have_fonts {
+            logger::info(
+                &app,
+                "video",
+                "bundled caption fonts unavailable; libass will substitute",
+            );
+        }
+    } else {
+        // SYSTEM family: locate + embed the installed face(s) so libass matches
+        // the requested family by name (no fontconfig dependency). If nothing
+        // matches on disk, `have_fonts` stays false and the export is reported
+        // as "substituted" — never a false "system" match.
+        have_fonts = copy_system_family_faces(style.font_id.trim(), &burn_dir);
+        if !have_fonts {
+            logger::info(
+                &app,
+                "video",
+                format!(
+                    "requested system font '{}' not found on disk; libass will substitute",
+                    style.font_id.trim()
+                ),
+            );
+        }
     }
 
     // 4. Encode to a sibling temp `.part` so an existing destination is
@@ -151,8 +253,12 @@ pub async fn export_video(
         .map_err(|e| AppError::VideoExportFailed(format!("Bundled FFmpeg sidecar unavailable: {e}")))?;
 
     // fontsdir=. is a bare current-dir reference (no path chars), so it
-    // preserves the escape-by-elimination property. Omitted when no fonts were
-    // copied so libass falls back to system substitution.
+    // preserves the escape-by-elimination property. `have_fonts` is true
+    // whenever we embedded faces into the temp dir — bundled TTFs OR the
+    // located system-family faces (see copy_system_family_faces) — so libass
+    // matches the requested family by name. It is omitted only on the degrade
+    // path where nothing could be copied ("substituted"), letting libass
+    // substitute a default face.
     let vf = if have_fonts {
         format!("ass={}:fontsdir=.", ass_name)
     } else {
@@ -309,10 +415,25 @@ pub async fn export_video(
             output_path
         ),
     );
-    // Return whether the bundled fonts were embedded so the UI can tell the
-    // user the truth: `true` = burned with the app's own faces (matches the
-    // preview), `false` = libass substituted a system face (degrade path).
-    Ok(have_fonts)
+    // Return a three-way tag describing how the font resolved so the UI can
+    // tell the user the truth. `have_fonts` is the honest signal that the
+    // requested face was actually embedded (copied into the fontsdir libass
+    // reads); it is the gate for BOTH faithful outcomes:
+    //   - "bundled"     = a bundled family's embedded app TTFs (matches preview);
+    //   - "system"      = a non-bundled family whose installed face(s) we
+    //                     located and embedded (same face the preview used);
+    //   - "substituted" = the requested face couldn't be embedded (bundled TTFs
+    //                     unavailable OR system family not found on disk), so
+    //                     `fontsdir` was omitted and libass may substitute. We
+    //                     never claim a match we didn't embed.
+    let outcome = if !have_fonts {
+        "substituted"
+    } else if bundled_family {
+        "bundled"
+    } else {
+        "system"
+    };
+    Ok(outcome.to_string())
     // _burn_guard drops here, recursively removing the temp subdir (.ass + TTFs).
 }
 

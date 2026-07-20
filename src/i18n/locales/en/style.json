@@ -7,6 +7,13 @@
   "comingSoon": "Animations and effect presets are coming in a future release. This tab is a preview and is not active yet.",
   "text": "TEXT",
   "font": "Font",
+  "fontPicker": {
+    "bundled": "Bundled",
+    "system": "System fonts",
+    "search": "Search fonts…",
+    "loading": "Loading fonts…",
+    "empty": "No fonts match"
+  },
   "size": "Size",
   "letterSpacing": "Letter spacing",
   "lineHeight": "Line height",
