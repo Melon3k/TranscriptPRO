@@ -1,4 +1,4 @@
-import { useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { Sparkles, Layers, ChevronDown, Search, Plus, RotateCcw, Copy, Trash2, Pencil, Check, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { COLORS, f, FONTS, tabStyle, sectionLabel, selectStyle, toggle } from "../../lib/ui";
@@ -18,6 +18,7 @@ import {
   type NumericAnimationField,
 } from "../../lib/caption-animation";
 import { BUILTIN_PRESETS, uniquePresetName } from "../../lib/caption-presets";
+import { useNotifyStore } from "../../stores/notifyStore";
 import type {
   CaptionAlign,
   CaptionEasing,
@@ -285,6 +286,11 @@ function ToggleRow({ label, on, onClick, badge }: { label: string; on: boolean; 
 }
 
 function ColorRow({ label, value, onChange, badge }: { label: string; value: string; onChange: (v: string) => void; badge?: string }) {
+  const { t } = useTranslation(["style"]);
+  // Draft holds in-progress (possibly invalid) text; only fully-valid #RRGGBB
+  // is committed to the store, and the effect resyncs when value flows back in.
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 9 }}>
       <input
@@ -295,7 +301,22 @@ function ColorRow({ label, value, onChange, badge }: { label: string; value: str
         style={{ width: 30, height: 22, padding: 0, border: "1px solid var(--c-border)", borderRadius: 5, background: "var(--c-input)", cursor: "pointer" }}
       />
       <span style={f(500, 11, "body", { color: "var(--c-text)", flex: "none" })}>{label}</span>
-      <span style={{ fontFamily: FONTS.mono, fontWeight: 500, fontSize: 9, color: "var(--c-muted)" }}>{value}</span>
+      <input
+        type="text"
+        value={draft}
+        onChange={(e) => {
+          const v = e.target.value;
+          setDraft(v);
+          if (/^#[0-9a-fA-F]{6}$/.test(v)) onChange(normalizeHexColor(v));
+        }}
+        onBlur={() => {
+          if (!/^#[0-9a-fA-F]{6}$/.test(draft)) setDraft(value);
+        }}
+        maxLength={7}
+        spellCheck={false}
+        aria-label={t("style:hexInputLabel")}
+        style={{ width: 72, fontFamily: FONTS.mono, fontSize: 10, background: "var(--c-input)", border: "1px solid var(--c-border)", borderRadius: 5, color: "var(--c-text)", padding: "2px 5px", outline: "none" }}
+      />
       {badge && (
         <span style={f(600, 8, "body", { color: COLORS.amber, border: `1px solid ${COLORS.amber}55`, borderRadius: 4, padding: "1px 5px", letterSpacing: ".06em", textTransform: "uppercase" })}>
           {badge}
@@ -349,15 +370,15 @@ function Animations({ t }: { t: TFn }) {
                 background: "#0c1017",
               }}
             >
-              <div style={{ height: 48, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <span style={{ fontFamily: FONTS.display, fontWeight: 800, fontSize: 14, color: "#fff", WebkitTextStroke: "0.5px #0D1117" }}>Aa</span>
+              <div style={{ height: 60, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <span style={{ fontFamily: FONTS.display, fontWeight: 800, fontSize: 22, color: "#fff", WebkitTextStroke: "0.5px #0D1117" }}>Aa</span>
               </div>
               {at !== "none" && (
                 <span style={{ position: "absolute", top: 4, right: 4, ...badge(exported ? COLORS.cyan : COLORS.amber) }}>
                   {exported ? t("style:anim.exported") : t("style:previewOnly")}
                 </span>
               )}
-              <div style={{ ...f(600, 9), padding: "5px 8px", borderTop: "1px solid var(--c-border)", color: active ? COLORS.violetLight : "var(--c-text)" }}>
+              <div style={{ ...f(600, 10), padding: "5px 8px", borderTop: "1px solid var(--c-border)", color: active ? COLORS.violetLight : "var(--c-text)" }}>
                 {t(`style:anim.types.${at}`)}
               </div>
             </button>
@@ -471,6 +492,7 @@ function Effects({ t }: { t: TFn }) {
   const addPreset = useStyleStore((s) => s.addPreset);
   const updatePreset = useStyleStore((s) => s.updatePreset);
   const deletePreset = useStyleStore((s) => s.deletePreset);
+  const notify = useNotifyStore((s) => s.notify);
 
   const [search, setSearch] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -488,6 +510,7 @@ function Effects({ t }: { t: TFn }) {
     const id = addPreset(uniquePresetName(t("style:presets.defaultName"), allNames), style);
     setEditingId(id);
     setSearch("");
+    notify("success", t("style:presets.saved"));
   };
 
   return (
@@ -528,7 +551,10 @@ function Effects({ t }: { t: TFn }) {
                 const id = addPreset(uniquePresetName(preset.name, allNames), preset.style);
                 setEditingId(id);
               }}
-              onSaveOver={() => updatePreset(preset.id, { style })}
+              onSaveOver={() => {
+                updatePreset(preset.id, { style });
+                notify("success", t("style:presets.saved"));
+              }}
               onRename={(name) => updatePreset(preset.id, { name })}
               setEditing={(on) => setEditingId(on ? preset.id : null)}
               onDeleteRequest={() => setConfirmDeleteId(preset.id)}
@@ -606,8 +632,8 @@ function PresetCard({
     >
       {/* Preview surface picks the tone that contrasts the sample's text color,
           so a dark-text preset stays legible (independent of the app theme). */}
-      <div style={{ position: "relative", height: 44, display: "flex", alignItems: "center", justifyContent: "center", background: isLightColor(preset.style.textColor) ? "#0c1017" : "#e9edf2" }}>
-        <span style={{ ...captionTextCss(preset.style), fontSize: 22, whiteSpace: "nowrap" }}>Aa</span>
+      <div style={{ position: "relative", height: 56, display: "flex", alignItems: "center", justifyContent: "center", background: isLightColor(preset.style.textColor) ? "#0c1017" : "#e9edf2" }}>
+        <span style={{ ...captionTextCss(preset.style), fontSize: 30, whiteSpace: "nowrap" }}>Aa</span>
         {active && (
           <span style={{ position: "absolute", top: 4, right: 4, ...badge(COLORS.cyan) }}>{t("style:presets.active")}</span>
         )}
@@ -644,11 +670,11 @@ function PresetCard({
               }
             }}
             onBlur={(e) => commit(e.currentTarget.value)}
-            style={{ flex: 1, minWidth: 0, height: 20, padding: "0 5px", background: "var(--c-input)", border: `1px solid ${COLORS.blue}`, borderRadius: 5, color: "var(--c-text)", outline: "none", ...f(600, 9, "body") }}
+            style={{ flex: 1, minWidth: 0, height: 20, padding: "0 5px", background: "var(--c-input)", border: `1px solid ${COLORS.blue}`, borderRadius: 5, color: "var(--c-text)", outline: "none", ...f(600, 10, "body") }}
           />
         ) : preset.builtin ? (
           <>
-            <span style={f(600, 9, "body", { flex: 1, minWidth: 0, color: "var(--c-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>
+            <span style={f(600, 10, "body", { flex: 1, minWidth: 0, color: "var(--c-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>
               {preset.name}
             </span>
             <ActionBtn label={t("style:presets.duplicate")} onClick={stop(onDuplicate)}>
@@ -660,7 +686,7 @@ function PresetCard({
             <button
               onClick={stop(() => setEditing(true))}
               title={t("style:presets.rename")}
-              style={{ flex: 1, minWidth: 0, textAlign: "left", background: "none", border: "none", padding: 0, cursor: "text", color: "var(--c-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", ...f(600, 9, "body") }}
+              style={{ flex: 1, minWidth: 0, textAlign: "left", background: "none", border: "none", padding: 0, cursor: "text", color: "var(--c-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", ...f(600, 10, "body") }}
             >
               {preset.name}
             </button>

@@ -29,6 +29,11 @@ export const FONTS = {
 
 type FontFamilyKey = keyof typeof FONTS;
 
+// Right-panel width. Style mode is wider so the Effects/Animations preview
+// cards fit their previews and names; every other panel keeps the base width.
+export const PANEL_WIDTH = 328;
+export const STYLE_PANEL_WIDTH = 440;
+
 /** CSS `font` shorthand → style object. e.g. f(600, 12, "display"). */
 export function f(
   weight: number,

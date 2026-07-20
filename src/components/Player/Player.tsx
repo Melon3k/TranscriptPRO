@@ -26,6 +26,13 @@ export default function Player() {
   const animation = useStyleStore((s) => s.animation);
   const setStyle = useStyleStore((s) => s.setStyle);
   const [showSubs, setShowSubs] = useState(false);
+  // Smoothed playhead for the caption overlay ONLY. The media element's
+  // `timeupdate` fires ~4Hz on WKWebView, which makes the playhead-driven
+  // caption animations (fade / typewriter / karaoke) step visibly. A rAF loop
+  // samples the media clock at ~60fps while playing so they ramp smoothly.
+  // Kept Player-local (not pushed into the store) so the segment list — which
+  // derives its active-row highlight from the store — does not re-render 60×/s.
+  const [smoothMs, setSmoothMs] = useState(0);
   const [positioning, setPositioning] = useState(false);
   // Set during an active "move" drag so the snap guides re-render; the drag
   // gesture itself is tracked on dragRef (no re-render needed for it).
@@ -87,8 +94,24 @@ export default function Player() {
 
   const handleTimeUpdate = useCallback(() => {
     const el = mediaRef.current;
-    if (el) setCurrentTimeMs(el.currentTime * 1000);
+    if (el) {
+      setCurrentTimeMs(el.currentTime * 1000);
+      setSmoothMs(el.currentTime * 1000); // keep the overlay clock fresh when paused/seeking
+    }
   }, [setCurrentTimeMs]);
+
+  // ~60fps caption clock while playing (see smoothMs). Cancels on pause/unmount.
+  useEffect(() => {
+    if (!isPlaying) return;
+    let raf = 0;
+    const tick = () => {
+      const el = mediaRef.current;
+      if (el) setSmoothMs(el.currentTime * 1000);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [isPlaying]);
 
   const handleLoadedMetadata = useCallback(() => {
     const el = mediaRef.current;
@@ -121,7 +144,10 @@ export default function Player() {
   const progressPercent = duration > 0 ? (currentTimeMs / 1000 / duration) * 100 : 0;
   const mediaSrc = filePath ? convertFileSrc(filePath) : undefined;
 
-  const activeSub = subtitles.find((s) => currentTimeMs >= s.startTime && currentTimeMs < s.endTime);
+  // Overlay uses the smooth clock while playing; the store value (4Hz, fresh on
+  // seek/pause) is authoritative otherwise. Both agree to within one frame.
+  const overlayMs = isPlaying ? smoothMs : currentTimeMs;
+  const activeSub = subtitles.find((s) => overlayMs >= s.startTime && overlayMs < s.endTime);
 
   const ratiosFromEvent = useCallback((e: React.PointerEvent) => {
     const r = frameRef.current!.getBoundingClientRect();
@@ -289,7 +315,7 @@ export default function Player() {
                 style={style}
                 animation={animation}
                 sub={activeSub ?? null}
-                nowMs={currentTimeMs}
+                nowMs={overlayMs}
                 frameH={frame.h}
               />
               {positioning && (
@@ -437,9 +463,17 @@ function AnimatedCaption({
     // to match the exported ASS \fad (which is linear).
     const remaining = sub.endTime - nowMs;
     const fadingOut = remaining < animation.durationMs;
-    const spanStyle: React.CSSProperties = fadingOut
-      ? { ...base, opacity: Math.max(0, remaining / animation.durationMs) }
-      : { ...base, animation: `captionFadeIn ${animation.durationMs}ms linear both` };
+    const spanStyle: React.CSSProperties = {
+      ...base,
+      // fade-in: one-shot mount animation with NO fill, so when it ends opacity
+      // falls back to the inline value. fade-out opacity is computed per frame
+      // from the playhead (not a CSS transition) so it tracks seeks/pauses and
+      // still shows for cues shorter than durationMs.
+      animationName: fadingOut ? undefined : "captionFadeIn",
+      animationDuration: fadingOut ? undefined : `${animation.durationMs}ms`,
+      animationTimingFunction: "linear",
+      opacity: fadingOut ? Math.max(0, remaining / animation.durationMs) : 1,
+    };
     return <span style={spanStyle}>{sub.text}</span>;
   }
 

@@ -340,6 +340,7 @@ function WordChips({
       key={`w${wi}`}
       onClick={(e) => onWordClick(e, wi)}
       onPointerDown={(e) => onWordPointerDown(e, wi)}
+      onContextMenu={(e) => e.preventDefault()}
       style={chip(wi)}
     >
       {w.text}

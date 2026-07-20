@@ -80,19 +80,18 @@ export default function SubtitleEditor() {
   const wordDrop = useCallback(
     (payload: WordDragPayload, targetId: string, insertAt?: number) => {
       moveWords(payload.sourceSubId, payload.wordIndices, targetId, insertAt);
-      setSelectedWords((prev) => {
-        const next = new Map(prev);
-        next.delete(payload.sourceSubId);
-        return next;
-      });
+      // Full clear: the move reindexes both segments, so index-keyed Sets are stale.
+      clearSelection();
     },
-    [moveWords],
+    [moveWords, clearSelection],
   );
 
   const { dragging, hover, ghostRef, ghostLabel, startDrag } = useWordDrag(wordDrop, listRef);
 
   const selectSeg = useCallback(
     (id: string) => {
+      // Row clicks only seek/select the row; word selections persist so users
+      // can check timing mid-move without rebuilding a cross-segment selection.
       setSelectedId(id);
       const seg = subtitles.find((s) => s.id === id);
       if (seg) setCurrentTimeMs(seg.startTime);

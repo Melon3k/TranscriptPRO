@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "react-i18next";
 import { Upload } from "lucide-react";
-import { COLORS, f } from "../../lib/ui";
+import { COLORS, f, PANEL_WIDTH, STYLE_PANEL_WIDTH } from "../../lib/ui";
 import {
   setDirty, exitApp, cancelAudioExtraction,
   openMediaFileDialog, openSrtFileDialog,
@@ -228,7 +228,7 @@ export default function MainLayout() {
 
             <div
               style={{
-                width: 328,
+                width: mode === "style" ? STYLE_PANEL_WIDTH : PANEL_WIDTH,
                 flex: "none",
                 background: "var(--c-panel)",
                 borderLeft: "1px solid var(--c-border)",

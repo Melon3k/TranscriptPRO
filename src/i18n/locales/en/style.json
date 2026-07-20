@@ -62,6 +62,7 @@
   "bottomDistance": "Distance from bottom",
   "topDistance": "Distance from top",
   "reset": "Reset to defaults",
+  "hexInputLabel": "Hex color value",
   "searchPreset": "Search preset…",
   "newPreset": "New",
   "presets": {
@@ -80,6 +81,7 @@
     "defaultName": "My preset",
     "builtinBadge": "Built-in",
     "active": "Active",
-    "empty": "No presets match your search."
+    "empty": "No presets match your search.",
+    "saved": "Preset saved"
   }
 }
