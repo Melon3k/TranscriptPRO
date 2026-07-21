@@ -560,3 +560,243 @@ mod tests {
         assert_eq!("progress=end".trim(), "progress=end");
     }
 }
+
+/// End-to-end burn smoke: drive a REAL ffmpeg over the exact `write_ass` output
+/// + filtergraph shape that `export_video` uses, and assert an MP4 with a video
+/// stream comes out. This is the automated proxy for the manual "burn a styled
+/// MP4 and eyeball it" release check (BACKLOG: MP4 burn-in was verified by
+/// fixture-frame inspection, never by an automated run).
+///
+/// What it guards against, that the string-only parser tests above cannot:
+///   - `write_ass` emitting ASS that libass rejects (a parse error aborts the
+///     burn — caught here as a non-zero ffmpeg exit / missing output),
+///   - the `ass=<basename>:fontsdir=.` + `current_dir` bundled-font recipe
+///     silently breaking,
+///   - any animation variant ("all animations now export/burn") producing a
+///     filtergraph libass won't accept.
+///
+/// Gated on an ffmpeg with the `ass` filter (the shipped sidecar has one; a dev
+/// Homebrew ffmpeg does too). Set `TPRO_TEST_FFMPEG` to point at a specific
+/// binary. When no suitable ffmpeg is found the test SKIPS with a printed
+/// notice rather than failing — it must never be a false red on a machine that
+/// simply lacks ffmpeg, but the skip is always logged (never silent).
+///
+/// NOTE: the ffmpeg args here MUST mirror `export_video` (see the `-vf` +
+/// encoder block around the `sidecar("ffmpeg")` call). If that invocation
+/// changes, update this test in lockstep.
+#[cfg(test)]
+mod burn_smoke {
+    use crate::subtitle::style::{CaptionAnimation, CaptionStyle};
+    use crate::subtitle::types::Subtitle;
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+    use uuid::Uuid;
+
+    fn sub(index: usize, start_ms: u64, end_ms: u64, text: &str) -> Subtitle {
+        Subtitle {
+            id: Uuid::new_v4().to_string(),
+            index,
+            start_time: start_ms,
+            end_time: end_ms,
+            text: text.to_string(),
+            words: Vec::new(),
+            speaker: None,
+        }
+    }
+
+    /// Locate an ffmpeg with the `ass` filter compiled in. Returns None (with a
+    /// logged reason) when the environment can't run the smoke.
+    fn find_ffmpeg_with_ass() -> Option<String> {
+        let bin = std::env::var("TPRO_TEST_FFMPEG").unwrap_or_else(|_| "ffmpeg".to_string());
+        // A provided path (possibly relative, e.g. the CI sidecar) is made
+        // absolute so it still resolves once the burn runs with `current_dir`
+        // set to a temp folder. A bare command name ("ffmpeg") fails to
+        // canonicalize and is left for PATH resolution.
+        let bin = std::fs::canonicalize(&bin)
+            .map(|abs| abs.to_string_lossy().into_owned())
+            .unwrap_or(bin);
+        let out = match Command::new(&bin).arg("-hide_banner").arg("-filters").output() {
+            Ok(o) => o,
+            Err(e) => {
+                eprintln!("[burn_smoke] SKIP: cannot run '{bin}' (-filters): {e}");
+                return None;
+            }
+        };
+        let filters = String::from_utf8_lossy(&out.stdout);
+        // ffmpeg -filters lines look like: " ... ass  V->V  Render ASS subtitles..."
+        let has_ass = filters
+            .lines()
+            .any(|l| l.split_whitespace().nth(1) == Some("ass"));
+        if !has_ass {
+            eprintln!("[burn_smoke] SKIP: ffmpeg '{bin}' has no `ass` filter (libass missing)");
+            return None;
+        }
+        Some(bin)
+    }
+
+    /// Copy the bundled caption TTFs (Regular+Bold of Outfit/Inter/JetBrains
+    /// Mono) next to the .ass, exactly as the bundled-family burn path does.
+    fn copy_bundled_fonts(dest: &Path) -> bool {
+        let fonts_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("fonts");
+        let Ok(entries) = std::fs::read_dir(&fonts_dir) else {
+            return false;
+        };
+        let mut any = false;
+        for entry in entries.flatten() {
+            let src = entry.path();
+            let is_ttf = src
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| e.eq_ignore_ascii_case("ttf"));
+            if is_ttf {
+                if let Some(name) = src.file_name() {
+                    if std::fs::copy(&src, dest.join(name)).is_ok() {
+                        any = true;
+                    }
+                }
+            }
+        }
+        any
+    }
+
+    /// Run ffmpeg and return (success, combined stderr).
+    fn run(bin: &str, cwd: &Path, args: &[&str]) -> (bool, String) {
+        let out = Command::new(bin)
+            .current_dir(cwd)
+            .args(args)
+            .output()
+            .expect("ffmpeg spawn failed");
+        let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+        (out.status.success(), stderr)
+    }
+
+    #[test]
+    fn styled_subtitles_burn_into_a_playable_mp4() {
+        let Some(ffmpeg) = find_ffmpeg_with_ass() else {
+            return; // environment gate — reason already logged
+        };
+
+        let dir = std::env::temp_dir().join(format!("tpro_burn_smoke_{}", Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&dir).unwrap();
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let _guard = Cleanup(dir.clone());
+
+        // 1. A 1-second silent test clip to burn onto (absolute path input).
+        let input = dir.join("input.mp4");
+        let input_str = input.to_string_lossy().to_string();
+        let (ok, err) = run(
+            &ffmpeg,
+            &dir,
+            &[
+                "-nostdin", "-y", "-f", "lavfi", "-i",
+                "color=c=black:s=320x180:d=1:r=15", "-c:v", "libx264", "-t", "1", &input_str,
+            ],
+        );
+        assert!(ok, "generating the test input clip failed:\n{err}");
+        assert!(input.exists(), "test input clip was not written");
+
+        // 2. The app's own ASS, with the default (bundled Outfit) style, plus
+        //    Unicode + a brace to exercise escaping.
+        let subs = vec![sub(1, 0, 900, "Smoke żółć {test}")];
+        let ass = crate::subtitle::ass::write_ass(&subs, &CaptionStyle::default(), &CaptionAnimation::default());
+        let ass_name = "smoke.ass";
+        std::fs::write(dir.join(ass_name), &ass).unwrap();
+
+        let have_fonts = copy_bundled_fonts(&dir);
+        // Bundled TTFs live in-repo; if this ever regresses the burn would fall
+        // back to substitution, which is a real signal worth failing on here.
+        assert!(have_fonts, "bundled caption fonts were not copied from src-tauri/fonts");
+
+        // 3. Burn — same filtergraph + encoder flags as `export_video`.
+        let out = dir.join("out.mp4");
+        let out_str = out.to_string_lossy().to_string();
+        let vf = format!("ass={ass_name}:fontsdir=.");
+        let (ok, err) = run(
+            &ffmpeg,
+            &dir,
+            &[
+                "-nostdin", "-y", "-i", &input_str, "-vf", &vf, "-c:v", "libx264",
+                "-preset", "veryfast", "-crf", "18", "-c:a", "aac", "-f", "mp4", &out_str,
+            ],
+        );
+        assert!(ok, "burn-in ffmpeg run failed (libass likely rejected the ASS):\n{err}");
+        let size = std::fs::metadata(&out).map(|m| m.len()).unwrap_or(0);
+        assert!(size > 1024, "burned MP4 is missing or too small ({size} bytes)");
+
+        // 4. Probe the result: ffmpeg -i on a file with no output exits 1 but
+        //    prints the stream table to stderr. Assert a real video stream and
+        //    a ~1s duration made it in.
+        let (_ok, probe) = run(&ffmpeg, &dir, &["-hide_banner", "-i", &out_str]);
+        assert!(probe.contains("Video:"), "no video stream in the burned MP4:\n{probe}");
+        assert!(
+            probe.contains("Duration: 00:00:0"),
+            "unexpected duration in the burned MP4:\n{probe}"
+        );
+    }
+
+    /// Every animation type must burn without libass rejecting the emitted ASS.
+    /// This is the automated backstop for "all animations now export/burn"
+    /// (fade, karaoke, pop, blur, slide, typewriter) — the string tests check
+    /// the emitted tags, this proves libass actually accepts them.
+    #[test]
+    fn every_animation_type_burns() {
+        let Some(ffmpeg) = find_ffmpeg_with_ass() else {
+            return;
+        };
+
+        let dir = std::env::temp_dir().join(format!("tpro_burn_anim_{}", Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&dir).unwrap();
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let _guard = Cleanup(dir.clone());
+
+        let input = dir.join("input.mp4");
+        let input_str = input.to_string_lossy().to_string();
+        let (ok, err) = run(
+            &ffmpeg,
+            &dir,
+            &[
+                "-nostdin", "-y", "-f", "lavfi", "-i",
+                "color=c=black:s=320x180:d=1:r=15", "-c:v", "libx264", "-t", "1", &input_str,
+            ],
+        );
+        assert!(ok, "generating the test input clip failed:\n{err}");
+        copy_bundled_fonts(&dir);
+
+        let subs = vec![sub(1, 0, 900, "Multi word żółć line")];
+        for anim_type in ["none", "fade", "slide", "pop", "typewriter", "karaoke", "blur"] {
+            let anim = CaptionAnimation {
+                anim_type: anim_type.to_string(),
+                ..CaptionAnimation::default()
+            };
+            let ass = crate::subtitle::ass::write_ass(&subs, &CaptionStyle::default(), &anim);
+            let ass_name = format!("anim_{anim_type}.ass");
+            std::fs::write(dir.join(&ass_name), &ass).unwrap();
+
+            let out_name = format!("out_{anim_type}.mp4");
+            let out = dir.join(&out_name);
+            let out_str = out.to_string_lossy().to_string();
+            let vf = format!("ass={ass_name}:fontsdir=.");
+            let (ok, err) = run(
+                &ffmpeg,
+                &dir,
+                &[
+                    "-nostdin", "-y", "-i", &input_str, "-vf", &vf, "-c:v", "libx264",
+                    "-preset", "veryfast", "-crf", "18", "-c:a", "aac", "-f", "mp4", &out_str,
+                ],
+            );
+            assert!(ok, "animation '{anim_type}' failed to burn (libass rejected its ASS):\n{err}");
+            let size = std::fs::metadata(&out).map(|m| m.len()).unwrap_or(0);
+            assert!(size > 1024, "animation '{anim_type}' produced a too-small MP4 ({size} bytes)");
+        }
+    }
+}
