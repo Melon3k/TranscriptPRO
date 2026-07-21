@@ -157,8 +157,8 @@ carry are exported; the rest are marked "preview only" in the UI.
   persisted; applying reuses `setStyle` so export stays faithful.
 - ✅ **C — Animations tab.** One global `CaptionAnimation`: fade (ASS `\fad`) and
   karaoke (ASS `\k` + Primary/Secondary split) exported end-to-end; slide/pop/
-  typewriter/blur animate in-preview only. Default `none`. Animation editor modal
-  deliberately deferred.
+  typewriter/blur were preview-only here but **all now export too** (see the
+  follow-on below). Default `none`. Animation editor modal deliberately deferred.
 - ✅ **E — Export preview modal.** "Preview & export" opens SRT/VTT tabs rendering
   the exact serializer output (read-only `preview_export` command) + Download;
   inverted timings shown as an inline banner (no double prompt). Word SRT/ASS/TXT
@@ -167,9 +167,60 @@ carry are exported; the rest are marked "preview only" in the UI.
   events (`useWordDrag`), so native Tauri file drop is re-enabled
   (`dragDropEnabled: true`) with a drop overlay.
 
-**Deferred (out of scope this pass, noted for later):** per-segment style/animation
-overrides; the animation editor modal with live preview; free per-cue `\pos`
-positioning; preview tabs for Word SRT/ASS/TXT.
+### Video export + fidelity follow-on (2026-07-21, same branch)
+
+After A–G, the user asked for the real goal — **burn the styled/animated
+subtitles into an MP4** — plus a batch of QA fixes from live testing. All done on
+`claude/new-design-features` (each its own commit; workflow spec→impl→verify→review,
+or a single focused agent where the workflow's spec phase kept failing):
+
+- ✅ **MP4 burn-in export.** New "Eksportuj wideo (MP4)" in the Rail export menu →
+  `export_video` runs the bundled ffmpeg over the ASS the app already generates
+  (`-vf ass=…`, H.264 + AAC), progress + cancel, temp cleanup. Path-escaping solved
+  by writing the `.ass` to a per-export temp dir and running ffmpeg with `current_dir`
+  there (bare basename in the filtergraph). **ASS is now invisible internal plumbing**,
+  not a user deliverable.
+- ✅ **Bundled TTF fonts for the burn.** Static Regular+Bold of Outfit/Inter/JetBrains
+  Mono (SIL OFL) shipped in `src-tauri/fonts/` (bundle resource); burn copies them into
+  the temp dir + `fontsdir=.` so the video matches the preview. Family names verified
+  to equal the ASS `Fontname`. Degrades to system substitution (reported) if unavailable.
+- ✅ **System fonts.** `list_system_fonts` (fontdb) → searchable font picker (bundled
+  pinned on top). `fontId` generalized to a family-name string (legacy ids migrate).
+  System-font burns embed the located face via fontdb so libass matches by name.
+- ✅ **Colour picker with alpha.** react-colorful popover (sat/hue/alpha + Hex/R/G/B/A),
+  colours now `#RRGGBBAA`; alpha flows to preview, ASS (`&HAABBGGRR` inverse-alpha) and
+  the burn. Migration of persisted styles/presets on load.
+- ✅ **All animations now export/burn** (was fade+karaoke only): pop `\fscx/\t`, blur
+  `\blur24\t`, slide `\move`, typewriter per-char `\alpha` cascade. easing + per-word
+  delay stay preview-only.
+- ✅ **Glow exported** as a soft fill-shape halo (blurred glyph copy in the glow colour
+  on a layer behind the caption) — matches the CSS preview; replaced a first attempt that
+  rendered a chunky border ring.
+- ✅ **QA fixes from testing:** light-theme animation/preset card labels made readable;
+  translation *comparison* view scoped to the Translate workspace (was leaking into
+  transcription and hiding progress); stale word-selection after a cross-segment move
+  fixed (orphaned-id prune + clear-on-row-click); **custom tooltips** app-wide (native
+  `title` doesn't render in the macOS WKWebView).
+
+### To take care of (known limitations / follow-ups)
+
+- **Everything here was verified by `tsc` + `vitest` + `cargo test` and, for the burn,
+  by inspecting fixture frames — but NOT by a real `tauri build` + release run.** Font
+  bundling fidelity and resource paths only fully manifest in a packaged build; do a
+  build + smoke before any release.
+- **Windows unverified** for the new surfaces: system-font enumeration, burn-in fonts,
+  and the still-open **Cmd+Q guard** (P2) need a Windows pass. `tauri-driver` E2E is
+  Linux/Windows-only (no macOS), so automated end-to-end stays CI-only.
+- **Test automation deferred** (user's call): the UI/burn behaviours are covered by unit
+  tests + manual QA only. No component (jsdom/RTL) or burn-smoke tests yet — EDT-1 in
+  particular shipped without a regression test. First automation slice, when wanted:
+  component tests + a cargo burn-smoke.
+- **libass effect limits (documented, accepted):** blur reads as a shrinking halo, not a
+  photographic defocus; typewriter is a per-char fade cascade, not a hard slice; a long
+  multi-line *slide* cue may wrap slightly differently under `\move`.
+- **Bundle size:** the three TTFs add ~1–1.5 MB to the installer/updater artifact.
+- Still deferred by design: per-segment style/animation overrides; the animation editor
+  modal; free per-cue `\pos`; preview tabs for Word SRT/ASS/TXT.
 
 Not on this list (these work): Whisper transcription + speaker detection, translation
 (Gemini/Claude/local Gemma), SRT import, SRT/VTT/ASS/TXT/Word SRT export, editing/segments,
