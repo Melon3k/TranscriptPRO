@@ -69,7 +69,8 @@ export default function Rail({ mode, setMode, onOpenExportPreview, onStartVideoE
         <button
           key={item.key}
           onClick={() => setMode(item.key)}
-          title={item.label}
+          aria-label={item.label}
+          data-tip={item.label}
           style={{ ...navStyle(mode === item.key), background: navStyle(mode === item.key).background, border: "none" }}
         >
           {item.icon}
@@ -82,7 +83,8 @@ export default function Rail({ mode, setMode, onOpenExportPreview, onStartVideoE
 
       <button
         onClick={toggleLogs}
-        title={logsOpen ? t("toolbar:hideLogs") : t("toolbar:showLogs")}
+        aria-label={logsOpen ? t("toolbar:hideLogs") : t("toolbar:showLogs")}
+        data-tip={logsOpen ? t("toolbar:hideLogs") : t("toolbar:showLogs")}
         style={{ ...navStyle(logsOpen), border: "none" }}
       >
         <Terminal size={19} />
@@ -234,7 +236,8 @@ function ExportMenu({
       <button
         onClick={() => !disabled && setOpen((v) => !v)}
         disabled={disabled}
-        title={t("toolbar:export")}
+        aria-label={t("toolbar:export")}
+        data-tip={t("toolbar:export")}
         style={{ ...navStyle(open, disabled), border: "none" }}
       >
         <Download size={19} />

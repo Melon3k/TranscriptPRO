@@ -52,6 +52,7 @@
   },
   "colors": "COLORS",
   "textColor": "Text",
+  "colorSwatchTip": "Color — click to pick",
   "fields": {
     "hex": "Hex",
     "r": "R",

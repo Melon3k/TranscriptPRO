@@ -75,7 +75,8 @@ function IconBtn({
   return (
     <button
       onClick={onClick}
-      title={title}
+      aria-label={title}
+      data-tip={title}
       style={{
         width: 30,
         height: 30,

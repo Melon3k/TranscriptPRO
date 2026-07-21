@@ -36,6 +36,7 @@ import KeyboardShortcutsModal from "../KeyboardShortcutsModal";
 import ExportPreviewModal from "./ExportPreviewModal";
 import VideoExportModal from "./VideoExportModal";
 import OnboardingWizard from "../Onboarding/OnboardingWizard";
+import Tooltip from "../common/Tooltip";
 
 export default function MainLayout() {
   const { t } = useTranslation(["common"]);
@@ -266,6 +267,8 @@ export default function MainLayout() {
       <ExportPreviewModal open={exportPreviewOpen} onClose={() => setExportPreviewOpen(false)} />
       <VideoExportModal outputPath={videoExportOut} onClose={() => setVideoExportOut(null)} />
       {!onboardingCompleted && <OnboardingWizard />}
+
+      <Tooltip />
 
       {isDragging && (
         <div

@@ -140,6 +140,7 @@ export default function FontPicker({
       <button
         onClick={() => (open ? setOpen(false) : openPanel())}
         aria-label={t("style:font")}
+        data-tip={t("style:font")}
         aria-haspopup="listbox"
         aria-expanded={open}
         style={{

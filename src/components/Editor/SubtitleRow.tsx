@@ -166,7 +166,7 @@ function SubtitleRow({
           </span>
           {spk && spkColor && (
             <span
-              title={subtitle.speaker}
+              data-tip={subtitle.speaker}
               style={{
                 width: 16,
                 height: 16,
@@ -241,7 +241,7 @@ function SubtitleRow({
       ) : (
         <div
           onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}
-          title={t("editor:doubleClickToEdit")}
+          data-tip={t("editor:doubleClickToEdit")}
           style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 3 }}
         >
           {hasWords ? (
@@ -370,6 +370,8 @@ function TimeCode({
   onChange: (ms: number) => void;
   invalid?: boolean;
 }) {
+  const { t } = useTranslation(["editor"]);
+  const tipText = t("editor:timestampHint");
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(formatTimestamp(value));
   useEffect(() => setDraft(formatTimestamp(value)), [value]);
@@ -409,6 +411,7 @@ function TimeCode({
     <button
       onClick={(e) => { e.stopPropagation(); onSeek(value); }}
       onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}
+      data-tip={tipText}
       style={{
         fontFamily: FONTS.mono,
         fontWeight: 500,
@@ -440,7 +443,8 @@ function ActionBtn({
 }) {
   return (
     <button
-      title={title}
+      aria-label={title}
+      data-tip={title}
       onClick={onClick}
       disabled={disabled}
       style={{

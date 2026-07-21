@@ -274,7 +274,7 @@ function ToggleRow({ label, on, onClick, badge }: { label: string; on: boolean; 
 
 function IconBtn({ on, label, onClick, children }: { on: boolean; label: string; onClick: () => void; children: ReactNode }) {
   return (
-    <button onClick={onClick} aria-pressed={on} aria-label={label} title={label} style={{ ...iconBtn(on), cursor: "pointer", padding: 0 }}>
+    <button onClick={onClick} aria-pressed={on} aria-label={label} data-tip={label} style={{ ...iconBtn(on), cursor: "pointer", padding: 0 }}>
       {children}
     </button>
   );
@@ -477,7 +477,7 @@ function Effects({ t }: { t: TFn }) {
         </div>
         <button
           onClick={onNew}
-          title={t("style:presets.tips.new")}
+          data-tip={t("style:presets.tips.new")}
           style={{ display: "flex", alignItems: "center", gap: 5, height: 28, padding: "0 10px", background: "rgba(37,99,255,.14)", border: `1px solid ${COLORS.blue}`, borderRadius: 7, color: COLORS.blueLight, cursor: "pointer", ...f(600, 10) }}
         >
           <Plus size={12} />
@@ -635,7 +635,7 @@ function PresetCard({
           <>
             <button
               onClick={stop(() => setEditing(true))}
-              title={t("style:presets.rename")}
+              data-tip={t("style:presets.rename")}
               style={{ flex: 1, minWidth: 0, textAlign: "left", background: "none", border: "none", padding: 0, cursor: "text", color: "var(--c-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", ...f(600, 10, "body") }}
             >
               {preset.name}
@@ -664,7 +664,7 @@ function ActionBtn({ label, tip, onClick, danger, children }: { label: string; t
     <button
       onClick={onClick}
       aria-label={label}
-      title={tip || label}
+      data-tip={tip || label}
       style={{
         display: "flex",
         alignItems: "center",

@@ -115,6 +115,7 @@ export default function ColorField({
         ref={swatchRef}
         onClick={() => setOpen((o) => !o)}
         aria-label={label}
+        data-tip={t("style:colorSwatchTip")}
         aria-haspopup="dialog"
         aria-expanded={open}
         style={{

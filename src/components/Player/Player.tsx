@@ -301,7 +301,7 @@ export default function Player() {
             )}
             <div
               style={boxStyle}
-              title={positioning ? t("player:moveCaption") : undefined}
+              data-tip={positioning ? t("player:moveCaption") : undefined}
               aria-label={positioning ? t("player:moveCaption") : undefined}
               onPointerDown={positioning ? onBoxPointerDown : undefined}
               onPointerMove={positioning ? onBoxPointerMove : undefined}
@@ -324,7 +324,7 @@ export default function Player() {
                   onPointerMove={onHandlePointerMove}
                   onPointerUp={endDrag}
                   onPointerCancel={endDrag}
-                  title={t("player:resizeWidth")}
+                  data-tip={t("player:resizeWidth")}
                   aria-label={t("player:resizeWidth")}
                   style={{
                     position: "absolute",
@@ -349,7 +349,7 @@ export default function Player() {
           <div style={{ position: "absolute", top: 10, right: 10, display: "flex", gap: 6 }}>
             <button
               onClick={() => { setShowSubs(true); setPositioning((p) => !p); }}
-              title={positioning ? t("player:exitEditPosition") : t("player:editPosition")}
+              data-tip={positioning ? t("player:exitEditPosition") : t("player:editPosition")}
               aria-label={positioning ? t("player:exitEditPosition") : t("player:editPosition")}
               style={cornerBtn(positioning)}
             >
@@ -357,7 +357,8 @@ export default function Player() {
             </button>
             <button
               onClick={() => { if (showSubs) setPositioning(false); setShowSubs(!showSubs); }}
-              title={showSubs ? t("player:hideSubtitles") : t("player:showSubtitles")}
+              data-tip={showSubs ? t("player:hideSubtitles") : t("player:showSubtitles")}
+              aria-label={showSubs ? t("player:hideSubtitles") : t("player:showSubtitles")}
               style={cornerBtn(showSubs)}
             >
               {showSubs ? <Captions size={16} /> : <CaptionsOff size={16} />}
@@ -368,12 +369,14 @@ export default function Player() {
 
       {/* transport */}
       <div style={{ height: 46, flex: "none", display: "flex", alignItems: "center", gap: 14, padding: "0 20px 12px" }}>
-        <button onClick={() => skip(-5000)} disabled={!filePath} title={t("player:back5s")} style={ctrlIcon(!filePath)}>
+        <button onClick={() => skip(-5000)} disabled={!filePath} aria-label={t("player:back5s")} data-tip={t("player:back5s")} style={ctrlIcon(!filePath)}>
           <SkipBack size={15} />
         </button>
         <button
           onClick={togglePlay}
           disabled={!filePath}
+          aria-label={isPlaying ? t("player:pause") : t("player:play")}
+          data-tip={isPlaying ? t("player:pause") : t("player:play")}
           style={{
             width: 34,
             height: 34,
@@ -389,7 +392,7 @@ export default function Player() {
         >
           {isPlaying ? <Pause size={14} /> : <Play size={14} style={{ marginLeft: 1 }} />}
         </button>
-        <button onClick={() => skip(5000)} disabled={!filePath} title={t("player:forward5s")} style={ctrlIcon(!filePath)}>
+        <button onClick={() => skip(5000)} disabled={!filePath} aria-label={t("player:forward5s")} data-tip={t("player:forward5s")} style={ctrlIcon(!filePath)}>
           <SkipForward size={15} />
         </button>
         <div
