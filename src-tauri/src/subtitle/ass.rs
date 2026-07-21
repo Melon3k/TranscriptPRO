@@ -298,17 +298,21 @@ fn animation_prefix(style: &CaptionStyle, animation: &CaptionAnimation) -> Optio
     }
 }
 
-/// The glow override block painted on the BEHIND (Layer 0) line: a transparent
-/// fill (`\1a&HFF&`) with an opaque, blurred, coloured border so only a soft
-/// halo shows. `glow_strength` drives border width `\bord` (clamp 2..=20 of
-/// half the strength) and blur radius `\blur` (clamp 4..=40 of the strength).
-/// The glow colour goes through the same hex→ASS `&HAABBGGRR` conversion as the
-/// Style colours; its alpha byte is folded into `\3a` and the BGR into `\3c`.
+/// The glow override block painted on the BEHIND (Layer 0) line: the letter
+/// SHAPES filled in the glow colour, with NO border and NO shadow, then blurred
+/// — so a soft coloured halo bleeds out from behind the real caption. This
+/// mirrors the in-app preview, whose CSS glow is `text-shadow: 0 0 <strength>
+/// glowColor` (a blurred copy of the glyphs, not an outline). An earlier
+/// border-based version (`\bord`+`\blur`) read as a chunky rounded ring/slab on
+/// bold, tightly-spaced multi-line captions — the fill-shape blur is the softer,
+/// correct glow. `glow_strength` drives the blur radius `\blur` (clamp 4..=40).
+/// The glow colour goes through the same hex→ASS `&HAABBGGRR` conversion; its
+/// alpha byte is folded into the fill alpha `\1a` and the BGR into `\1c`.
 ///
 /// When the animation type is `blur`, its own `\blur`/`\t(...,\blur0)` already
 /// drives the line's blur; emitting the glow's static `\blur<r>` too would
-/// double-apply the tag (the later block would clobber the animation), so we
-/// omit the glow's static blur in that one case and let the animation drive it.
+/// double-apply the tag, so we omit the glow's static blur in that one case and
+/// let the animation drive it.
 fn glow_prefix(style: &CaptionStyle, anim_is_blur: bool) -> String {
     // "&HAABBGGRR" — always "&H" + 8 hex digits (valid parse or 6-digit
     // fallback), so the byte slices below are always in range.
@@ -316,18 +320,11 @@ fn glow_prefix(style: &CaptionStyle, anim_is_blur: bool) -> String {
     let hexpart = &ass[2..]; // "AABBGGRR"
     let alpha = &hexpart[0..2]; // "AA"
     let bgr = &hexpart[2..]; // "BBGGRR"
-    let b = (style.glow_strength * 0.5).round().clamp(2.0, 20.0) as i64;
     let r = style.glow_strength.round().clamp(4.0, 40.0) as i64;
     if anim_is_blur {
-        format!(
-            "{{\\1a&HFF&\\3a&H{}&\\3c&H{}&\\bord{}\\shad0}}",
-            alpha, bgr, b
-        )
+        format!("{{\\bord0\\shad0\\1c&H{}&\\1a&H{}&}}", bgr, alpha)
     } else {
-        format!(
-            "{{\\1a&HFF&\\3a&H{}&\\3c&H{}&\\bord{}\\shad0\\blur{}}}",
-            alpha, bgr, b, r
-        )
+        format!("{{\\bord0\\shad0\\1c&H{}&\\1a&H{}&\\blur{}}}", bgr, alpha, r)
     }
 }
 
@@ -886,15 +883,15 @@ mod tests {
         let dialogue_lines: Vec<&str> = out.lines().filter(|l| l.starts_with("Dialogue:")).collect();
         assert_eq!(dialogue_lines.len(), 1, "glow off must emit one line; got: {out}");
         assert!(dialogue_lines[0].starts_with("Dialogue: 0,"), "got: {out}");
-        assert!(!out.contains("\\1a&HFF&"), "no glow tags when glow off; got: {out}");
+        assert!(!out.contains("\\1c&HEED322&"), "no glow tags when glow off; got: {out}");
         // Byte-identical to the pre-glow golden line.
         assert!(out.contains("Dialogue: 0,0:00:01.00,0:00:03.50,Default,,0,0,0,,Hello world\n"));
     }
 
     #[test]
     fn test_glow_on_emits_behind_line_and_bumps_real_line() {
-        // glow on → a Layer 0 glow line (transparent fill, opaque coloured
-        // blurred border) BEHIND, and the real text bumped to Layer 1.
+        // glow on → a Layer 0 glow line (glyph shapes filled in the glow
+        // colour, no border, blurred) BEHIND, and the real text bumped to Layer 1.
         let style = CaptionStyle {
             glow: true,
             ..CaptionStyle::default()
@@ -905,11 +902,10 @@ mod tests {
         assert_eq!(dialogue_lines.len(), 2, "glow on must emit two lines; got: {out}");
 
         // Glow line: Layer 0, whole-text halo. Default glowStrength 12 →
-        // \bord round(12*0.5)=6, \blur round(12)=12; glowColor #22D3EE →
-        // &H00EED322 → \3c&HEED322&, \3a&H00&.
+        // \blur round(12)=12; glowColor #22D3EE → &H00EED322 → \1c&HEED322&, \1a&H00&.
         assert!(
             dialogue_lines[0].contains(
-                "Dialogue: 0,0:00:00.00,0:00:02.00,Default,,0,0,0,,{\\1a&HFF&\\3a&H00&\\3c&HEED322&\\bord6\\shad0\\blur12}hello world"
+                "Dialogue: 0,0:00:00.00,0:00:02.00,Default,,0,0,0,,{\\bord0\\shad0\\1c&HEED322&\\1a&H00&\\blur12}hello world"
             ),
             "glow line; got: {out}"
         );
@@ -940,7 +936,7 @@ mod tests {
         let dialogue_lines: Vec<&str> = out.lines().filter(|l| l.starts_with("Dialogue:")).collect();
         // Glow line: fade prefix, then glow block, then body.
         assert!(
-            dialogue_lines[0].contains(",,{\\fad(400,400)}{\\1a&HFF&\\3a&H00&\\3c&HEED322&\\bord6\\shad0\\blur12}hello world"),
+            dialogue_lines[0].contains(",,{\\fad(400,400)}{\\bord0\\shad0\\1c&HEED322&\\1a&H00&\\blur12}hello world"),
             "glow line carries fade prefix; got: {out}"
         );
         // Real line: fade prefix, Layer 1.
@@ -966,17 +962,18 @@ mod tests {
         let subs = vec![make_sub(1, 0, 2000, "hello world")];
         let out = write_ass(&subs, &style, &anim);
         let dialogue_lines: Vec<&str> = out.lines().filter(|l| l.starts_with("Dialogue:")).collect();
-        // Glow block ends at \shad0 (no \blur<r>); the entrance \blur24 leads.
+        // Glow block has no \blur<r> (the entrance \blur24 leads and drives it).
         assert!(
-            dialogue_lines[0].contains(",,{\\blur24\\t(0,400,\\blur0)}{\\1a&HFF&\\3a&H00&\\3c&HEED322&\\bord6\\shad0}hello world"),
+            dialogue_lines[0].contains(",,{\\blur24\\t(0,400,\\blur0)}{\\bord0\\shad0\\1c&HEED322&\\1a&H00&}hello world"),
             "glow line omits static blur under blur animation; got: {out}"
         );
     }
 
     #[test]
-    fn test_glow_color_alpha_folds_into_3a() {
-        // A glowColor with alpha folds the inverse-alpha byte into \3a and the
-        // BGR into \3c. #22D3EE80 → &H7FEED322 → \3a&H7F&, \3c&HEED322&.
+    fn test_glow_color_alpha_folds_into_1a() {
+        // A glowColor with alpha folds the inverse-alpha byte into the fill
+        // alpha \1a and the BGR into \1c. #22D3EE80 → &H7FEED322 → \1a&H7F&,
+        // \1c&HEED322&.
         let style = CaptionStyle {
             glow: true,
             glow_color: "#22D3EE80".to_string(),
@@ -985,32 +982,32 @@ mod tests {
         };
         let subs = vec![make_sub(1, 0, 2000, "hi")];
         let out = write_ass(&subs, &style, &CaptionAnimation::default());
-        // glowStrength 20 → \bord round(10)=10, \blur round(20)=20.
+        // glowStrength 20 → \blur round(20)=20.
         assert!(
-            out.contains("{\\1a&HFF&\\3a&H7F&\\3c&HEED322&\\bord10\\shad0\\blur20}hi"),
-            "glow alpha folded into \\3a; got: {out}"
+            out.contains("{\\bord0\\shad0\\1c&HEED322&\\1a&H7F&\\blur20}hi"),
+            "glow alpha folded into \\1a; got: {out}"
         );
     }
 
     #[test]
     fn test_glow_strength_clamps() {
-        // Tiny strength clamps \bord to 2 and \blur to 4.
+        // Tiny strength clamps \blur to 4 (no border in the fill-based glow).
         let style = CaptionStyle {
             glow: true,
             glow_strength: 1.0,
             ..CaptionStyle::default()
         };
         let out = write_ass(&[make_sub(1, 0, 1000, "x")], &style, &CaptionAnimation::default());
-        assert!(out.contains("\\bord2\\shad0\\blur4}x"), "low clamp; got: {out}");
+        assert!(out.contains("\\1c&HEED322&\\1a&H00&\\blur4}x"), "low clamp; got: {out}");
 
-        // Huge strength clamps \bord to 20 and \blur to 40.
+        // Huge strength clamps \blur to 40.
         let style = CaptionStyle {
             glow: true,
             glow_strength: 500.0,
             ..CaptionStyle::default()
         };
         let out = write_ass(&[make_sub(1, 0, 1000, "x")], &style, &CaptionAnimation::default());
-        assert!(out.contains("\\bord20\\shad0\\blur40}x"), "high clamp; got: {out}");
+        assert!(out.contains("\\1c&HEED322&\\1a&H00&\\blur40}x"), "high clamp; got: {out}");
     }
 
     #[test]
