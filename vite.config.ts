@@ -35,10 +35,12 @@ export default defineConfig(async () => ({
     },
   },
 
-  // Unit tests (vitest). Pure logic in src/lib runs without a DOM.
+  // Unit tests (vitest). Pure logic in src/lib runs in the default "node"
+  // environment; component tests (*.test.tsx) opt into jsdom via a
+  // `// @vitest-environment jsdom` docblock at the top of the file.
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
     // Skip macOS AppleDouble sidecars ("._*") — the exFAT working copy on a
     // portable drive spawns them next to real files and they match the glob.
     exclude: ["**/node_modules/**", "**/dist/**", "**/._*"],
