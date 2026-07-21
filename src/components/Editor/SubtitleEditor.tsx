@@ -51,6 +51,24 @@ export default function SubtitleEditor() {
 
   const clearSelection = useCallback(() => setSelectedWords(new Map()), []);
 
+  // Prune word selections keyed by a subtitle id that no longer exists. A cross-
+  // segment move (moveWords) gives the SOURCE segment a fresh id, so any selection
+  // entry under its old id is orphaned — and a stray orphan keeps totalSelected > 0,
+  // which lights every row with the green "drop here" chrome (looks like a stuck
+  // multi-selection). Dropping dead ids after any subtitles change kills that.
+  useEffect(() => {
+    setSelectedWords((prev) => {
+      if (prev.size === 0) return prev;
+      const live = new Set(subtitles.map((s) => s.id));
+      let changed = false;
+      const next = new Map(prev);
+      for (const id of next.keys()) {
+        if (!live.has(id)) { next.delete(id); changed = true; }
+      }
+      return changed ? next : prev;
+    });
+  }, [subtitles]);
+
   const toggleWord = useCallback((subId: string, wi: number) => {
     setSelectedWords((prev) => {
       const next = new Map(prev);
@@ -90,13 +108,17 @@ export default function SubtitleEditor() {
 
   const selectSeg = useCallback(
     (id: string) => {
-      // Row clicks only seek/select the row; word selections persist so users
-      // can check timing mid-move without rebuilding a cross-segment selection.
+      // A plain row click starts a clean slate: clear any word selection so a
+      // leftover cross-segment selection (or its drop-target chrome) can't cling
+      // after a move. Building a multi-selection goes through ⌘-click on WORD
+      // chips (stopPropagation), which never reaches here, so this doesn't fight
+      // selection build-up.
+      clearSelection();
       setSelectedId(id);
       const seg = subtitles.find((s) => s.id === id);
       if (seg) setCurrentTimeMs(seg.startTime);
     },
-    [subtitles, setCurrentTimeMs],
+    [subtitles, setCurrentTimeMs, clearSelection],
   );
 
   return (
