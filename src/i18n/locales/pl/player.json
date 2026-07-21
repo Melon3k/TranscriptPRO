@@ -1,6 +1,13 @@
 {
+  "play": "Odtwórz",
+  "pause": "Wstrzymaj",
   "back5s": "Cofnij 5 sekund",
   "forward5s": "Przewiń 5 sekund",
   "showSubtitles": "Pokaż napisy",
-  "hideSubtitles": "Ukryj napisy"
+  "hideSubtitles": "Ukryj napisy",
+  "editPosition": "Edytuj położenie napisów",
+  "exitEditPosition": "Zakończ pozycjonowanie",
+  "positionSample": "Przykładowy napis",
+  "resizeWidth": "Przeciągnij, aby zmienić szerokość",
+  "moveCaption": "Przeciągnij, aby przesunąć napis"
 }

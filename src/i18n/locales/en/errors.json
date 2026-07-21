@@ -7,6 +7,7 @@
   "API_KEY_UNREADABLE": "Your saved {{detail}} API key can't be read — the system key store may have changed. Remove the key in Settings and enter it again.",
   "FILE_ERROR": "File error: {{detail}}",
   "INVALID_SRT_FORMAT": "Invalid SRT format: {{detail}}",
+  "VIDEO_EXPORT_FAILED": "Video export failed: {{detail}}",
   "CANCELLED": "Operation cancelled",
   "UNKNOWN_ERROR": "Unexpected error: {{detail}}"
 }

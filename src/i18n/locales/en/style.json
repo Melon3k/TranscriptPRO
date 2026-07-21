@@ -4,23 +4,106 @@
     "animations": "Animations",
     "effects": "Effects"
   },
-  "comingSoon": "Caption styling, animations and presets are coming in a future release. This panel is a preview and is not active yet.",
+  "comingSoon": "Animations and effect presets are coming in a future release. This tab is a preview and is not active yet.",
   "text": "TEXT",
+  "font": "Font",
+  "fontPicker": {
+    "bundled": "Bundled",
+    "system": "System fonts",
+    "search": "Search fonts…",
+    "loading": "Loading fonts…",
+    "empty": "No fonts match"
+  },
   "size": "Size",
   "letterSpacing": "Letter spacing",
   "lineHeight": "Line height",
+  "align": {
+    "left": "Align left",
+    "center": "Align center",
+    "right": "Align right"
+  },
+  "boldToggle": "Bold",
+  "italicToggle": "Italic",
+  "uppercaseToggle": "Uppercase",
   "outlineShadowGlow": "OUTLINE · SHADOW · GLOW",
   "outline": "Outline",
+  "outlineWidth": "Outline width",
   "shadow": "Shadow",
+  "shadowDepth": "Shadow depth",
   "glow": "Glow",
   "glowStrength": "Glow strength",
+  "previewOnly": "preview only",
+  "anim": {
+    "appliesAll": "Applies to all captions",
+    "exported": "exported",
+    "duration": "Duration",
+    "perWordDelay": "Per-word delay",
+    "easing": "Easing",
+    "highlightColor": "Karaoke highlight",
+    "types": {
+      "none": "None",
+      "fade": "Fade",
+      "slide": "Slide up",
+      "pop": "Pop",
+      "typewriter": "Typewriter",
+      "karaoke": "Karaoke",
+      "blur": "Blur in"
+    }
+  },
+  "colors": "COLORS",
+  "textColor": "Text",
+  "colorSwatchTip": "Color — click to pick",
+  "fields": {
+    "hex": "Hex",
+    "r": "R",
+    "g": "G",
+    "b": "B",
+    "alpha": "Alpha"
+  },
+  "alphaTextHint": "Lowering the text color's alpha hurts readability — alpha works best on shadow, glow and outline.",
   "captionBox": "CAPTION BOX",
   "boxPosition": "Box position",
-  "boxBottomCenter": "Bottom · center",
+  "boxPos": {
+    "1": "Bottom · left",
+    "2": "Bottom · center",
+    "3": "Bottom · right",
+    "4": "Middle · left",
+    "5": "Middle · center",
+    "6": "Middle · right",
+    "7": "Top · left",
+    "8": "Top · center",
+    "9": "Top · right"
+  },
   "width": "Width",
   "bottomDistance": "Distance from bottom",
-  "applyToSelected": "Apply to selected",
-  "applyToAll": "All",
+  "topDistance": "Distance from top",
+  "reset": "Reset to defaults",
   "searchPreset": "Search preset…",
-  "newPreset": "New"
+  "newPreset": "New",
+  "presets": {
+    "builtin": {
+      "neon": "Neon",
+      "hardShadow": "Hard shadow",
+      "thickOutline": "Thick outline",
+      "soft": "Soft"
+    },
+    "duplicate": "Duplicate",
+    "save": "Save current style",
+    "delete": "Delete",
+    "deleteConfirm": "Delete this preset?",
+    "rename": "Rename",
+    "namePlaceholder": "Preset name",
+    "defaultName": "My preset",
+    "builtinBadge": "Built-in",
+    "active": "Active",
+    "empty": "No presets match your search.",
+    "saved": "Preset saved",
+    "tips": {
+      "new": "New preset — save the current style as a reusable preset",
+      "save": "Save — overwrite this preset with the current style",
+      "duplicate": "Duplicate — create an editable copy as your own preset",
+      "rename": "Rename this preset",
+      "delete": "Delete this preset"
+    }
+  }
 }

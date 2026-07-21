@@ -1,11 +1,16 @@
 import { useRef, useEffect, useCallback, useState } from "react";
-import { Play, Pause, SkipBack, SkipForward, Film, Captions, CaptionsOff } from "lucide-react";
+import { Play, Pause, SkipBack, SkipForward, Film, Captions, CaptionsOff, Move } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { usePlayerStore } from "../../stores/playerStore";
 import { useSubtitleStore } from "../../stores/subtitleStore";
+import { useStyleStore } from "../../stores/styleStore";
 import { formatDuration } from "../../lib/time-format";
+import { captionBoxCss, captionTextCss, hexToCssColor, pointerToBoxPlacement, pointerToWidthPct } from "../../lib/caption-style";
+import { karaokeSegments } from "../../lib/caption-animation";
 import { COLORS, FONTS } from "../../lib/ui";
+import type { CaptionAnimation, CaptionStyle } from "../../types/captionStyle";
+import type { Subtitle } from "../../types/subtitle";
 
 /**
  * Center video/audio stage. Renders the media, an optional subtitle overlay
@@ -17,11 +22,57 @@ export default function Player() {
   const { filePath, currentTimeMs, duration, isPlaying, setCurrentTimeMs, setDuration, setIsPlaying } =
     usePlayerStore();
   const subtitles = useSubtitleStore((s) => s.subtitles);
+  const style = useStyleStore((s) => s.style);
+  const animation = useStyleStore((s) => s.animation);
+  const setStyle = useStyleStore((s) => s.setStyle);
   const [showSubs, setShowSubs] = useState(false);
+  // Smoothed playhead for the caption overlay ONLY. The media element's
+  // `timeupdate` fires ~4Hz on WKWebView, which makes the playhead-driven
+  // caption animations (fade / typewriter / karaoke) step visibly. A rAF loop
+  // samples the media clock at ~60fps while playing so they ramp smoothly.
+  // Kept Player-local (not pushed into the store) so the segment list — which
+  // derives its active-row highlight from the store — does not re-render 60×/s.
+  const [smoothMs, setSmoothMs] = useState(0);
+  const [positioning, setPositioning] = useState(false);
+  // Set during an active "move" drag so the snap guides re-render; the drag
+  // gesture itself is tracked on dragRef (no re-render needed for it).
+  const [showGuides, setShowGuides] = useState(false);
   const hasSubtitles = subtitles.length > 0;
 
   const mediaRef = useRef<HTMLVideoElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+  // Frame-sized wrapper — drag math reads its rect to derive pointer ratios.
+  const frameRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<null | "move" | "resize">(null);
+  const rafRef = useRef<number | null>(null);
+  // Rendered video content box inside the stage. Captions anchor to THIS
+  // rect, not the stage, so letterbox/pillarbox bars don't skew size or
+  // position vs. the ASS export (which is defined relative to the frame).
+  const [frame, setFrame] = useState<{ w: number; h: number } | null>(null);
+
+  const measureFrame = useCallback(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    const sw = stage.clientWidth;
+    const sh = stage.clientHeight;
+    const v = mediaRef.current;
+    if (v && v.videoWidth > 0 && v.videoHeight > 0) {
+      // Mirrors the video's maxWidth/maxHeight:100% sizing (no upscale).
+      const scale = Math.min(sw / v.videoWidth, sh / v.videoHeight, 1);
+      setFrame({ w: v.videoWidth * scale, h: v.videoHeight * scale });
+    } else {
+      setFrame({ w: sw, h: sh });
+    }
+  }, []);
+
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    const ro = new ResizeObserver(measureFrame);
+    ro.observe(stage);
+    return () => ro.disconnect();
+  }, [measureFrame]);
 
   useEffect(() => {
     const el = mediaRef.current;
@@ -31,15 +82,42 @@ export default function Player() {
     }
   }, [currentTimeMs]);
 
+  // When subtitles disappear the corner toggles unmount, so exit positioning
+  // (and hide the overlay) — otherwise the sample box stays on screen with no
+  // control to dismiss it.
+  useEffect(() => {
+    if (!hasSubtitles) {
+      setPositioning(false);
+      setShowSubs(false);
+    }
+  }, [hasSubtitles]);
+
   const handleTimeUpdate = useCallback(() => {
     const el = mediaRef.current;
-    if (el) setCurrentTimeMs(el.currentTime * 1000);
+    if (el) {
+      setCurrentTimeMs(el.currentTime * 1000);
+      setSmoothMs(el.currentTime * 1000); // keep the overlay clock fresh when paused/seeking
+    }
   }, [setCurrentTimeMs]);
+
+  // ~60fps caption clock while playing (see smoothMs). Cancels on pause/unmount.
+  useEffect(() => {
+    if (!isPlaying) return;
+    let raf = 0;
+    const tick = () => {
+      const el = mediaRef.current;
+      if (el) setSmoothMs(el.currentTime * 1000);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [isPlaying]);
 
   const handleLoadedMetadata = useCallback(() => {
     const el = mediaRef.current;
     if (el) setDuration(el.duration);
-  }, [setDuration]);
+    measureFrame(); // videoWidth/videoHeight are only known from here on
+  }, [setDuration, measureFrame]);
 
   const togglePlay = () => {
     const el = mediaRef.current;
@@ -66,12 +144,88 @@ export default function Player() {
   const progressPercent = duration > 0 ? (currentTimeMs / 1000 / duration) * 100 : 0;
   const mediaSrc = filePath ? convertFileSrc(filePath) : undefined;
 
-  const activeSub = subtitles.find((s) => currentTimeMs >= s.startTime && currentTimeMs < s.endTime);
+  // Overlay uses the smooth clock while playing; the store value (4Hz, fresh on
+  // seek/pause) is authoritative otherwise. Both agree to within one frame.
+  const overlayMs = isPlaying ? smoothMs : currentTimeMs;
+  const activeSub = subtitles.find((s) => overlayMs >= s.startTime && overlayMs < s.endTime);
+
+  const ratiosFromEvent = useCallback((e: React.PointerEvent) => {
+    const r = frameRef.current!.getBoundingClientRect();
+    return { rx: (e.clientX - r.left) / r.width, ry: (e.clientY - r.top) / r.height };
+  }, []);
+
+  const endDrag = useCallback((e: React.PointerEvent) => {
+    dragRef.current = null;
+    setShowGuides(false);
+    if (rafRef.current != null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    // On pointercancel the capture is already implicitly dropped, so guard the
+    // release to avoid a NotFoundError.
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+  }, []);
+
+  const onBoxPointerDown = useCallback((e: React.PointerEvent) => {
+    if (!positioning) return;
+    e.preventDefault();
+    dragRef.current = "move";
+    setShowGuides(true);
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }, [positioning]);
+
+  const onBoxPointerMove = useCallback((e: React.PointerEvent) => {
+    if (dragRef.current !== "move" || !frameRef.current) return;
+    const { rx, ry } = ratiosFromEvent(e);
+    if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+    // Read the freshest style inside the rAF so successive drags compose off
+    // committed state, not a stale render-time closure (mirrors the Inspector).
+    rafRef.current = requestAnimationFrame(() => {
+      setStyle(pointerToBoxPlacement(rx, ry, useStyleStore.getState().style));
+    });
+  }, [ratiosFromEvent, setStyle]);
+
+  const onHandlePointerDown = useCallback((e: React.PointerEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    dragRef.current = "resize";
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }, []);
+
+  const onHandlePointerMove = useCallback((e: React.PointerEvent) => {
+    if (dragRef.current !== "resize" || !frameRef.current) return;
+    const { rx } = ratiosFromEvent(e);
+    if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(() => {
+      setStyle({ widthPct: pointerToWidthPct(rx, useStyleStore.getState().style) });
+    });
+  }, [ratiosFromEvent, setStyle]);
+
+  const col = (style.boxPosition - 1) % 3;
+  const boxStyle: React.CSSProperties = {
+    ...captionBoxCss(style),
+    ...(positioning
+      ? {
+          pointerEvents: "auto" as const,
+          cursor: "move",
+          outline: `1px dashed ${COLORS.blue}`,
+          outlineOffset: 4,
+          borderRadius: 4,
+          // Pin the box to the full widthPct so the resize handle sits on the
+          // real width boundary (not the shrink-to-fit sample-text edge) and
+          // dragging gives visible feedback that matches the persisted width.
+          width: `${style.widthPct}%`,
+        }
+      : null),
+  };
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
       {/* stage */}
       <div
+        ref={stageRef}
         style={{
           flex: 1,
           minHeight: 0,
@@ -110,76 +264,119 @@ export default function Player() {
           </>
         )}
 
-        {/* Subtitle overlay — only rendered while enabled and a cue is active. */}
-        {showSubs && activeSub && (
+        {/* Subtitle overlay — only rendered while enabled and a cue is active.
+            No background pill: the box isn't part of the style model and the
+            preview must stay honest vs. the ASS export (F2). */}
+        {showSubs && frame && (activeSub || positioning) && (
+          // Wrapper matching the rendered video frame (videos center in the
+          // stage), so captionBoxCss percentages resolve against the frame.
           <div
+            ref={frameRef}
             style={{
               position: "absolute",
               left: "50%",
-              transform: "translateX(-50%)",
-              bottom: "8%",
-              maxWidth: "80%",
-              padding: "6px 14px",
-              borderRadius: 6,
-              background: "rgba(8,12,18,.55)",
-              userSelect: "none",
+              top: "50%",
+              transform: "translate(-50%,-50%)",
+              width: frame.w,
+              height: frame.h,
               pointerEvents: "none",
             }}
           >
-            <span
-              style={{
-                fontFamily: FONTS.display,
-                fontWeight: 700,
-                fontSize: 22,
-                color: "#fff",
-                textAlign: "center",
-                display: "block",
-                lineHeight: 1.25,
-                // Clean outline via layered shadows — avoids the "chewed" look
-                // that -webkit-text-stroke produces when the stroke overlaps the fill.
-                textShadow:
-                  "-1px -1px 0 #0b0f16, 1px -1px 0 #0b0f16, -1px 1px 0 #0b0f16, 1px 1px 0 #0b0f16, 0 2px 5px rgba(0,0,0,.7)",
-              }}
+            {showGuides && (
+              // Column/row snap hints (33%/66%) shown only during a move drag.
+              <>
+                {[1 / 3, 2 / 3].map((f) => (
+                  <span
+                    key={`v${f}`}
+                    style={{ position: "absolute", top: 0, bottom: 0, left: `${f * 100}%`, width: 1, background: `${COLORS.blue}33` }}
+                  />
+                ))}
+                {[1 / 3, 2 / 3].map((f) => (
+                  <span
+                    key={`h${f}`}
+                    style={{ position: "absolute", left: 0, right: 0, top: `${f * 100}%`, height: 1, background: `${COLORS.blue}33` }}
+                  />
+                ))}
+              </>
+            )}
+            <div
+              style={boxStyle}
+              data-tip={positioning ? t("player:moveCaption") : undefined}
+              aria-label={positioning ? t("player:moveCaption") : undefined}
+              onPointerDown={positioning ? onBoxPointerDown : undefined}
+              onPointerMove={positioning ? onBoxPointerMove : undefined}
+              onPointerUp={positioning ? endDrag : undefined}
+              onPointerCancel={positioning ? endDrag : undefined}
             >
-              {activeSub.text}
-            </span>
+              <AnimatedCaption
+                // Key by cue id so CSS entrance animations restart each cue
+                // (a new element mounts). Undefined key (sample text) is stable.
+                key={activeSub?.id}
+                style={style}
+                animation={animation}
+                sub={activeSub ?? null}
+                nowMs={overlayMs}
+                frameH={frame.h}
+              />
+              {positioning && (
+                <span
+                  onPointerDown={onHandlePointerDown}
+                  onPointerMove={onHandlePointerMove}
+                  onPointerUp={endDrag}
+                  onPointerCancel={endDrag}
+                  data-tip={t("player:resizeWidth")}
+                  aria-label={t("player:resizeWidth")}
+                  style={{
+                    position: "absolute",
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    ...(col === 2 ? { left: -5 } : { right: -5 }),
+                    width: 10,
+                    height: 22,
+                    borderRadius: 3,
+                    background: COLORS.blue,
+                    cursor: "ew-resize",
+                    pointerEvents: "auto",
+                  }}
+                />
+              )}
+            </div>
           </div>
         )}
 
-        {/* Corner toggle — enabled only when there are subtitles to show. */}
+        {/* Corner toggles — enabled only when there are subtitles to show. */}
         {hasSubtitles && (
-          <button
-            onClick={() => setShowSubs((v) => !v)}
-            title={showSubs ? t("player:hideSubtitles") : t("player:showSubtitles")}
-            style={{
-              position: "absolute",
-              top: 10,
-              right: 10,
-              width: 32,
-              height: 32,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              borderRadius: 8,
-              cursor: "pointer",
-              background: showSubs ? COLORS.blue : "rgba(8,12,18,.6)",
-              border: `1px solid ${showSubs ? COLORS.blue : "var(--c-border)"}`,
-              color: "#fff",
-            }}
-          >
-            {showSubs ? <Captions size={16} /> : <CaptionsOff size={16} />}
-          </button>
+          <div style={{ position: "absolute", top: 10, right: 10, display: "flex", gap: 6 }}>
+            <button
+              onClick={() => { setShowSubs(true); setPositioning((p) => !p); }}
+              data-tip={positioning ? t("player:exitEditPosition") : t("player:editPosition")}
+              aria-label={positioning ? t("player:exitEditPosition") : t("player:editPosition")}
+              style={cornerBtn(positioning)}
+            >
+              <Move size={16} />
+            </button>
+            <button
+              onClick={() => { if (showSubs) setPositioning(false); setShowSubs(!showSubs); }}
+              data-tip={showSubs ? t("player:hideSubtitles") : t("player:showSubtitles")}
+              aria-label={showSubs ? t("player:hideSubtitles") : t("player:showSubtitles")}
+              style={cornerBtn(showSubs)}
+            >
+              {showSubs ? <Captions size={16} /> : <CaptionsOff size={16} />}
+            </button>
+          </div>
         )}
       </div>
 
       {/* transport */}
       <div style={{ height: 46, flex: "none", display: "flex", alignItems: "center", gap: 14, padding: "0 20px 12px" }}>
-        <button onClick={() => skip(-5000)} disabled={!filePath} title={t("player:back5s")} style={ctrlIcon(!filePath)}>
+        <button onClick={() => skip(-5000)} disabled={!filePath} aria-label={t("player:back5s")} data-tip={t("player:back5s")} style={ctrlIcon(!filePath)}>
           <SkipBack size={15} />
         </button>
         <button
           onClick={togglePlay}
           disabled={!filePath}
+          aria-label={isPlaying ? t("player:pause") : t("player:play")}
+          data-tip={isPlaying ? t("player:pause") : t("player:play")}
           style={{
             width: 34,
             height: 34,
@@ -195,7 +392,7 @@ export default function Player() {
         >
           {isPlaying ? <Pause size={14} /> : <Play size={14} style={{ marginLeft: 1 }} />}
         </button>
-        <button onClick={() => skip(5000)} disabled={!filePath} title={t("player:forward5s")} style={ctrlIcon(!filePath)}>
+        <button onClick={() => skip(5000)} disabled={!filePath} aria-label={t("player:forward5s")} data-tip={t("player:forward5s")} style={ctrlIcon(!filePath)}>
           <SkipForward size={15} />
         </button>
         <div
@@ -221,6 +418,120 @@ export default function Player() {
       </div>
     </div>
   );
+}
+
+// slide/pop/blur map to a one-shot entrance keyframe; fade/typewriter/karaoke
+// are JS-driven off nowMs so they track scrubbing, not just mount.
+const ENTRANCE_KEYFRAME: Record<"slide" | "pop" | "blur", string> = {
+  slide: "captionSlideUp",
+  pop: "captionPop",
+  blur: "captionBlurIn",
+};
+
+/** Animation-aware caption span. Honestly previews what fade/karaoke export
+ *  and animates the four preview-only types; `sub === null` is the positioning
+ *  sample, which renders plain (animation ignored). Mounted with a cue-id key
+ *  so entrance keyframes restart per cue. */
+function AnimatedCaption({
+  style,
+  animation,
+  sub,
+  nowMs,
+  frameH,
+}: {
+  style: CaptionStyle;
+  animation: CaptionAnimation;
+  sub: Subtitle | null;
+  nowMs: number;
+  frameH: number;
+}) {
+  const { t } = useTranslation(["player"]);
+  const base: React.CSSProperties = {
+    ...captionTextCss(style),
+    // fontSize is defined at a 1080-px-tall reference canvas; scale it by the
+    // measured frame height (px, not cqh — WKWebView on macOS 10.15 lacks
+    // container-query units).
+    fontSize: `${((style.fontSize / 1080) * frameH).toFixed(2)}px`,
+  };
+
+  // Positioning sample: no cue → plain text, no animation.
+  if (!sub) {
+    return <span style={base}>{t("player:positionSample")}</span>;
+  }
+
+  const type = animation.type;
+
+  if (type === "fade") {
+    // Fade-out overrides the mount fade-in near the cue end. Linear both ways
+    // to match the exported ASS \fad (which is linear).
+    const remaining = sub.endTime - nowMs;
+    const fadingOut = remaining < animation.durationMs;
+    const spanStyle: React.CSSProperties = {
+      ...base,
+      // fade-in: one-shot mount animation with NO fill, so when it ends opacity
+      // falls back to the inline value. fade-out opacity is computed per frame
+      // from the playhead (not a CSS transition) so it tracks seeks/pauses and
+      // still shows for cues shorter than durationMs.
+      animationName: fadingOut ? undefined : "captionFadeIn",
+      animationDuration: fadingOut ? undefined : `${animation.durationMs}ms`,
+      animationTimingFunction: "linear",
+      opacity: fadingOut ? Math.max(0, remaining / animation.durationMs) : 1,
+    };
+    return <span style={spanStyle}>{sub.text}</span>;
+  }
+
+  if (type === "slide" || type === "pop" || type === "blur") {
+    return (
+      <span
+        style={{
+          ...base,
+          animation: `${ENTRANCE_KEYFRAME[type]} ${animation.durationMs}ms ${animation.easing} both`,
+        }}
+      >
+        {sub.text}
+      </span>
+    );
+  }
+
+  if (type === "typewriter") {
+    // Reveal by elapsed fraction of durationMs; slice avoids ch-unit reliance.
+    const chars = Math.round(
+      ((nowMs - sub.startTime) / Math.max(animation.durationMs, 1)) * sub.text.length,
+    );
+    return <span style={base}>{sub.text.slice(0, Math.max(0, chars))}</span>;
+  }
+
+  if (type === "karaoke") {
+    // Per-word spans override only color; the wrapper keeps the single
+    // captionTextCss textShadow (don't stack it per span).
+    return (
+      <span style={base}>
+        {karaokeSegments(sub, nowMs).map((seg, i) => (
+          <span key={i} style={{ color: hexToCssColor(seg.sung ? animation.highlightColor : style.textColor) }}>
+            {seg.text}
+          </span>
+        ))}
+      </span>
+    );
+  }
+
+  // "none"
+  return <span style={base}>{sub.text}</span>;
+}
+
+function cornerBtn(active: boolean): React.CSSProperties {
+  return {
+    width: 32,
+    height: 32,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 8,
+    cursor: "pointer",
+    background: active ? COLORS.blue : "rgba(8,12,18,.6)",
+    border: `1px solid ${active ? COLORS.blue : "var(--c-border)"}`,
+    color: "#fff",
+  };
 }
 
 function ctrlIcon(disabled: boolean): React.CSSProperties {

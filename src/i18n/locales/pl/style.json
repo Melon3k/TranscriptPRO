@@ -4,23 +4,106 @@
     "animations": "Animacje",
     "effects": "Efekty"
   },
-  "comingSoon": "Stylizacja napisów, animacje i presety pojawią się w przyszłej wersji. Ten panel to podgląd i nie jest jeszcze aktywny.",
+  "comingSoon": "Animacje i presety efektów pojawią się w przyszłej wersji. Ta zakładka to podgląd i nie jest jeszcze aktywna.",
   "text": "TEKST",
+  "font": "Czcionka",
+  "fontPicker": {
+    "bundled": "Wbudowane",
+    "system": "Czcionki systemowe",
+    "search": "Szukaj czcionek…",
+    "loading": "Ładowanie czcionek…",
+    "empty": "Brak pasujących czcionek"
+  },
   "size": "Rozmiar",
   "letterSpacing": "Odstęp liter",
   "lineHeight": "Interlinia",
+  "align": {
+    "left": "Wyrównaj do lewej",
+    "center": "Wyśrodkuj",
+    "right": "Wyrównaj do prawej"
+  },
+  "boldToggle": "Pogrubienie",
+  "italicToggle": "Kursywa",
+  "uppercaseToggle": "Wersaliki",
   "outlineShadowGlow": "OBRYS · CIEŃ · GLOW",
   "outline": "Obrys",
+  "outlineWidth": "Grubość obrysu",
   "shadow": "Cień",
+  "shadowDepth": "Głębokość cienia",
   "glow": "Poświata (glow)",
   "glowStrength": "Siła poświaty",
+  "previewOnly": "tylko podgląd",
+  "anim": {
+    "appliesAll": "Dotyczy wszystkich napisów",
+    "exported": "eksport",
+    "duration": "Czas trwania",
+    "perWordDelay": "Opóźnienie na słowo",
+    "easing": "Wygładzanie",
+    "highlightColor": "Podświetlenie karaoke",
+    "types": {
+      "none": "Brak",
+      "fade": "Zanikanie",
+      "slide": "Wjazd w górę",
+      "pop": "Pop",
+      "typewriter": "Maszyna do pisania",
+      "karaoke": "Karaoke",
+      "blur": "Rozmycie"
+    }
+  },
+  "colors": "KOLORY",
+  "textColor": "Tekst",
+  "colorSwatchTip": "Kolor — kliknij, aby wybrać",
+  "fields": {
+    "hex": "Hex",
+    "r": "R",
+    "g": "G",
+    "b": "B",
+    "alpha": "Alfa"
+  },
+  "alphaTextHint": "Zmniejszenie alfy koloru tekstu pogarsza czytelność — alfa najlepiej działa na cieniu, poświacie i obrysie.",
   "captionBox": "BOX NAPISÓW",
   "boxPosition": "Pozycja boxa",
-  "boxBottomCenter": "Dół · środek",
+  "boxPos": {
+    "1": "Dół · lewo",
+    "2": "Dół · środek",
+    "3": "Dół · prawo",
+    "4": "Środek · lewo",
+    "5": "Środek · centrum",
+    "6": "Środek · prawo",
+    "7": "Góra · lewo",
+    "8": "Góra · środek",
+    "9": "Góra · prawo"
+  },
   "width": "Szerokość",
   "bottomDistance": "Odległość od dołu",
-  "applyToSelected": "Zastosuj do zaznaczonych",
-  "applyToAll": "Wszystkie",
+  "topDistance": "Odległość od góry",
+  "reset": "Przywróć domyślne",
   "searchPreset": "Szukaj presetu…",
-  "newPreset": "Nowy"
+  "newPreset": "Nowy",
+  "presets": {
+    "builtin": {
+      "neon": "Neon",
+      "hardShadow": "Twardy cień",
+      "thickOutline": "Gruby obrys",
+      "soft": "Miękki"
+    },
+    "duplicate": "Duplikuj",
+    "save": "Zapisz bieżący styl",
+    "delete": "Usuń",
+    "deleteConfirm": "Usunąć ten preset?",
+    "rename": "Zmień nazwę",
+    "namePlaceholder": "Nazwa presetu",
+    "defaultName": "Mój preset",
+    "builtinBadge": "Wbudowany",
+    "active": "Aktywny",
+    "empty": "Brak presetów pasujących do wyszukiwania.",
+    "saved": "Zapisano preset",
+    "tips": {
+      "new": "Nowy preset — zapisz bieżący styl jako preset do wielokrotnego użycia",
+      "save": "Zapisz — nadpisz ten preset bieżącym stylem",
+      "duplicate": "Duplikuj — utwórz edytowalną kopię jako własny preset",
+      "rename": "Zmień nazwę tego presetu",
+      "delete": "Usuń ten preset"
+    }
+  }
 }

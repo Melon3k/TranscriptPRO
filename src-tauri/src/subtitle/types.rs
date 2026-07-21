@@ -94,6 +94,9 @@ pub enum AppError {
     #[error("Failed to download model: {0}")]
     ModelDownloadFailed(String),
 
+    #[error("Video export failed: {0}")]
+    VideoExportFailed(String),
+
     #[error("Operation cancelled")]
     Cancelled,
 
@@ -113,6 +116,7 @@ impl AppError {
             AppError::FileError(_) => "FILE_ERROR",
             AppError::InvalidSrtFormat(_) => "INVALID_SRT_FORMAT",
             AppError::ModelDownloadFailed(_) => "MODEL_DOWNLOAD_FAILED",
+            AppError::VideoExportFailed(_) => "VIDEO_EXPORT_FAILED",
             AppError::Cancelled => "CANCELLED",
             AppError::Other(_) => "UNKNOWN_ERROR",
         }
@@ -129,6 +133,7 @@ impl AppError {
             | AppError::FileError(s)
             | AppError::InvalidSrtFormat(s)
             | AppError::ModelDownloadFailed(s)
+            | AppError::VideoExportFailed(s)
             | AppError::Other(s) => s,
             AppError::Cancelled => "",
         }

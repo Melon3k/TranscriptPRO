@@ -3,7 +3,8 @@ import { Copy, X, ListX } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useSubtitleStore } from "../../stores/subtitleStore";
 import { usePlayerStore } from "../../stores/playerStore";
-import SubtitleRow, { type WordDragPayload } from "./SubtitleRow";
+import SubtitleRow from "./SubtitleRow";
+import { useWordDrag, type WordDragPayload } from "../../hooks/useWordDrag";
 import { COLORS, f, FONTS } from "../../lib/ui";
 
 /** The 252px segment-list column. Owns word selection + active-row tracking. */
@@ -50,6 +51,24 @@ export default function SubtitleEditor() {
 
   const clearSelection = useCallback(() => setSelectedWords(new Map()), []);
 
+  // Prune word selections keyed by a subtitle id that no longer exists. A cross-
+  // segment move (moveWords) gives the SOURCE segment a fresh id, so any selection
+  // entry under its old id is orphaned — and a stray orphan keeps totalSelected > 0,
+  // which lights every row with the green "drop here" chrome (looks like a stuck
+  // multi-selection). Dropping dead ids after any subtitles change kills that.
+  useEffect(() => {
+    setSelectedWords((prev) => {
+      if (prev.size === 0) return prev;
+      const live = new Set(subtitles.map((s) => s.id));
+      let changed = false;
+      const next = new Map(prev);
+      for (const id of next.keys()) {
+        if (!live.has(id)) { next.delete(id); changed = true; }
+      }
+      return changed ? next : prev;
+    });
+  }, [subtitles]);
+
   const toggleWord = useCallback((subId: string, wi: number) => {
     setSelectedWords((prev) => {
       const next = new Map(prev);
@@ -77,24 +96,29 @@ export default function SubtitleEditor() {
   );
 
   const wordDrop = useCallback(
-    (targetId: string, payload: WordDragPayload, insertAt?: number) => {
+    (payload: WordDragPayload, targetId: string, insertAt?: number) => {
       moveWords(payload.sourceSubId, payload.wordIndices, targetId, insertAt);
-      setSelectedWords((prev) => {
-        const next = new Map(prev);
-        next.delete(payload.sourceSubId);
-        return next;
-      });
+      // Full clear: the move reindexes both segments, so index-keyed Sets are stale.
+      clearSelection();
     },
-    [moveWords],
+    [moveWords, clearSelection],
   );
+
+  const { dragging, hover, ghostRef, ghostLabel, startDrag } = useWordDrag(wordDrop, listRef);
 
   const selectSeg = useCallback(
     (id: string) => {
+      // A plain row click starts a clean slate: clear any word selection so a
+      // leftover cross-segment selection (or its drop-target chrome) can't cling
+      // after a move. Building a multi-selection goes through ⌘-click on WORD
+      // chips (stopPropagation), which never reaches here, so this doesn't fight
+      // selection build-up.
+      clearSelection();
       setSelectedId(id);
       const seg = subtitles.find((s) => s.id === id);
       if (seg) setCurrentTimeMs(seg.startTime);
     },
-    [subtitles, setCurrentTimeMs],
+    [subtitles, setCurrentTimeMs, clearSelection],
   );
 
   return (
@@ -174,7 +198,9 @@ export default function SubtitleEditor() {
         >
           {subtitles.map((sub, i) => {
             const isActive = sub.id === activeId;
-            const isDropTarget = totalSelected > 0 && !sourceSubIds.has(sub.id);
+            const isDropTarget =
+              (totalSelected > 0 && !sourceSubIds.has(sub.id)) ||
+              (dragging !== null && dragging.sourceSubId !== sub.id);
             return (
               <div key={sub.id} ref={isActive ? activeRef : undefined}>
                 <SubtitleRow
@@ -193,13 +219,37 @@ export default function SubtitleEditor() {
                   onSelect={selectSeg}
                   onWordToggleSelect={toggleWord}
                   onMoveWordsHere={moveHere}
-                  onWordDrop={wordDrop}
+                  onWordDragStart={startDrag}
+                  dragHoverInsertAt={hover?.subId === sub.id ? hover.insertAt : undefined}
                   isFirst={i === 0}
                   isLast={i === subtitles.length - 1}
                 />
               </div>
             );
           })}
+        </div>
+      )}
+
+      {dragging !== null && (
+        <div
+          ref={ghostRef}
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            zIndex: 1000,
+            pointerEvents: "none",
+            padding: "2px 8px",
+            borderRadius: 5,
+            background: COLORS.violet,
+            color: "#fff",
+            border: `1px solid ${COLORS.violetLight}`,
+            ...f(600, 10.5, "body"),
+            boxShadow: "0 4px 14px rgba(0,0,0,.35)",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {ghostLabel}
         </div>
       )}
     </div>

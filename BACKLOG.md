@@ -129,53 +129,98 @@ Still open:
   arbitrary user-chosen paths; a file-open app can't easily narrow this without breaking the
   core flow. Revisit only if Tauri grows a dynamic-scope API; otherwise document the decision.
 
-## New design (redesign UI) — features present in the UI but not yet implemented
+## New design (redesign UI) — SHIPPED (items A–G, 2026-07 AI-agent pass)
 
-The `feat/new-design` redesign (PR #23) ships the full new UI, but some panels
-are **built and rendered disabled/grayed** because there is no backend for them
-yet (per the brief: build the UI, gray it out, add no behaviour). This section
-tracks what it would take to make each one real.
+The `feat/new-design` redesign (PR #23) shipped the full new UI with the styling
+panels **built but grayed**. The 2026-07 AI-agent pass (branch
+`claude/new-design-features`, one workflow run per item: spec → implement →
+verify → adversarial review) made all of them real. Accepted decisions:
+**one global `CaptionStyle`/`CaptionAnimation`** (per-segment overrides remain a
+future additive field), and **honest export** — only fields ASS can faithfully
+carry are exported; the rest are marked "preview only" in the UI.
 
-### A. Caption styling — "Inspector" panel (disabled) *(LARGE)*
-- [ ] Font family picker (applied), size, letter-spacing, line-height sliders
-- [ ] Alignment L/C/R, bold / italic / uppercase (TT)
-- [ ] Outline / shadow / glow toggles + glow strength
-- [ ] Colours: text / outline / shadow / glow (no colour UI yet; model has the fields)
-- [ ] Caption-box position (3×3 grid), center H/V, width, distance-from-bottom
+- ✅ **F1 — Style foundation.** `CaptionStyle` type + persisted `styleStore`;
+  Player overlay bound to it (anchored to the video frame, no background pill);
+  Outfit/Inter/JetBrains Mono bundled locally via `@fontsource` (SIL OFL) with
+  `font-src 'self' data:` added to the CSP.
+- ✅ **F2 — ASS serialization.** `export_ass` generates `[V4+ Styles]` from the
+  style (Script Info `PlayResX/Y 1920×1080`, `ScaledBorderAndShadow`); uppercase
+  applied in Rust, braces escaped. `lineHeight`/`glow`/`align` are preview-only.
+- ✅ **A — Inspector tab live.** Font/size/spacing/line-height, L/C/R, B/I/TT,
+  outline/shadow/glow + strengths, four colour pickers, 3×3 box grid (visual→ASS
+  numpad map), width, distance, reset. Preview-only badges on glow/line-height/align.
+- ✅ **B — Draggable caption box.** "Position" mode on the player; drag snaps the
+  numpad column/row and sets `marginVPct`/`widthPct` live, syncing bidirectionally
+  with the Inspector (no free X — ASS Alignment is discrete, `\pos` out of scope).
+- ✅ **D — Effects/presets tab.** Named `CaptionStyle` snapshots: four built-ins +
+  user presets with live previews, New/Duplicate/Save/Delete/rename/search,
+  persisted; applying reuses `setStyle` so export stays faithful.
+- ✅ **C — Animations tab.** One global `CaptionAnimation`: fade (ASS `\fad`) and
+  karaoke (ASS `\k` + Primary/Secondary split) exported end-to-end; slide/pop/
+  typewriter/blur were preview-only here but **all now export too** (see the
+  follow-on below). Default `none`. Animation editor modal deliberately deferred.
+- ✅ **E — Export preview modal.** "Preview & export" opens SRT/VTT tabs rendering
+  the exact serializer output (read-only `preview_export` command) + Download;
+  inverted timings shown as an inline banner (no double prompt). Word SRT/ASS/TXT
+  keep their direct menu entries.
+- ✅ **G — Drag-and-drop regression fixed.** Word DnD reimplemented on pointer
+  events (`useWordDrag`), so native Tauri file drop is re-enabled
+  (`dragDropEnabled: true`) with a drop overlay.
 
-### B. Subtitle positioning on the player *(MEDIUM)*
-- [ ] Draggable caption box on the video (handles, `x%` / `bottom%`) — today the
-      overlay is static, only show/hide via the corner CC toggle
-- [ ] Bind position/width to the style model
+### Video export + fidelity follow-on (2026-07-21, same branch)
 
-### C. Subtitle animations — "Animations" tab (disabled) *(LARGE)*
-- [ ] Types: fade / slide / pop / typewriter / karaoke / blur
-- [ ] Apply to selected / all
-- [ ] Duration, per-word delay, easing, highlight colour
-- [ ] Per-word animation
-- [ ] **Animation editor modal** (with live preview) — not built at all
+After A–G, the user asked for the real goal — **burn the styled/animated
+subtitles into an MP4** — plus a batch of QA fixes from live testing. All done on
+`claude/new-design-features` (each its own commit; workflow spec→impl→verify→review,
+or a single focused agent where the workflow's spec phase kept failing):
 
-### D. Presets / effects — "Effects" tab (disabled) *(MEDIUM)*
-- [ ] Preset cards (Neon, Hard shadow, Thick outline, Soft)
-- [ ] New / Duplicate / Save / Delete + inline editor
-- [ ] Preset search
-- [ ] Persist presets
+- ✅ **MP4 burn-in export.** New "Eksportuj wideo (MP4)" in the Rail export menu →
+  `export_video` runs the bundled ffmpeg over the ASS the app already generates
+  (`-vf ass=…`, H.264 + AAC), progress + cancel, temp cleanup. Path-escaping solved
+  by writing the `.ass` to a per-export temp dir and running ffmpeg with `current_dir`
+  there (bare basename in the filtergraph). **ASS is now invisible internal plumbing**,
+  not a user deliverable.
+- ✅ **Bundled TTF fonts for the burn.** Static Regular+Bold of Outfit/Inter/JetBrains
+  Mono (SIL OFL) shipped in `src-tauri/fonts/` (bundle resource); burn copies them into
+  the temp dir + `fontsdir=.` so the video matches the preview. Family names verified
+  to equal the ASS `Fontname`. Degrades to system substitution (reported) if unavailable.
+- ✅ **System fonts.** `list_system_fonts` (fontdb) → searchable font picker (bundled
+  pinned on top). `fontId` generalized to a family-name string (legacy ids migrate).
+  System-font burns embed the located face via fontdb so libass matches by name.
+- ✅ **Colour picker with alpha.** react-colorful popover (sat/hue/alpha + Hex/R/G/B/A),
+  colours now `#RRGGBBAA`; alpha flows to preview, ASS (`&HAABBGGRR` inverse-alpha) and
+  the burn. Migration of persisted styles/presets on load.
+- ✅ **All animations now export/burn** (was fade+karaoke only): pop `\fscx/\t`, blur
+  `\blur24\t`, slide `\move`, typewriter per-char `\alpha` cascade. easing + per-word
+  delay stay preview-only.
+- ✅ **Glow exported** as a soft fill-shape halo (blurred glyph copy in the glow colour
+  on a layer behind the caption) — matches the CSS preview; replaced a first attempt that
+  rendered a chunky border ring.
+- ✅ **QA fixes from testing:** light-theme animation/preset card labels made readable;
+  translation *comparison* view scoped to the Translate workspace (was leaking into
+  transcription and hiding progress); stale word-selection after a cross-segment move
+  fixed (orphaned-id prune + clear-on-row-click); **custom tooltips** app-wide (native
+  `title` doesn't render in the macOS WKWebView).
 
-### E. Design elements skipped in the implementation *(SMALL)*
-- [ ] **Export preview modal** (SRT/VTT tabs + text preview + Download) — export
-      currently goes straight to the native save dialog (functional, no preview)
+### To take care of (known limitations / follow-ups)
 
-### F. Cross-cutting prerequisites for A–D
-- [ ] Extend `Subtitle` (or a new store) with style/animation data — global and/or per-segment
-- [ ] Render the style on the video overlay in `Player` (plain text today)
-- [ ] Backend: serialize style/animation into **ASS** (`export_ass`) and possibly karaoke/Word SRT
-- [ ] Persist style settings / presets (localStorage / settings / per project)
-- [ ] (CSP) No real Outfit/Inter webfonts — consider bundling `.woff2` locally so style previews are faithful
-
-### G. Regression to decide *(from the redesign)*
-- [ ] Drag-and-drop a **file** onto the window to open it — disabled (`dragDropEnabled: false`)
-      because the native Tauri drag-drop swallowed HTML5 word dragging on macOS. To have both,
-      reimplement word DnD on pointer events (mouse) and re-enable native file drop.
+- **Everything here was verified by `tsc` + `vitest` + `cargo test` and, for the burn,
+  by inspecting fixture frames — but NOT by a real `tauri build` + release run.** Font
+  bundling fidelity and resource paths only fully manifest in a packaged build; do a
+  build + smoke before any release.
+- **Windows unverified** for the new surfaces: system-font enumeration, burn-in fonts,
+  and the still-open **Cmd+Q guard** (P2) need a Windows pass. `tauri-driver` E2E is
+  Linux/Windows-only (no macOS), so automated end-to-end stays CI-only.
+- **Test automation deferred** (user's call): the UI/burn behaviours are covered by unit
+  tests + manual QA only. No component (jsdom/RTL) or burn-smoke tests yet — EDT-1 in
+  particular shipped without a regression test. First automation slice, when wanted:
+  component tests + a cargo burn-smoke.
+- **libass effect limits (documented, accepted):** blur reads as a shrinking halo, not a
+  photographic defocus; typewriter is a per-char fade cascade, not a hard slice; a long
+  multi-line *slide* cue may wrap slightly differently under `\move`.
+- **Bundle size:** the three TTFs add ~1–1.5 MB to the installer/updater artifact.
+- Still deferred by design: per-segment style/animation overrides; the animation editor
+  modal; free per-cue `\pos`; preview tabs for Word SRT/ASS/TXT.
 
 Not on this list (these work): Whisper transcription + speaker detection, translation
 (Gemini/Claude/local Gemma), SRT import, SRT/VTT/ASS/TXT/Word SRT export, editing/segments,

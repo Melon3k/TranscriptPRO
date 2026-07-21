@@ -22,12 +22,22 @@ const ITEMS = {
   E: 'Item E — export preview modal: SRT/VTT tabs with generated text preview + Download button in front of the native save dialog; include the inverted-timings warning already shown by the export guard.',
 }
 
-const item = args && args.item
+// args may arrive as a JSON-encoded string depending on the invocation path.
+let input = args
+if (typeof input === 'string') {
+  try { input = JSON.parse(input) } catch { input = { item: input.trim() } }
+}
+const item = input && input.item
 if (!item || !ITEMS[item]) {
-  throw new Error(`args.item must be one of: ${Object.keys(ITEMS).join(', ')}`)
+  throw new Error(`args.item must be one of: ${Object.keys(ITEMS).join(', ')} (got: ${JSON.stringify(args)})`)
 }
 const brief = ITEMS[item]
 log(`Implementing backlog item ${item}`)
+
+// Custom agent types from .claude/agents/ are only registered at session start,
+// so agents adopt their role by reading the definition file instead.
+const role = (name) =>
+  `First, Read the file .claude/agents/${name}.md and adopt everything after its frontmatter as your operating instructions for this task. Then proceed:\n\n`
 
 // ── Schemas ───────────────────────────────────────────────────────────────────
 const SPEC_SCHEMA = {
@@ -111,8 +121,9 @@ const VERDICT_SCHEMA = {
 // ── Phase 1: Spec ─────────────────────────────────────────────────────────────
 phase('Spec')
 const spec = await agent(
-  `Produce the implementation spec for this TranscriptPRO backlog item.\n\n${brief}\n\nFollow your standing instructions: read BACKLOG.md ("New design" section), docs/new-design-agents.md (accepted decisions — do not reopen them), and the code you build on, then return the spec.`,
-  { agentType: 'feature-architect', label: `spec:${item}`, schema: SPEC_SCHEMA }
+  role('feature-architect') +
+    `Produce the implementation spec for this TranscriptPRO backlog item.\n\n${brief}\n\nFollow your role instructions: read BACKLOG.md ("New design" section), docs/new-design-agents.md (accepted decisions — do not reopen them), and the code you build on, then return the spec.`,
+  { label: `spec:${item}`, schema: SPEC_SCHEMA }
 )
 if (!spec) throw new Error('Architect returned nothing')
 log(`Spec ready: ${spec.workPackages.length} work package(s)`)
@@ -122,10 +133,11 @@ phase('Implement')
 const implemented = []
 for (let i = 0; i < spec.workPackages.length; i++) {
   const wp = spec.workPackages[i]
-  const agentType = wp.area === 'rust' ? 'tauri-rust-implementer' : 'frontend-implementer'
+  const roleName = wp.area === 'rust' ? 'tauri-rust-implementer' : 'frontend-implementer'
   const result = await agent(
-    `Implement this work package (${i + 1}/${spec.workPackages.length}) for backlog item ${item}.\n\nFeature summary: ${spec.summary}\n\nData model: ${spec.dataModel || 'n/a'}\n\nPackage: ${wp.title}\nFiles: ${wp.files.join(', ')}\nInstructions:\n${wp.instructions}\n\nEarlier packages already applied to the working tree: ${implemented.map((r) => r.title).join('; ') || 'none'}.`,
-    { agentType, label: `impl:${wp.title.slice(0, 30)}` }
+    role(roleName) +
+      `Implement this work package (${i + 1}/${spec.workPackages.length}) for backlog item ${item}.\n\nFeature summary: ${spec.summary}\n\nData model: ${spec.dataModel || 'n/a'}\n\nPackage: ${wp.title}\nFiles: ${wp.files.join(', ')}\nInstructions:\n${wp.instructions}\n\nEarlier packages already applied to the working tree: ${implemented.map((r) => r.title).join('; ') || 'none'}.`,
+    { label: `impl:${wp.title.slice(0, 30)}` }
   )
   implemented.push({ title: wp.title, result })
 }
@@ -133,22 +145,26 @@ for (let i = 0; i < spec.workPackages.length; i++) {
 // ── Phase 3: Verify (gate + one repair round) ─────────────────────────────────
 phase('Verify')
 // Route repairs to the implementer whose files are failing.
-const repairAgentFor = (findings) =>
-  (findings || []).some((f) => (f.file || '').endsWith('.rs') || (f.file || '').includes('src-tauri'))
-    ? 'tauri-rust-implementer'
-    : 'frontend-implementer'
+const repairRoleFor = (findings) =>
+  role(
+    (findings || []).some((f) => (f.file || '').endsWith('.rs') || (f.file || '').includes('src-tauri'))
+      ? 'tauri-rust-implementer'
+      : 'frontend-implementer'
+  )
 const verifyPrompt = () =>
-  `Verify the just-implemented backlog item ${item} ("${spec.summary}"). The diff to audit is the uncommitted working tree (git diff HEAD). Follow your standing checklist and return the verdict object.`
-let verdict = await agent(verifyPrompt(), { agentType: 'qa-verifier', label: 'verify', schema: VERIFY_SCHEMA })
+  role('qa-verifier') +
+  `Verify the just-implemented backlog item ${item} ("${spec.summary}"). The diff to audit is the uncommitted working tree (git diff HEAD). Follow your role checklist and return the verdict object.`
+let verdict = await agent(verifyPrompt(), { label: 'verify', schema: VERIFY_SCHEMA })
 
 if (verdict && !verdict.ok) {
   const highs = verdict.findings.filter((f) => f.severity === 'high')
   log(`Verify failed (${highs.length} high) — one repair round`)
   await agent(
-    `Repair round for backlog item ${item}. The QA gate failed. Fix ONLY these problems, nothing else:\n\n${JSON.stringify(verdict.findings, null, 2)}\n\nCommand output excerpts:\n${verdict.commands || 'n/a'}`,
-    { agentType: repairAgentFor(verdict.findings), label: 'repair' }
+    repairRoleFor(verdict.findings) +
+      `Repair round for backlog item ${item}. The QA gate failed. Fix ONLY these problems, nothing else:\n\n${JSON.stringify(verdict.findings, null, 2)}\n\nCommand output excerpts:\n${verdict.commands || 'n/a'}`,
+    { label: 'repair' }
   )
-  verdict = await agent(verifyPrompt(), { agentType: 'qa-verifier', label: 're-verify', schema: VERIFY_SCHEMA })
+  verdict = await agent(verifyPrompt(), { label: 're-verify', schema: VERIFY_SCHEMA })
 }
 
 // ── Phase 4: Review (3 lenses → adversarial verify → fix confirmed highs) ────
@@ -162,8 +178,9 @@ const found = (
   await parallel(
     LENSES.map((l) => () =>
       agent(
-        `Review the uncommitted working-tree diff (git diff HEAD) of TranscriptPRO backlog item ${item}. Lens: ${l.prompt}. Read the enclosing code of every hunk. Return up to 5 findings with concrete failure scenarios; return an empty list if clean.`,
-        { agentType: 'qa-verifier', label: `find:${l.key}`, phase: 'Review', schema: FINDINGS_SCHEMA }
+        role('qa-verifier') +
+          `Review the uncommitted working-tree diff (git diff HEAD) of TranscriptPRO backlog item ${item}. Lens: ${l.prompt}. Read the enclosing code of every hunk. Do NOT run the build/test commands (a separate gate does that) — audit only. Return up to 5 findings with concrete failure scenarios; return an empty list if clean.`,
+        { label: `find:${l.key}`, phase: 'Review', schema: FINDINGS_SCHEMA }
       )
     )
   )
@@ -183,8 +200,8 @@ log(`${unique.length} unique finding(s) to verify`)
 const judged = await parallel(
   unique.map((f) => () =>
     agent(
-      `Adversarially verify this code-review finding against the actual code (try to REFUTE it; quote lines):\n${JSON.stringify(f)}`,
-      { agentType: 'qa-verifier', label: `judge:${(f.file || '').split('/').pop()}`, phase: 'Review', schema: VERDICT_SCHEMA }
+      `Adversarially verify this code-review finding against the actual code in this repo (try to REFUTE it; quote lines):\n${JSON.stringify(f)}`,
+      { label: `judge:${(f.file || '').split('/').pop()}`, phase: 'Review', schema: VERDICT_SCHEMA }
     ).then((v) => ({ ...f, verdict: v ? v.verdict : 'PLAUSIBLE' }))
   )
 )
@@ -193,10 +210,11 @@ const confirmed = judged.filter(Boolean).filter((f) => f.verdict === 'CONFIRMED'
 if (confirmed.length > 0) {
   log(`Fixing ${confirmed.length} confirmed finding(s)`)
   await agent(
-    `Fix ONLY these confirmed review findings for backlog item ${item}, nothing else:\n\n${JSON.stringify(confirmed, null, 2)}`,
-    { agentType: repairAgentFor(confirmed), label: 'fix-findings', phase: 'Review' }
+    repairRoleFor(confirmed) +
+      `Fix ONLY these confirmed review findings for backlog item ${item}, nothing else:\n\n${JSON.stringify(confirmed, null, 2)}`,
+    { label: 'fix-findings', phase: 'Review' }
   )
-  verdict = await agent(verifyPrompt(), { agentType: 'qa-verifier', label: 'final-verify', phase: 'Review', schema: VERIFY_SCHEMA })
+  verdict = await agent(verifyPrompt(), { label: 'final-verify', phase: 'Review', schema: VERIFY_SCHEMA })
 }
 
 return {

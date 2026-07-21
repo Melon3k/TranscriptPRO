@@ -11,8 +11,8 @@
  * default to the dark theme (`:root`); the app root carries data-th="dark|light"
  * (set in MainLayout from settingsStore.darkMode) so the light overrides win.
  * Names mirror the imported prototype (`--c-*`) so the ported inline styles map
- * 1:1. Fonts fall back to the system stack because the desktop CSP blocks the
- * Google Fonts CDN. */
+ * 1:1. Outfit, Inter and JetBrains Mono are bundled locally as Fontsource
+ * woff2 (imported in main.tsx) — no webfont CDN, so the closed CSP stays. */
 :root,
 :root [data-th="dark"] {
   --c-bg: #0D1117;
@@ -78,6 +78,13 @@ button, [role="button"] {
 @keyframes an-blur { from { opacity: 0; filter: blur(9px); } to { opacity: 1; filter: blur(0); } }
 @keyframes an-type { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
 @keyframes an-kar { 0% { color: #22D3EE; text-shadow: 0 0 12px #22D3EE; } 100% { color: #fff; text-shadow: none; } }
+/* Item C caption entrances — transform/opacity/filter only (WKWebView-safe),
+   no container-query units. The Player keys the caption span by cue id so each
+   cue restarts these on mount. */
+@keyframes captionFadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes captionSlideUp { from { opacity: 0; transform: translateY(18%); } to { opacity: 1; transform: none; } }
+@keyframes captionPop { from { opacity: 0; transform: scale(.7); } to { opacity: 1; transform: scale(1); } }
+@keyframes captionBlurIn { from { opacity: 0; filter: blur(8px); } to { opacity: 1; filter: blur(0); } }
 
 /* ── Range sliders (subtitle inspector) ──────────────────────────────────── */
 input[type=range] {
@@ -116,3 +123,16 @@ select, input, textarea { color-scheme: light dark; }
   font-size: 0.75rem;
   letter-spacing: 0.02em;
 }
+
+/* ── react-colorful (ColorField popover) ─────────────────────────────────── */
+/* The library needs class-based sizing that inline styles can't provide. It
+   bakes its own neutral-gray checkerboard into .react-colorful__alpha — we
+   only size it, never override the background (reads fine in both themes). */
+.tpro-colorful .react-colorful { width: 180px; height: auto; }
+.tpro-colorful .react-colorful__saturation {
+  border-radius: 6px 6px 0 0;
+  height: 130px;
+}
+.tpro-colorful .react-colorful__hue,
+.tpro-colorful .react-colorful__alpha { height: 18px; }
+.tpro-colorful .react-colorful__last-control { border-radius: 0 0 6px 6px; }

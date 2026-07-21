@@ -5,6 +5,9 @@ import { Subtitle, Word } from "../../types/subtitle";
 import { formatTimestamp, parseTimestamp } from "../../lib/time-format";
 import { hasInvertedTiming } from "../../lib/subtitle-ops";
 import { COLORS, f, FONTS } from "../../lib/ui";
+import type { WordDragPayload } from "../../hooks/useWordDrag";
+
+export type { WordDragPayload } from "../../hooks/useWordDrag";
 
 /**
  * Rebuild word tokens from edited sentence text, spreading the segment's time
@@ -24,11 +27,6 @@ function retokenize(text: string, start: number, end: number): Word[] {
   }));
 }
 
-export interface WordDragPayload {
-  sourceSubId: string;
-  wordIndices: number[];
-}
-
 interface SubtitleRowProps {
   subtitle: Subtitle;
   isActive: boolean;
@@ -44,7 +42,8 @@ interface SubtitleRowProps {
   onSelect: (id: string) => void;
   onWordToggleSelect?: (subtitleId: string, wordIdx: number) => void;
   onMoveWordsHere?: (targetSubId: string, insertAt?: number) => void;
-  onWordDrop?: (targetSubId: string, payload: WordDragPayload, insertAt?: number) => void;
+  onWordDragStart?: (e: React.PointerEvent, payload: WordDragPayload, label: string) => void;
+  dragHoverInsertAt?: number | null;
   isSelected: boolean;
   isFirst: boolean;
   isLast: boolean;
@@ -75,7 +74,8 @@ function SubtitleRow({
   onSelect,
   onWordToggleSelect,
   onMoveWordsHere,
-  onWordDrop,
+  onWordDragStart,
+  dragHoverInsertAt,
   isSelected,
   isFirst,
   isLast,
@@ -83,7 +83,6 @@ function SubtitleRow({
   const { t } = useTranslation(["editor"]);
   const [editing, setEditing] = useState(false);
   const [editingText, setEditingText] = useState(subtitle.text);
-  const [dragInsertIdx, setDragInsertIdx] = useState<number | null>(null);
 
   useEffect(() => setEditingText(subtitle.text), [subtitle.text]);
 
@@ -113,27 +112,21 @@ function SubtitleRow({
     }
   };
 
-  const handleWordDragStart = (e: React.DragEvent, wi: number) => {
-    const indices =
+  const handleWordPointerDown = (e: React.PointerEvent, wi: number) => {
+    // modified clicks are word-selection, never drags
+    if (e.metaKey || e.ctrlKey || e.shiftKey) return;
+    // A retokenizing text edit can leave stale out-of-range indices in the
+    // selection Set (same subtitle id, fewer words) — drop them or we'd
+    // dereference undefined below.
+    const valid =
       selectedWordIndices && selectedWordIndices.has(wi)
-        ? Array.from(selectedWordIndices)
+        ? Array.from(selectedWordIndices).filter((i) => i >= 0 && i < subtitle.words.length)
         : [wi];
+    const indices = valid.length > 0 ? valid : [wi];
     const payload: WordDragPayload = { sourceSubId: subtitle.id, wordIndices: indices };
-    e.dataTransfer.setData("text/plain", JSON.stringify(payload));
-    e.dataTransfer.effectAllowed = "move";
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setDragInsertIdx(null);
-    const raw = e.dataTransfer.getData("text/plain");
-    if (!raw) return;
-    try {
-      const payload: WordDragPayload = JSON.parse(raw);
-      if (payload.sourceSubId !== subtitle.id) onWordDrop?.(subtitle.id, payload);
-    } catch {
-      /* ignore malformed payload */
-    }
+    const label =
+      subtitle.words[indices[0]].text + (indices.length > 1 ? ` +${indices.length - 1}` : "");
+    onWordDragStart?.(e, payload, label);
   };
 
   // Non-blocking inverted-time signal: TimeCode deliberately allows transient
@@ -161,9 +154,8 @@ function SubtitleRow({
 
   return (
     <div
+      data-word-row={subtitle.id}
       onClick={() => onSelect(subtitle.id)}
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={handleDrop}
       style={{ borderRadius: 8, border, background, padding: "9px 11px", cursor: "pointer" }}
     >
       {/* header */}
@@ -174,7 +166,7 @@ function SubtitleRow({
           </span>
           {spk && spkColor && (
             <span
-              title={subtitle.speaker}
+              data-tip={subtitle.speaker}
               style={{
                 width: 16,
                 height: 16,
@@ -249,7 +241,7 @@ function SubtitleRow({
       ) : (
         <div
           onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}
-          title={t("editor:doubleClickToEdit")}
+          data-tip={t("editor:doubleClickToEdit")}
           style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 3 }}
         >
           {hasWords ? (
@@ -258,12 +250,10 @@ function SubtitleRow({
               activeWordIndex={activeWordIndex}
               selectedWordIndices={selectedWordIndices}
               isDropTarget={!!isDropTarget}
-              dragInsertIdx={dragInsertIdx}
-              setDragInsertIdx={setDragInsertIdx}
+              dragHoverInsertAt={dragHoverInsertAt}
               onWordClick={handleWordClick}
-              onWordDragStart={handleWordDragStart}
+              onWordPointerDown={handleWordPointerDown}
               onMoveWordsHere={onMoveWordsHere}
-              onWordDrop={onWordDrop}
             />
           ) : (
             <p style={f(400, 11, "body", { color: "var(--c-text2)", lineHeight: 1.4, margin: 0 })}>{subtitle.text}</p>
@@ -295,23 +285,19 @@ function WordChips({
   activeWordIndex,
   selectedWordIndices,
   isDropTarget,
-  dragInsertIdx,
-  setDragInsertIdx,
+  dragHoverInsertAt,
   onWordClick,
-  onWordDragStart,
+  onWordPointerDown,
   onMoveWordsHere,
-  onWordDrop,
 }: {
   subtitle: Subtitle;
   activeWordIndex: number | null;
   selectedWordIndices?: Set<number>;
   isDropTarget: boolean;
-  dragInsertIdx: number | null;
-  setDragInsertIdx: (i: number | null) => void;
+  dragHoverInsertAt?: number | null;
   onWordClick: (e: React.MouseEvent, wi: number) => void;
-  onWordDragStart: (e: React.DragEvent, wi: number) => void;
+  onWordPointerDown: (e: React.PointerEvent, wi: number) => void;
   onMoveWordsHere?: (targetSubId: string, insertAt?: number) => void;
-  onWordDrop?: (targetSubId: string, payload: WordDragPayload, insertAt?: number) => void;
 }) {
   const chip = (wi: number): CSSProperties => {
     const sel = selectedWordIndices?.has(wi) ?? false;
@@ -323,6 +309,7 @@ function WordChips({
       borderRadius: 5,
       cursor: "grab",
       userSelect: "none",
+      touchAction: "none",
       border: `1px solid ${sel ? COLORS.violet : "transparent"}`,
       background: sel ? "rgba(124,58,237,.22)" : activeWord ? "rgba(37,99,255,.22)" : "var(--c-input)",
       color: sel ? COLORS.violetLight : activeWord ? COLORS.blueLight : "var(--c-text2)",
@@ -330,11 +317,11 @@ function WordChips({
   };
 
   const zone = (k: number): CSSProperties => ({
-    width: dragInsertIdx === k ? 6 : 4,
+    width: dragHoverInsertAt === k ? 6 : 4,
     alignSelf: "stretch",
     minHeight: 18,
     borderRadius: 3,
-    background: "rgba(124,58,237,.55)",
+    background: dragHoverInsertAt === k ? "rgba(124,58,237,.9)" : "rgba(124,58,237,.55)",
     flex: "none",
     cursor: "pointer",
   });
@@ -342,27 +329,18 @@ function WordChips({
   const dropZone = (k: number) => (
     <span
       key={`z${k}`}
+      data-word-zone={k}
       style={zone(k)}
-      onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragInsertIdx(k); }}
       onClick={(e) => { e.stopPropagation(); onMoveWordsHere?.(subtitle.id, k); }}
-      onDrop={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        setDragInsertIdx(null);
-        try {
-          const payload: WordDragPayload = JSON.parse(e.dataTransfer.getData("text/plain"));
-          if (payload.sourceSubId !== subtitle.id) onWordDrop?.(subtitle.id, payload, k);
-        } catch { /* ignore */ }
-      }}
     />
   );
 
   const words = subtitle.words.map((w, wi) => (
     <span
       key={`w${wi}`}
-      draggable
       onClick={(e) => onWordClick(e, wi)}
-      onDragStart={(e) => onWordDragStart(e, wi)}
+      onPointerDown={(e) => onWordPointerDown(e, wi)}
+      onContextMenu={(e) => e.preventDefault()}
       style={chip(wi)}
     >
       {w.text}
@@ -392,6 +370,8 @@ function TimeCode({
   onChange: (ms: number) => void;
   invalid?: boolean;
 }) {
+  const { t } = useTranslation(["editor"]);
+  const tipText = t("editor:timestampHint");
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(formatTimestamp(value));
   useEffect(() => setDraft(formatTimestamp(value)), [value]);
@@ -431,6 +411,7 @@ function TimeCode({
     <button
       onClick={(e) => { e.stopPropagation(); onSeek(value); }}
       onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}
+      data-tip={tipText}
       style={{
         fontFamily: FONTS.mono,
         fontWeight: 500,
@@ -462,7 +443,8 @@ function ActionBtn({
 }) {
   return (
     <button
-      title={title}
+      aria-label={title}
+      data-tip={title}
       onClick={onClick}
       disabled={disabled}
       style={{

@@ -7,6 +7,7 @@ import {
   WhisperModelInfo,
 } from "../types/subtitle";
 import { SubtitleVersion } from "../types/version";
+import type { CaptionStyle, CaptionAnimation } from "../types/captionStyle";
 
 // ── File dialogs ─────────────────────────────────────────────────────────────
 
@@ -70,6 +71,15 @@ export async function saveAssFileDialog(
   });
 }
 
+export async function saveMp4FileDialog(
+  defaultName = "video.mp4"
+): Promise<string | null> {
+  return save({
+    filters: [{ name: "MP4 Video", extensions: ["mp4"] }],
+    defaultPath: defaultName,
+  });
+}
+
 // ── File I/O commands ────────────────────────────────────────────────────────
 
 export async function importSrt(path: string): Promise<Subtitle[]> {
@@ -106,9 +116,20 @@ export async function exportVtt(
 
 export async function exportAss(
   path: string,
-  subtitles: Subtitle[]
+  subtitles: Subtitle[],
+  style: CaptionStyle,
+  animation: CaptionAnimation
 ): Promise<void> {
-  return invoke("export_ass", { path, subtitles });
+  return invoke("export_ass", { path, subtitles, style, animation });
+}
+
+export type PreviewFormat = "srt" | "vtt";
+
+export async function previewExport(
+  subtitles: Subtitle[],
+  format: PreviewFormat,
+): Promise<string> {
+  return invoke<string>("preview_export", { subtitles, format });
 }
 
 export async function saveVersionHistory(
@@ -132,6 +153,50 @@ export async function loadVersionHistory(
 
 export async function extractAudio(inputPath: string): Promise<string> {
   return invoke<string>("extract_audio", { inputPath });
+}
+
+// ── Video export (MP4 subtitle burn-in) ──────────────────────────────────────
+
+/** How the burn-in resolved the caption font.
+ *  `bundled` = app TTFs (matches the preview); `system` = an OS font resolved
+ *  by fontconfig (faithful — the same installed font the preview used);
+ *  `substituted` = bundled TTFs couldn't be copied, so libass substituted. */
+export type FontOutcome = "bundled" | "system" | "substituted";
+
+/**
+ * Burn the currently-loaded video's styled + animated subtitles into an MP4.
+ * Progress is reported 0..1 over a Channel, mirroring downloadModel.
+ * Only STYLE + FADE + KARAOKE burn in; slide/pop/typewriter/blur render as
+ * plain (un-animated) captions.
+ *
+ * Resolves to how the burn resolved the font: `bundled` (app TTFs, matches the
+ * preview), `system` (OS font resolved by fontconfig, faithful — the same
+ * installed font the preview used), or `substituted` (bundled TTFs unavailable,
+ * libass substituted). The caller uses this to avoid claiming a match that
+ * didn't happen.
+ */
+export async function exportVideo(
+  videoPath: string,
+  subtitles: Subtitle[],
+  style: CaptionStyle,
+  animation: CaptionAnimation,
+  outputPath: string,
+  onProgress: (progress: number) => void
+): Promise<FontOutcome> {
+  const channel = new Channel<number>();
+  channel.onmessage = onProgress;
+  return invoke<FontOutcome>("export_video", {
+    videoPath,
+    subtitles,
+    style,
+    animation,
+    outputPath,
+    onProgress: channel,
+  });
+}
+
+export async function cancelVideoExport(): Promise<void> {
+  return invoke("cancel_video_export");
 }
 
 // ── Whisper model management ─────────────────────────────────────────────────
@@ -170,6 +235,18 @@ export async function downloadLocalModel(
 
 export async function cancelLocalModelDownload(): Promise<void> {
   return invoke("cancel_local_model_download");
+}
+
+// ── System fonts ─────────────────────────────────────────────────────────────
+
+/** DISTINCT, sorted, human-readable font family names installed on the machine.
+ *  Called lazily (font control open) and cached by the caller — can be a few
+ *  hundred entries. REJECTS on failure (rather than resolving []) so the caller
+ *  can tell a transient error apart from a genuinely empty list and retry
+ *  instead of caching the failure forever. The bundled quick-picks are shown
+ *  regardless, since they come from CAPTION_FONTS, not from this call. */
+export async function listSystemFonts(): Promise<string[]> {
+  return invoke<string[]>("list_system_fonts");
 }
 
 // ── Transcription ────────────────────────────────────────────────────────────

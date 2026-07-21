@@ -133,6 +133,17 @@ przy każdym odczycie. Klucze nigdy nie wracają do warstwy UI.
   (TranslateGemma) działa offline, ale jakość idiomów jest niższa niż w modelach chmurowych
 - Aplikacja nie jest jeszcze podpisana komercyjnym certyfikatem OS (macOS Developer ID, Windows Authenticode) — pierwsze uruchomienie wymaga zaakceptowania ostrzeżenia, patrz sekcja **Pierwsze uruchomienie — ostrzeżenia OS** wyżej. Sam mechanizm aktualizacji jest podpisany kluczem Ed25519 (Tauri updater) niezależnie od OS.
 
+## Fonty
+
+Aplikacja bundluje trzy kroje pisma: **Outfit**, **Inter** i **JetBrains Mono** — każdy na licencji
+SIL Open Font License 1.1, self-hostowane przez pakiety [Fontsource](https://fontsource.org)
+(brak CDN-u webfontów — CSP pozostaje zamknięte).
+
+Wypalanie napisów do MP4 dodatkowo bundluje statyczne instancje Regular+Bold tych samych trzech
+krojów (TTF, SIL OFL 1.1) w `src-tauri/fonts/`, dołączane jako zasoby Tauri — dzięki temu wypalone
+wideo renderuje te same kroje co podgląd na ekranie (libass czyta TTF, nie woff2). Obie kopie
+współistnieją: `@fontsource` .woff2 obsługuje UI aplikacji, a TTF-y obsługują wypalanie w libass.
+
 ## Licencja
 
 Prywatny projekt. Wszelkie prawa zastrzeżone.

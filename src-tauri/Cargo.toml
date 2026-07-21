@@ -48,6 +48,8 @@ thiserror = "2"
 regex = "1"
 # Decode legacy-encoded subtitle files (e.g. Windows-1250 Polish SRTs) on import.
 encoding_rs = "0.8"
+# Pure-Rust system-font enumeration (no system libs) for the caption font picker.
+fontdb = "0.23"
 # whisper-rs Metal backend is macOS-only (links Apple's Foundation.framework).
 # Windows/Linux fall back to the default CPU backend.
 whisper-rs-sys = "0.15"

@@ -18,8 +18,20 @@ export function useFileDrop(onDrop: (paths: string[]) => void): { isDragging: bo
     // Native drag-drop is a Tauri-only capability. When the same React UI runs
     // outside the desktop shell (the hosted web target), the Tauri internals are
     // absent and getCurrentWebview() throws — skip wiring rather than crash.
-    if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {
+    if (typeof window === "undefined") {
       return;
+    }
+    if (!("__TAURI_INTERNALS__" in window)) {
+      // Hosted-web target: no native drop routing, but we must still swallow
+      // OS file drops or the browser navigates away from the app (discarding
+      // unsaved edits).
+      const swallow = (e: DragEvent) => e.preventDefault();
+      window.addEventListener("dragover", swallow);
+      window.addEventListener("drop", swallow);
+      return () => {
+        window.removeEventListener("dragover", swallow);
+        window.removeEventListener("drop", swallow);
+      };
     }
     const unlistenPromise = getCurrentWebview().onDragDropEvent((event) => {
       switch (event.payload.type) {

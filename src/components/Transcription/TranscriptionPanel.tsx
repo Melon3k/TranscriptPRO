@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Mic, Download, X, Scissors } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useSettingsStore, type SegmentLimitModeSetting } from "../../stores/settingsStore";
@@ -55,6 +55,22 @@ export default function TranscriptionPanel({ audioPath, extracting, onCancelExtr
   const [transcribing, setTranscribing] = useState(false);
   const [progress, setProgress] = useState<TranscriptionProgress | null>(null);
   const [detectSpeakers, setDetectSpeakers] = useState(false);
+
+  // The perceived "window jump" was the config→progress content swap inside this
+  // overflow:auto container: the focused Transcribe button unmounts and the progress
+  // block can render below the fold. Fixed by scrolling the progress block into view
+  // and re-homing focus onto the Cancel button when a run begins.
+  const progressRef = useRef<HTMLDivElement>(null);
+  const cancelBtnRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (transcribing) {
+      progressRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      cancelBtnRef.current?.focus();
+    }
+  }, [transcribing]);
+  useEffect(() => {
+    if (extracting) progressRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [extracting]);
 
   useEffect(() => { void loadModels(); }, []);
   const loadModels = async () => {
@@ -187,8 +203,8 @@ export default function TranscriptionPanel({ audioPath, extracting, onCancelExtr
       </div>
 
       {transcribing ? (
-        <>
-          <button onClick={handleCancel} style={{ ...dangerBtn, marginBottom: 14 }}>
+        <div ref={progressRef}>
+          <button ref={cancelBtnRef} onClick={handleCancel} style={{ ...dangerBtn, marginBottom: 14 }}>
             <X size={15} />{t("transcription:cancel")}
           </button>
           <ProgressCard
@@ -200,14 +216,14 @@ export default function TranscriptionPanel({ audioPath, extracting, onCancelExtr
             percent={progress ? Math.round(progress.progress * 100) : 0}
             accent={COLORS.cyan}
           />
-        </>
+        </div>
       ) : extracting ? (
-        <>
+        <div ref={progressRef}>
           <ProgressCard label={t("transcription:extractingAudio")} percent={null} accent={COLORS.cyan} />
           <button onClick={onCancelExtraction} style={{ ...dangerBtn, marginTop: 12 }}>
             <X size={15} />{t("transcription:cancel")}
           </button>
-        </>
+        </div>
       ) : (
         <>
           <button

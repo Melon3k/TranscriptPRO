@@ -2,6 +2,7 @@ use crate::logger;
 use crate::subtitle::{
     ass::write_ass,
     srt::{parse_srt, write_srt, write_word_srt, write_txt},
+    style::{CaptionAnimation, CaptionStyle},
     types::{AppError, Subtitle},
     vtt::write_vtt,
 };
@@ -135,8 +136,10 @@ pub async fn export_ass(
     app: AppHandle,
     path: String,
     subtitles: Vec<Subtitle>,
+    style: CaptionStyle,
+    animation: CaptionAnimation,
 ) -> Result<(), AppError> {
-    let content = write_ass(&subtitles);
+    let content = write_ass(&subtitles, &style, &animation);
     write_atomic(&path, &content)?;
     logger::info(
         &app,
@@ -144,6 +147,22 @@ pub async fn export_ass(
         format!("Exported {} segments as ASS → {}", subtitles.len(), path),
     );
     Ok(())
+}
+
+/// Read-only export preview: serialize subtitles to the requested lossless text format
+/// using the SAME pure serializers as the real export commands, so the in-app preview
+/// can never drift from the written file. Does not touch the filesystem.
+#[tauri::command]
+pub async fn preview_export(
+    subtitles: Vec<Subtitle>,
+    format: String,
+) -> Result<String, AppError> {
+    let content = match format.as_str() {
+        "srt" => write_srt(&subtitles),
+        "vtt" => write_vtt(&subtitles),
+        other => return Err(AppError::Other(format!("Unknown preview format: {}", other))),
+    };
+    Ok(content)
 }
 
 #[tauri::command]

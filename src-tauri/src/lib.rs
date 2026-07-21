@@ -26,6 +26,14 @@ pub struct AudioExtraction {
     pub cancelled: AtomicBool,
 }
 
+/// Handle to the running ffmpeg child plus a cancellation flag for MP4 subtitle
+/// burn-in, so an export can be killed on demand and never outlives the app.
+/// Mirrors `AudioExtraction`.
+pub struct VideoExport {
+    pub child: Mutex<Option<CommandChild>>,
+    pub cancelled: AtomicBool,
+}
+
 /// Native mirror of the frontend "unsaved changes" flag. Lets the OS-level close/quit
 /// handlers (notably macOS Cmd+Q, which does not emit a per-window close event) guard it.
 pub struct DirtyState(pub AtomicBool);
@@ -62,6 +70,16 @@ fn exit_app(app: tauri::AppHandle) {
 
 fn kill_audio_child(app: &tauri::AppHandle) {
     if let Some(state) = app.try_state::<AudioExtraction>() {
+        if let Ok(mut guard) = state.child.lock() {
+            if let Some(child) = guard.take() {
+                let _ = child.kill();
+            }
+        }
+    }
+}
+
+fn kill_video_export(app: &tauri::AppHandle) {
+    if let Some(state) = app.try_state::<VideoExport>() {
         if let Ok(mut guard) = state.child.lock() {
             if let Some(child) = guard.take() {
                 let _ = child.kill();
@@ -124,6 +142,10 @@ pub fn run() {
             child: Mutex::new(None),
             cancelled: AtomicBool::new(false),
         })
+        .manage(VideoExport {
+            child: Mutex::new(None),
+            cancelled: AtomicBool::new(false),
+        })
         .manage(DirtyState(AtomicBool::new(false)))
         .manage(LocalLlm {
             child: Mutex::new(None),
@@ -177,6 +199,7 @@ pub fn run() {
                     }
                 } else {
                     kill_audio_child(app);
+                    kill_video_export(app);
                     kill_local_llm(app);
                     app.exit(0);
                 }
@@ -202,11 +225,17 @@ pub fn run() {
             commands::file_io::export_txt,
             commands::file_io::export_vtt,
             commands::file_io::export_ass,
+            commands::file_io::preview_export,
             commands::file_io::save_version_history,
             commands::file_io::load_version_history,
+            // System fonts
+            commands::fonts::list_system_fonts,
             // Audio extraction
             commands::audio::extract_audio,
             commands::audio::cancel_audio_extraction,
+            // Video export (MP4 subtitle burn-in)
+            commands::video_export::export_video,
+            commands::video_export::cancel_video_export,
             // Transcription
             commands::transcribe::list_models,
             commands::transcribe::download_model,
@@ -245,6 +274,7 @@ pub fn run() {
                     // Actually exiting — make sure ffmpeg and llama-server don't
                     // outlive the app.
                     kill_audio_child(app_handle);
+                    kill_video_export(app_handle);
                     kill_local_llm(app_handle);
                 }
             }

@@ -1,17 +1,40 @@
-import { useState, type CSSProperties } from "react";
-import { Sparkles, Layers, ChevronDown, Lock, Search, Plus } from "lucide-react";
+import { useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { Sparkles, Layers, ChevronDown, Search, Plus, RotateCcw, Copy, Trash2, Pencil, Check, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { COLORS, f, FONTS, tabStyle, sectionLabel, toggle } from "../../lib/ui";
+import { COLORS, f, FONTS, tabStyle, sectionLabel, selectStyle, toggle } from "../../lib/ui";
+import { useStyleStore } from "../../stores/styleStore";
+import ColorField from "./ColorField";
+import FontPicker from "./FontPicker";
+import {
+  BOX_GRID,
+  STYLE_LIMITS,
+  captionTextCss,
+  type NumericStyleField,
+} from "../../lib/caption-style";
+import {
+  ANIMATION_TYPES,
+  ANIMATION_LIMITS,
+  EASINGS,
+  type NumericAnimationField,
+} from "../../lib/caption-animation";
+import { BUILTIN_PRESETS, uniquePresetName } from "../../lib/caption-presets";
+import { useNotifyStore } from "../../stores/notifyStore";
+import type {
+  CaptionAlign,
+  CaptionEasing,
+  CaptionStyle,
+} from "../../types/captionStyle";
+import { EXPORTED_ANIMATIONS } from "../../types/captionStyle";
 
 type StyleTab = "inspector" | "anim" | "effects";
 
 /**
- * Caption STYLING workspace. Subtitle styling, animations and presets are part
- * of the new design but not implemented yet, so this whole panel is rendered
- * disabled/grayed (per the brief: build the UI, gray it out, add no behaviour).
+ * Caption STYLING workspace. All three tabs are live: Inspector (item A) edits
+ * the global CaptionStyle, Animations (item C) edits the global CaptionAnimation,
+ * Effects (item D) manages style presets — all in styleStore.
  */
 export default function StylePanel() {
-  const { t } = useTranslation(["style"]);
+  const { t } = useTranslation(["style", "common"]);
   const [tab, setTab] = useState<StyleTab>("inspector");
 
   return (
@@ -30,29 +53,19 @@ export default function StylePanel() {
         </button>
       </div>
 
-      {/* Disabled notice */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          margin: "12px 14px 0",
-          padding: "9px 11px",
-          background: "rgba(245,165,36,.1)",
-          border: `1px solid ${COLORS.amber}55`,
-          borderRadius: 8,
-        }}
-      >
-        <Lock size={13} color={COLORS.amber} />
-        <span style={f(600, 10, "body", { color: COLORS.amber, lineHeight: 1.4 })}>{t("style:comingSoon")}</span>
-      </div>
-
-      {/* Grayed, non-interactive preview of the intended controls */}
-      <div style={{ flex: 1, overflowY: "auto", padding: 16, opacity: 0.45, pointerEvents: "none", userSelect: "none" }}>
-        {tab === "inspector" && <Inspector t={t} />}
-        {tab === "anim" && <Animations t={t} />}
-        {tab === "effects" && <Effects t={t} />}
-      </div>
+      {tab === "inspector" ? (
+        <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
+          <Inspector t={t} />
+        </div>
+      ) : tab === "effects" ? (
+        <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
+          <Effects t={t} />
+        </div>
+      ) : (
+        <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
+          <Animations t={t} />
+        </div>
+      )}
     </div>
   );
 }
@@ -60,132 +73,642 @@ export default function StylePanel() {
 type TFn = (key: string, opts?: Record<string, unknown>) => string;
 
 function Inspector({ t }: { t: TFn }) {
-  const tg = toggle(true);
-  const tgOff = toggle(false);
+  const style = useStyleStore((s) => s.style);
+  const setStyle = useStyleStore((s) => s.setStyle);
+  const resetStyle = useStyleStore((s) => s.resetStyle);
+
+  const setNum = (field: NumericStyleField) => (v: number) => setStyle({ [field]: v });
+  // marginVPct anchors to whichever edge the box position selects; the middle
+  // row ignores it entirely (captionBoxCss centers vertically), so hide it.
+  const row: "top" | "middle" | "bottom" =
+    style.boxPosition >= 7 ? "top" : style.boxPosition >= 4 ? "middle" : "bottom";
+
   return (
     <>
       <div style={sectionLabel}>{t("style:text")}</div>
-      <div style={{ ...fieldRow, marginBottom: 12 }}>
-        <span style={f(600, 12, "display")}>Outfit</span>
-        <ChevronDown size={13} color="var(--c-muted)" />
+      <div style={{ marginBottom: 12 }}>
+        <FontPicker value={style.fontId} onChange={(family) => setStyle({ fontId: family })} t={t} />
       </div>
-      <SliderRow label={t("style:size")} value="48 px" />
-      <div style={{ display: "flex", gap: 6, margin: "0 0 12px" }}>
-        {["L", "C", "R"].map((a, i) => (
-          <div key={a} style={iconBtn(i === 1)}>{a}</div>
+      <StyleSlider label={t("style:size")} field="fontSize" value={style.fontSize} onChange={setNum("fontSize")} unit=" px" />
+      <div style={{ display: "flex", gap: 6, margin: "0 0 12px", alignItems: "center" }}>
+        {(["left", "center", "right"] as const).map((a) => (
+          <IconBtn key={a} on={style.align === a} label={t(`style:align.${a}`)} onClick={() => setStyle({ align: a as CaptionAlign })}>
+            {a === "left" ? "L" : a === "center" ? "C" : "R"}
+          </IconBtn>
         ))}
+        {/* align is preview-only: ASS ties justification to the numpad Alignment
+            (driven by boxPosition), so ass.rs deliberately does not export it. */}
+        <span style={f(600, 8, "body", { color: COLORS.amber, border: `1px solid ${COLORS.amber}55`, borderRadius: 4, padding: "1px 5px", letterSpacing: ".06em", textTransform: "uppercase" })}>
+          {t("style:previewOnly")}
+        </span>
         <div style={{ width: 1, background: "var(--c-border)", margin: "0 2px" }} />
-        <div style={iconBtn(true)}>B</div>
-        <div style={iconBtn(false)}><span style={{ fontStyle: "italic" }}>I</span></div>
-        <div style={iconBtn(false)}>TT</div>
+        <IconBtn on={style.bold} label={t("style:boldToggle")} onClick={() => setStyle({ bold: !style.bold })}>
+          B
+        </IconBtn>
+        <IconBtn on={style.italic} label={t("style:italicToggle")} onClick={() => setStyle({ italic: !style.italic })}>
+          <span style={{ fontStyle: "italic" }}>I</span>
+        </IconBtn>
+        <IconBtn on={style.uppercase} label={t("style:uppercaseToggle")} onClick={() => setStyle({ uppercase: !style.uppercase })}>
+          TT
+        </IconBtn>
       </div>
-      <SliderRow label={t("style:letterSpacing")} value="0 px" />
-      <SliderRow label={t("style:lineHeight")} value="1.15" />
+      <StyleSlider label={t("style:letterSpacing")} field="letterSpacing" value={style.letterSpacing} onChange={setNum("letterSpacing")} unit=" px" />
+      <StyleSlider label={t("style:lineHeight")} field="lineHeight" value={style.lineHeight} onChange={setNum("lineHeight")} badge={t("style:previewOnly")} />
+
       <div style={{ ...sectionLabel, marginTop: 6 }}>{t("style:outlineShadowGlow")}</div>
-      {[
-        [t("style:outline"), tg] as const,
-        [t("style:shadow"), tgOff] as const,
-        [t("style:glow"), tg] as const,
-      ].map(([label, sw], i) => (
-        <div key={i} style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 11 }}>
-          <div style={sw.track}><span style={sw.knob} /></div>
-          <span style={f(500, 11, "body", { color: "var(--c-text)" })}>{label}</span>
-        </div>
-      ))}
-      <SliderRow label={t("style:glowStrength")} value="12" />
-      <div style={sectionLabel}>{t("style:captionBox")}</div>
+      <ToggleRow label={t("style:outline")} on={style.outline} onClick={() => setStyle({ outline: !style.outline })} />
+      {style.outline && (
+        <StyleSlider label={t("style:outlineWidth")} field="outlineWidth" value={style.outlineWidth} onChange={setNum("outlineWidth")} unit=" px" />
+      )}
+      <ToggleRow label={t("style:shadow")} on={style.shadow} onClick={() => setStyle({ shadow: !style.shadow })} />
+      {style.shadow && (
+        <StyleSlider label={t("style:shadowDepth")} field="shadowDepth" value={style.shadowDepth} onChange={setNum("shadowDepth")} unit=" px" />
+      )}
+      <ToggleRow label={t("style:glow")} on={style.glow} onClick={() => setStyle({ glow: !style.glow })} />
+      {style.glow && (
+        <StyleSlider label={t("style:glowStrength")} field="glowStrength" value={style.glowStrength} onChange={setNum("glowStrength")} unit=" px" />
+      )}
+
+      <div style={{ ...sectionLabel, marginTop: 6 }}>{t("style:colors")}</div>
+      <ColorField label={t("style:textColor")} value={style.textColor} onChange={(v) => setStyle({ textColor: v })} hint={t("style:alphaTextHint")} />
+      <ColorField label={t("style:outline")} value={style.outlineColor} onChange={(v) => setStyle({ outlineColor: v })} />
+      <ColorField label={t("style:shadow")} value={style.shadowColor} onChange={(v) => setStyle({ shadowColor: v })} />
+      <ColorField label={t("style:glow")} value={style.glowColor} onChange={(v) => setStyle({ glowColor: v })} />
+
+      <div style={{ ...sectionLabel, marginTop: 12 }}>{t("style:captionBox")}</div>
       <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12 }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gridTemplateRows: "repeat(3,20px)", gap: 4, width: 76 }}>
-          {Array.from({ length: 9 }).map((_, i) => (
-            <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 5, border: `1px solid ${i === 7 ? COLORS.blue : "var(--c-border)"}`, background: i === 7 ? "rgba(37,99,255,.16)" : "var(--c-input)" }}>
-              <span style={{ width: 6, height: 6, borderRadius: 2, background: i === 7 ? COLORS.blue : "var(--c-muted)" }} />
-            </div>
-          ))}
+          {BOX_GRID.map((pos) => {
+            const on = pos === style.boxPosition;
+            return (
+              <button
+                key={pos}
+                onClick={() => setStyle({ boxPosition: pos })}
+                aria-label={t(`style:boxPos.${pos}`)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: 0,
+                  cursor: "pointer",
+                  borderRadius: 5,
+                  border: `1px solid ${on ? COLORS.blue : "var(--c-border)"}`,
+                  background: on ? "rgba(37,99,255,.16)" : "var(--c-input)",
+                }}
+              >
+                <span style={{ width: 6, height: 6, borderRadius: 2, background: on ? COLORS.blue : "var(--c-muted)" }} />
+              </button>
+            );
+          })}
         </div>
         <div style={f(400, 10, "body", { flex: 1, color: "var(--c-text2)", lineHeight: 1.5 })}>
-          {t("style:boxPosition")}<br />
-          <span style={{ color: "var(--c-text)", fontWeight: 600 }}>{t("style:boxBottomCenter")}</span>
+          {t("style:boxPosition")}
+          <br />
+          <span style={{ color: "var(--c-text)", fontWeight: 600 }}>{t(`style:boxPos.${style.boxPosition}`)}</span>
         </div>
       </div>
-      <SliderRow label={t("style:width")} value="62%" />
-      <SliderRow label={t("style:bottomDistance")} value="8%" />
+      <StyleSlider label={t("style:width")} field="widthPct" value={style.widthPct} onChange={setNum("widthPct")} unit="%" />
+      {row !== "middle" && (
+        <StyleSlider
+          label={row === "top" ? t("style:topDistance") : t("style:bottomDistance")}
+          field="marginVPct"
+          value={style.marginVPct}
+          onChange={setNum("marginVPct")}
+          unit="%"
+        />
+      )}
+
+      <button
+        onClick={resetStyle}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 6,
+          width: "100%",
+          height: 30,
+          marginTop: 8,
+          background: "var(--c-raised)",
+          border: "1px solid var(--c-border)",
+          borderRadius: 7,
+          color: "var(--c-text2)",
+          cursor: "pointer",
+          ...f(600, 10),
+        }}
+      >
+        <RotateCcw size={12} />
+        {t("style:reset")}
+      </button>
     </>
+  );
+}
+
+function StyleSlider({
+  label,
+  field,
+  value,
+  onChange,
+  unit = "",
+  badge,
+}: {
+  label: string;
+  field: NumericStyleField;
+  value: number;
+  onChange: (v: number) => void;
+  unit?: string;
+  badge?: string;
+}) {
+  const lim = STYLE_LIMITS[field];
+  return (
+    <>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, ...f(400, 10, "body", { color: "var(--c-text2)" }) }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {label}
+          {badge && (
+            <span style={f(600, 8, "body", { color: COLORS.amber, border: `1px solid ${COLORS.amber}55`, borderRadius: 4, padding: "1px 5px", letterSpacing: ".06em", textTransform: "uppercase" })}>
+              {badge}
+            </span>
+          )}
+        </span>
+        <span style={{ fontFamily: FONTS.mono, fontWeight: 600, fontSize: 10, color: "var(--c-text)" }}>
+          {value}
+          {unit}
+        </span>
+      </div>
+      <input
+        type="range"
+        min={lim.min}
+        max={lim.max}
+        step={lim.step}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        style={{ width: "100%", marginBottom: 12, accentColor: COLORS.blue }}
+        aria-label={label}
+      />
+    </>
+  );
+}
+
+function ToggleRow({ label, on, onClick, badge }: { label: string; on: boolean; onClick: () => void; badge?: string }) {
+  const sw = toggle(on);
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 11 }}>
+      <button
+        onClick={onClick}
+        role="switch"
+        aria-checked={on}
+        aria-label={label}
+        style={{ ...sw.track, border: "none", padding: 0 }}
+      >
+        <span style={sw.knob} />
+      </button>
+      <span style={f(500, 11, "body", { color: "var(--c-text)" })}>{label}</span>
+      {badge && (
+        <span style={f(600, 8, "body", { color: COLORS.amber, border: `1px solid ${COLORS.amber}55`, borderRadius: 4, padding: "1px 5px", letterSpacing: ".06em", textTransform: "uppercase" })}>
+          {badge}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function IconBtn({ on, label, onClick, children }: { on: boolean; label: string; onClick: () => void; children: ReactNode }) {
+  return (
+    <button onClick={onClick} aria-pressed={on} aria-label={label} data-tip={label} style={{ ...iconBtn(on), cursor: "pointer", padding: 0 }}>
+      {children}
+    </button>
   );
 }
 
 function Animations({ t }: { t: TFn }) {
-  const anims = ["Fade in", "Slide up", "Pop", "Typewriter", "Karaoke", "Blur in"];
+  const animation = useStyleStore((s) => s.animation);
+  const setAnimation = useStyleStore((s) => s.setAnimation);
+
+  const type = animation.type;
+  // Preview-only stagger + easing apply to the CSS-driven entrance types; ASS
+  // export ignores them (see item C decision), so they hide for none/karaoke.
+  const isEntrance = type === "slide" || type === "pop" || type === "typewriter" || type === "blur";
+
   return (
     <>
-      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-        <div style={{ ...pill, flex: 1, justifyContent: "center", background: "rgba(124,58,237,.16)", border: `1px solid ${COLORS.violet}`, color: "#c4b5fd" }}>
-          {t("style:applyToSelected")}
-        </div>
-        <div style={{ ...pill, background: "var(--c-raised)", border: "1px solid var(--c-border)", color: "var(--c-text2)" }}>
-          {t("style:applyToAll")}
-        </div>
+      {/* Animation is global (accepted scope decision) — no per-segment "apply
+          to selected" pills; a static note replaces the mock's pill row. */}
+      <div style={sectionLabel}>{t("style:anim.appliesAll")}</div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
+        {ANIMATION_TYPES.map((at) => {
+          const active = type === at;
+          const exported = EXPORTED_ANIMATIONS.has(at);
+          return (
+            <button
+              key={at}
+              onClick={() => setAnimation({ type: at })}
+              aria-pressed={active}
+              style={{
+                position: "relative",
+                display: "block",
+                textAlign: "left",
+                padding: 0,
+                cursor: "pointer",
+                border: `1px solid ${active ? COLORS.violet : "var(--c-border)"}`,
+                borderRadius: 8,
+                overflow: "hidden",
+                background: "var(--c-panel)",
+              }}
+            >
+              {/* Dark tone only on the preview tile (so the white sample reads),
+                  NOT the whole card — the label row below must follow the theme
+                  or its var(--c-text) goes invisible in light mode. */}
+              <div style={{ height: 60, display: "flex", alignItems: "center", justifyContent: "center", background: "#0c1017" }}>
+                <span style={{ fontFamily: FONTS.display, fontWeight: 800, fontSize: 22, color: "#fff", WebkitTextStroke: "0.5px #0D1117" }}>Aa</span>
+              </div>
+              {at !== "none" && (
+                <span style={{ position: "absolute", top: 4, right: 4, ...badge(exported ? COLORS.cyan : COLORS.amber) }}>
+                  {exported ? t("style:anim.exported") : t("style:previewOnly")}
+                </span>
+              )}
+              <div style={{ ...f(600, 10), padding: "5px 8px", borderTop: "1px solid var(--c-border)", color: active ? COLORS.violetLight : "var(--c-text)" }}>
+                {t(`style:anim.types.${at}`)}
+              </div>
+            </button>
+          );
+        })}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-        {anims.map((name, i) => (
-          <div key={name} style={{ border: `1px solid ${i === 0 ? COLORS.violet : "var(--c-border)"}`, borderRadius: 8, overflow: "hidden", background: "#0c1017" }}>
-            <div style={{ height: 48, display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <span style={{ fontFamily: FONTS.display, fontWeight: 800, fontSize: 14, color: "#fff", WebkitTextStroke: "0.5px #0D1117" }}>Aa</span>
-            </div>
-            <div style={{ ...f(600, 9), padding: "5px 8px", borderTop: "1px solid var(--c-border)", color: "var(--c-text)" }}>{name}</div>
+
+      {/* Duration drives fade's \fad and the entrance types' CSS transitions.
+          Karaoke derives its \k sweep from word/cue timings and ignores
+          durationMs in both preview and export, so the slider is hidden there
+          rather than shown as an inert control. */}
+      {type !== "none" && type !== "karaoke" && (
+        <AnimSlider label={t("style:anim.duration")} field="durationMs" value={animation.durationMs} onChange={(v) => setAnimation({ durationMs: v })} unit=" ms" />
+      )}
+      {isEntrance && (
+        <AnimSlider label={t("style:anim.perWordDelay")} field="perWordDelayMs" value={animation.perWordDelayMs} onChange={(v) => setAnimation({ perWordDelayMs: v })} unit=" ms" badge={t("style:previewOnly")} />
+      )}
+      {type !== "none" && type !== "karaoke" && (
+        <>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, ...f(400, 10, "body", { color: "var(--c-text2)" }) }}>
+            {t("style:anim.easing")}
+            <span style={f(600, 8, "body", { color: COLORS.amber, border: `1px solid ${COLORS.amber}55`, borderRadius: 4, padding: "1px 5px", letterSpacing: ".06em", textTransform: "uppercase" })}>
+              {t("style:previewOnly")}
+            </span>
           </div>
-        ))}
-      </div>
+          <div style={{ position: "relative", marginBottom: 12 }}>
+            <select
+              value={animation.easing}
+              onChange={(e) => setAnimation({ easing: e.target.value as CaptionEasing })}
+              style={selectStyle}
+              aria-label={t("style:anim.easing")}
+            >
+              {EASINGS.map((ez) => (
+                <option key={ez} value={ez}>
+                  {ez}
+                </option>
+              ))}
+            </select>
+            <ChevronDown size={13} color="var(--c-muted)" style={{ position: "absolute", right: 10, top: 10, pointerEvents: "none" }} />
+          </div>
+        </>
+      )}
+      {type === "karaoke" && (
+        <ColorField label={t("style:anim.highlightColor")} value={animation.highlightColor} onChange={(v) => setAnimation({ highlightColor: v })} badge={t("style:anim.exported")} />
+      )}
     </>
   );
 }
 
+// Mirrors StyleSlider but reads ANIMATION_LIMITS instead of STYLE_LIMITS.
+function AnimSlider({
+  label,
+  field,
+  value,
+  onChange,
+  unit = "",
+  badge: badgeText,
+}: {
+  label: string;
+  field: NumericAnimationField;
+  value: number;
+  onChange: (v: number) => void;
+  unit?: string;
+  badge?: string;
+}) {
+  const lim = ANIMATION_LIMITS[field];
+  return (
+    <>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, ...f(400, 10, "body", { color: "var(--c-text2)" }) }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {label}
+          {badgeText && (
+            <span style={f(600, 8, "body", { color: COLORS.amber, border: `1px solid ${COLORS.amber}55`, borderRadius: 4, padding: "1px 5px", letterSpacing: ".06em", textTransform: "uppercase" })}>
+              {badgeText}
+            </span>
+          )}
+        </span>
+        <span style={{ fontFamily: FONTS.mono, fontWeight: 600, fontSize: 10, color: "var(--c-text)" }}>
+          {value}
+          {unit}
+        </span>
+      </div>
+      <input
+        type="range"
+        min={lim.min}
+        max={lim.max}
+        step={lim.step}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        style={{ width: "100%", marginBottom: 12, accentColor: COLORS.blue }}
+        aria-label={label}
+      />
+    </>
+  );
+}
+
+/** A preset as rendered in the grid: built-ins carry a resolved (translated)
+ *  name and no persisted identity; user presets are their store rows. */
+interface PresetItem {
+  id: string;
+  name: string;
+  style: CaptionStyle;
+  builtin: boolean;
+}
+
 function Effects({ t }: { t: TFn }) {
-  const presets = ["Neon cyan", "Twardy cień", "Gruby obrys", "Miękki"];
+  const style = useStyleStore((s) => s.style);
+  const activePresetId = useStyleStore((s) => s.activePresetId);
+  const applyPreset = useStyleStore((s) => s.applyPreset);
+  const presets = useStyleStore((s) => s.presets);
+  const addPreset = useStyleStore((s) => s.addPreset);
+  const updatePreset = useStyleStore((s) => s.updatePreset);
+  const deletePreset = useStyleStore((s) => s.deletePreset);
+  const notify = useNotifyStore((s) => s.notify);
+
+  const [search, setSearch] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  const items: PresetItem[] = [
+    ...BUILTIN_PRESETS.map((p) => ({ id: p.id, name: t(p.nameKey), style: p.style, builtin: true })),
+    ...presets.map((p) => ({ id: p.id, name: p.name, style: p.style, builtin: false })),
+  ];
+  const allNames = items.map((p) => p.name);
+  const q = search.trim().toLowerCase();
+  const filtered = q ? items.filter((p) => p.name.toLowerCase().includes(q)) : items;
+
+  const onNew = () => {
+    const id = addPreset(uniquePresetName(t("style:presets.defaultName"), allNames), style);
+    setEditingId(id);
+    setSearch("");
+    notify("success", t("style:presets.saved"));
+  };
+
   return (
     <>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
         <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 6, height: 28, padding: "0 9px", background: "var(--c-input)", border: "1px solid var(--c-border)", borderRadius: 7, color: "var(--c-muted)" }}>
           <Search size={12} />
-          <span style={f(400, 10)}>{t("style:searchPreset")}</span>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t("style:searchPreset")}
+            aria-label={t("style:searchPreset")}
+            style={{ flex: 1, minWidth: 0, background: "none", border: "none", outline: "none", color: "var(--c-text)", ...f(400, 10, "body") }}
+          />
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 5, height: 28, padding: "0 10px", background: "rgba(37,99,255,.14)", border: `1px solid ${COLORS.blue}`, borderRadius: 7, color: COLORS.blueLight, ...f(600, 10) }}>
+        <button
+          onClick={onNew}
+          data-tip={t("style:presets.tips.new")}
+          style={{ display: "flex", alignItems: "center", gap: 5, height: 28, padding: "0 10px", background: "rgba(37,99,255,.14)", border: `1px solid ${COLORS.blue}`, borderRadius: 7, color: COLORS.blueLight, cursor: "pointer", ...f(600, 10) }}
+        >
           <Plus size={12} />
           {t("style:newPreset")}
+        </button>
+      </div>
+      {filtered.length === 0 ? (
+        <div style={f(400, 10, "body", { color: "var(--c-muted)", padding: "8px 2px" })}>{t("style:presets.empty")}</div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 9 }}>
+          {filtered.map((preset) => (
+            <PresetCard
+              key={preset.id}
+              t={t}
+              preset={preset}
+              active={activePresetId === preset.id}
+              editing={editingId === preset.id}
+              confirmingDelete={confirmDeleteId === preset.id}
+              onApply={() => applyPreset(preset.id, preset.style)}
+              onDuplicate={() => {
+                const id = addPreset(uniquePresetName(preset.name, allNames), preset.style);
+                setEditingId(id);
+              }}
+              onSaveOver={() => {
+                updatePreset(preset.id, { style });
+                notify("success", t("style:presets.saved"));
+              }}
+              onRename={(name) => updatePreset(preset.id, { name })}
+              setEditing={(on) => setEditingId(on ? preset.id : null)}
+              onDeleteRequest={() => setConfirmDeleteId(preset.id)}
+              onDeleteConfirm={() => {
+                deletePreset(preset.id);
+                setConfirmDeleteId(null);
+              }}
+              onDeleteCancel={() => setConfirmDeleteId(null)}
+            />
+          ))}
         </div>
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 9 }}>
-        {presets.map((name, i) => (
-          <div key={name} style={{ border: `1px solid ${i === 0 ? COLORS.cyan : "var(--c-border)"}`, borderRadius: 9, overflow: "hidden", background: "#0c1017" }}>
-            <div style={{ height: 44, display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <span style={{ fontFamily: FONTS.display, fontWeight: 900, fontSize: 15, color: i === 0 ? "#fff" : COLORS.amber, textShadow: i === 0 ? `0 0 10px ${COLORS.cyan}` : "none" }}>Aa</span>
-            </div>
-            <div style={{ ...f(600, 9), padding: "5px 8px", borderTop: "1px solid var(--c-border)", color: "var(--c-text)" }}>{name}</div>
-          </div>
-        ))}
-      </div>
+      )}
     </>
   );
 }
 
-const fieldRow: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  height: 32,
-  padding: "0 10px",
-  background: "var(--c-input)",
-  border: "1px solid var(--c-border)",
-  borderRadius: 7,
-};
+function PresetCard({
+  t,
+  preset,
+  active,
+  editing,
+  confirmingDelete,
+  onApply,
+  onDuplicate,
+  onSaveOver,
+  onRename,
+  setEditing,
+  onDeleteRequest,
+  onDeleteConfirm,
+  onDeleteCancel,
+}: {
+  t: TFn;
+  preset: PresetItem;
+  active: boolean;
+  editing: boolean;
+  confirmingDelete: boolean;
+  onApply: () => void;
+  onDuplicate: () => void;
+  onSaveOver: () => void;
+  onRename: (name: string) => void;
+  setEditing: (on: boolean) => void;
+  onDeleteRequest: () => void;
+  onDeleteConfirm: () => void;
+  onDeleteCancel: () => void;
+}) {
+  // Escape must cancel without the trailing blur re-committing the draft.
+  const cancelledRef = useRef(false);
+  const commit = (value: string) => {
+    if (cancelledRef.current) {
+      cancelledRef.current = false;
+    } else {
+      onRename(value.trim() || preset.name);
+    }
+    setEditing(false);
+  };
 
-const pill: CSSProperties = {
-  height: 28,
-  padding: "0 11px",
-  display: "flex",
-  alignItems: "center",
-  borderRadius: 7,
-  ...f(600, 10),
-};
+  const stop = (fn: () => void) => (e: ReactMouseEvent) => {
+    e.stopPropagation();
+    fn();
+  };
+
+  return (
+    <div
+      // While confirming a delete the card must not apply the preset: clicking
+      // the prompt label or the preview surface would otherwise silently
+      // overwrite the live style instead of answering the dialog.
+      onClick={confirmingDelete ? undefined : onApply}
+      style={{
+        border: `1px solid ${active ? COLORS.cyan : "var(--c-border)"}`,
+        borderRadius: 9,
+        overflow: "hidden",
+        background: "var(--c-panel)",
+        cursor: confirmingDelete ? "default" : "pointer",
+      }}
+    >
+      {/* Preview surface picks the tone that contrasts the sample's text color,
+          so a dark-text preset stays legible (independent of the app theme). */}
+      <div style={{ position: "relative", height: 56, display: "flex", alignItems: "center", justifyContent: "center", background: isLightColor(preset.style.textColor) ? "#0c1017" : "#e9edf2" }}>
+        <span style={{ ...captionTextCss(preset.style), fontSize: 30, whiteSpace: "nowrap" }}>Aa</span>
+        {active && (
+          <span style={{ position: "absolute", top: 4, right: 4, ...badge(COLORS.cyan) }}>{t("style:presets.active")}</span>
+        )}
+        {preset.builtin && !active && (
+          <span style={{ position: "absolute", top: 4, right: 4, ...badge(COLORS.amber) }}>{t("style:presets.builtinBadge")}</span>
+        )}
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 6px", borderTop: "1px solid var(--c-border)", minHeight: 28 }}>
+        {confirmingDelete ? (
+          <>
+            <span style={f(600, 9, "body", { flex: 1, minWidth: 0, color: COLORS.red, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>
+              {t("style:presets.deleteConfirm")}
+            </span>
+            <ActionBtn label={t("style:presets.delete")} onClick={stop(onDeleteConfirm)} danger>
+              <Trash2 size={12} />
+            </ActionBtn>
+            <ActionBtn label={t("common:cancel")} onClick={stop(onDeleteCancel)}>
+              <X size={12} />
+            </ActionBtn>
+          </>
+        ) : editing && !preset.builtin ? (
+          <input
+            autoFocus
+            defaultValue={preset.name}
+            aria-label={t("style:presets.namePlaceholder")}
+            placeholder={t("style:presets.namePlaceholder")}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur();
+              else if (e.key === "Escape") {
+                cancelledRef.current = true;
+                e.currentTarget.blur();
+              }
+            }}
+            onBlur={(e) => commit(e.currentTarget.value)}
+            style={{ flex: 1, minWidth: 0, height: 20, padding: "0 5px", background: "var(--c-input)", border: `1px solid ${COLORS.blue}`, borderRadius: 5, color: "var(--c-text)", outline: "none", ...f(600, 10, "body") }}
+          />
+        ) : preset.builtin ? (
+          <>
+            <span style={f(600, 10, "body", { flex: 1, minWidth: 0, color: "var(--c-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>
+              {preset.name}
+            </span>
+            <ActionBtn label={t("style:presets.duplicate")} tip={t("style:presets.tips.duplicate")} onClick={stop(onDuplicate)}>
+              <Copy size={12} />
+            </ActionBtn>
+          </>
+        ) : (
+          <>
+            <button
+              onClick={stop(() => setEditing(true))}
+              data-tip={t("style:presets.rename")}
+              style={{ flex: 1, minWidth: 0, textAlign: "left", background: "none", border: "none", padding: 0, cursor: "text", color: "var(--c-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", ...f(600, 10, "body") }}
+            >
+              {preset.name}
+            </button>
+            <ActionBtn label={t("style:presets.rename")} tip={t("style:presets.tips.rename")} onClick={stop(() => setEditing(true))}>
+              <Pencil size={12} />
+            </ActionBtn>
+            <ActionBtn label={t("style:presets.save")} tip={t("style:presets.tips.save")} onClick={stop(onSaveOver)}>
+              <Check size={12} />
+            </ActionBtn>
+            <ActionBtn label={t("style:presets.duplicate")} tip={t("style:presets.tips.duplicate")} onClick={stop(onDuplicate)}>
+              <Copy size={12} />
+            </ActionBtn>
+            <ActionBtn label={t("style:presets.delete")} tip={t("style:presets.tips.delete")} onClick={stop(onDeleteRequest)} danger>
+              <Trash2 size={12} />
+            </ActionBtn>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ActionBtn({ label, tip, onClick, danger, children }: { label: string; tip?: string; onClick: (e: ReactMouseEvent) => void; danger?: boolean; children: ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label={label}
+      data-tip={tip || label}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: 22,
+        height: 20,
+        flex: "none",
+        padding: 0,
+        borderRadius: 5,
+        border: "1px solid var(--c-border)",
+        background: "var(--c-raised)",
+        color: danger ? COLORS.red : "var(--c-text2)",
+        cursor: "pointer",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** True if a color is light enough to need a dark backdrop (Rec. 601 luma).
+ *  Used only to pick a contrasting preview surface; alpha (if present) is
+ *  ignored and non-hex inputs are treated as dark. */
+function isLightColor(hex: string): boolean {
+  const m = /^#([0-9a-fA-F]{6})([0-9a-fA-F]{2})?$/.exec(hex);
+  if (!m) return false;
+  const n = parseInt(m[1], 16);
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  return 0.299 * r + 0.587 * g + 0.114 * b > 140;
+}
+
+function badge(color: string): CSSProperties {
+  return f(600, 8, "body", {
+    color,
+    background: "var(--c-panel)",
+    border: `1px solid ${color}88`,
+    borderRadius: 4,
+    padding: "1px 5px",
+    letterSpacing: ".06em",
+    textTransform: "uppercase",
+  });
+}
 
 function iconBtn(on: boolean): CSSProperties {
   return {
@@ -202,16 +725,4 @@ function iconBtn(on: boolean): CSSProperties {
     fontWeight: 700,
     fontSize: 12,
   };
-}
-
-function SliderRow({ label, value }: { label: string; value: string }) {
-  return (
-    <>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, ...f(400, 10, "body", { color: "var(--c-text2)" }) }}>
-        <span>{label}</span>
-        <span style={{ fontFamily: FONTS.mono, fontWeight: 600, fontSize: 10, color: "var(--c-text)" }}>{value}</span>
-      </div>
-      <input type="range" disabled defaultValue={50} style={{ width: "100%", marginBottom: 12 }} />
-    </>
-  );
 }
