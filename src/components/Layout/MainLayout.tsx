@@ -190,7 +190,11 @@ export default function MainLayout() {
     return () => window.removeEventListener("keydown", handler);
   }, [undo, redo, canUndo, canRedo]);
 
-  const showCompare = comparisonMode && !!originalSubtitles;
+  // The original-vs-translated comparison belongs to the Translate workspace only.
+  // Gating by mode keeps it from leaking into the center stage while transcribing
+  // (which hid the transcription progress) or editing, and from lingering when you
+  // switch away from Translate.
+  const showCompare = mode === "translate" && comparisonMode && !!originalSubtitles;
 
   return (
     <div

@@ -96,6 +96,13 @@
     "builtinBadge": "Built-in",
     "active": "Active",
     "empty": "No presets match your search.",
-    "saved": "Preset saved"
+    "saved": "Preset saved",
+    "tips": {
+      "new": "New preset — save the current style as a reusable preset",
+      "save": "Save — overwrite this preset with the current style",
+      "duplicate": "Duplicate — create an editable copy as your own preset",
+      "rename": "Rename this preset",
+      "delete": "Delete this preset"
+    }
   }
 }

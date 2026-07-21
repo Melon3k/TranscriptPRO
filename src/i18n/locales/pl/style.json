@@ -96,6 +96,13 @@
     "builtinBadge": "Wbudowany",
     "active": "Aktywny",
     "empty": "Brak presetów pasujących do wyszukiwania.",
-    "saved": "Zapisano preset"
+    "saved": "Zapisano preset",
+    "tips": {
+      "new": "Nowy preset — zapisz bieżący styl jako preset do wielokrotnego użycia",
+      "save": "Zapisz — nadpisz ten preset bieżącym stylem",
+      "duplicate": "Duplikuj — utwórz edytowalną kopię jako własny preset",
+      "rename": "Zmień nazwę tego presetu",
+      "delete": "Usuń ten preset"
+    }
   }
 }

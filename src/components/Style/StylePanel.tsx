@@ -477,6 +477,7 @@ function Effects({ t }: { t: TFn }) {
         </div>
         <button
           onClick={onNew}
+          title={t("style:presets.tips.new")}
           style={{ display: "flex", alignItems: "center", gap: 5, height: 28, padding: "0 10px", background: "rgba(37,99,255,.14)", border: `1px solid ${COLORS.blue}`, borderRadius: 7, color: COLORS.blueLight, cursor: "pointer", ...f(600, 10) }}
         >
           <Plus size={12} />
@@ -626,7 +627,7 @@ function PresetCard({
             <span style={f(600, 10, "body", { flex: 1, minWidth: 0, color: "var(--c-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>
               {preset.name}
             </span>
-            <ActionBtn label={t("style:presets.duplicate")} onClick={stop(onDuplicate)}>
+            <ActionBtn label={t("style:presets.duplicate")} tip={t("style:presets.tips.duplicate")} onClick={stop(onDuplicate)}>
               <Copy size={12} />
             </ActionBtn>
           </>
@@ -639,16 +640,16 @@ function PresetCard({
             >
               {preset.name}
             </button>
-            <ActionBtn label={t("style:presets.rename")} onClick={stop(() => setEditing(true))}>
+            <ActionBtn label={t("style:presets.rename")} tip={t("style:presets.tips.rename")} onClick={stop(() => setEditing(true))}>
               <Pencil size={12} />
             </ActionBtn>
-            <ActionBtn label={t("style:presets.save")} onClick={stop(onSaveOver)}>
+            <ActionBtn label={t("style:presets.save")} tip={t("style:presets.tips.save")} onClick={stop(onSaveOver)}>
               <Check size={12} />
             </ActionBtn>
-            <ActionBtn label={t("style:presets.duplicate")} onClick={stop(onDuplicate)}>
+            <ActionBtn label={t("style:presets.duplicate")} tip={t("style:presets.tips.duplicate")} onClick={stop(onDuplicate)}>
               <Copy size={12} />
             </ActionBtn>
-            <ActionBtn label={t("style:presets.delete")} onClick={stop(onDeleteRequest)} danger>
+            <ActionBtn label={t("style:presets.delete")} tip={t("style:presets.tips.delete")} onClick={stop(onDeleteRequest)} danger>
               <Trash2 size={12} />
             </ActionBtn>
           </>
@@ -658,12 +659,12 @@ function PresetCard({
   );
 }
 
-function ActionBtn({ label, onClick, danger, children }: { label: string; onClick: (e: ReactMouseEvent) => void; danger?: boolean; children: ReactNode }) {
+function ActionBtn({ label, tip, onClick, danger, children }: { label: string; tip?: string; onClick: (e: ReactMouseEvent) => void; danger?: boolean; children: ReactNode }) {
   return (
     <button
       onClick={onClick}
       aria-label={label}
-      title={label}
+      title={tip || label}
       style={{
         display: "flex",
         alignItems: "center",
