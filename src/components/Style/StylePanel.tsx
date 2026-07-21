@@ -124,7 +124,7 @@ function Inspector({ t }: { t: TFn }) {
       {style.shadow && (
         <StyleSlider label={t("style:shadowDepth")} field="shadowDepth" value={style.shadowDepth} onChange={setNum("shadowDepth")} unit=" px" />
       )}
-      <ToggleRow label={t("style:glow")} on={style.glow} onClick={() => setStyle({ glow: !style.glow })} badge={t("style:previewOnly")} />
+      <ToggleRow label={t("style:glow")} on={style.glow} onClick={() => setStyle({ glow: !style.glow })} />
       {style.glow && (
         <StyleSlider label={t("style:glowStrength")} field="glowStrength" value={style.glowStrength} onChange={setNum("glowStrength")} unit=" px" />
       )}
@@ -133,7 +133,7 @@ function Inspector({ t }: { t: TFn }) {
       <ColorField label={t("style:textColor")} value={style.textColor} onChange={(v) => setStyle({ textColor: v })} hint={t("style:alphaTextHint")} />
       <ColorField label={t("style:outline")} value={style.outlineColor} onChange={(v) => setStyle({ outlineColor: v })} />
       <ColorField label={t("style:shadow")} value={style.shadowColor} onChange={(v) => setStyle({ shadowColor: v })} />
-      <ColorField label={t("style:glow")} value={style.glowColor} onChange={(v) => setStyle({ glowColor: v })} badge={t("style:previewOnly")} />
+      <ColorField label={t("style:glow")} value={style.glowColor} onChange={(v) => setStyle({ glowColor: v })} />
 
       <div style={{ ...sectionLabel, marginTop: 12 }}>{t("style:captionBox")}</div>
       <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12 }}>

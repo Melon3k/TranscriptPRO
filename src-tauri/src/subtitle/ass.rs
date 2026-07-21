@@ -29,19 +29,51 @@ pub fn write_ass(subtitles: &[Subtitle], style: &CaptionStyle, animation: &Capti
 
     let (evt_ml, evt_mr, evt_mv) = dialogue_margins(style, animation);
     for sub in subtitles {
-        output.push_str(&format!(
-            "Dialogue: 0,{},{},Default,,{},{},{},,{}\n",
-            format_ass_timestamp(sub.start_time),
-            format_ass_timestamp(sub.end_time),
-            evt_ml,
-            evt_mr,
-            evt_mv,
-            dialogue_text(sub, style, animation)
-        ));
+        let start = format_ass_timestamp(sub.start_time);
+        let end = format_ass_timestamp(sub.end_time);
+        // When glow is enabled we paint a colored-halo line BEHIND the real
+        // caption: the glow line sits at Layer 0, the real text at Layer 1 (so
+        // it draws on top). With glow off we emit a single Layer 0 line exactly
+        // as before — byte-identical golden output.
+        if style.glow {
+            output.push_str(&format!(
+                "Dialogue: 0,{},{},Default,,{},{},{},,{}\n",
+                start,
+                end,
+                evt_ml,
+                evt_mr,
+                evt_mv,
+                glow_text(sub, style, animation)
+            ));
+            output.push_str(&format!(
+                "Dialogue: 1,{},{},Default,,{},{},{},,{}\n",
+                start,
+                end,
+                evt_ml,
+                evt_mr,
+                evt_mv,
+                dialogue_text(sub, style, animation)
+            ));
+        } else {
+            output.push_str(&format!(
+                "Dialogue: 0,{},{},Default,,{},{},{},,{}\n",
+                start,
+                end,
+                evt_ml,
+                evt_mr,
+                evt_mv,
+                dialogue_text(sub, style, animation)
+            ));
+        }
     }
 
     output
 }
+
+/// Blur-entrance start radius. libass `\blur` on a thick bold fill reads as a
+/// faint edge halo, not a defocus — radius 8 was invisible on large captions;
+/// 24 reads clearly as an entrance blur that resolves to 0.
+const BLUR_ENTRANCE_RADIUS: i64 = 24;
 
 /// Per-cue Dialogue MarginL/MarginR/MarginV.
 ///
@@ -76,7 +108,7 @@ fn dialogue_margins(style: &CaptionStyle, animation: &CaptionAnimation) -> (i64,
 ///                   frontend karaokeSegments fallback (`sub.text.split(/\s+/)`)
 ///                   so preview and export agree.
 ///   - `pop`       → prefix `{\fscx0\fscy0\t(0,d,\fscx100\fscy100)}` (scale-in).
-///   - `blur`      → prefix `{\blur8\t(0,d,\blur0)}` (resolve from blurred).
+///   - `blur`      → prefix `{\blur24\t(0,d,\blur0)}` (resolve from blurred).
 ///   - `slide`     → prefix `{\an<a>\move(x,y1,x,y,0,d)}` rising into the rest
 ///                   anchor (see `dialogue_margins` for the wrap-box pinning).
 ///   - `typewriter`→ per-character staggered `\alpha` reveal over `d` ms.
@@ -84,22 +116,13 @@ fn dialogue_margins(style: &CaptionStyle, animation: &CaptionAnimation) -> (i64,
 /// Every branch other than `none`/`karaoke` builds on `plain()` (the escaped,
 /// newline-converted, optionally speaker-prefixed body).
 fn dialogue_text(sub: &Subtitle, style: &CaptionStyle, animation: &CaptionAnimation) -> String {
-    let maybe_upper = |s: String| -> String {
-        if style.uppercase {
-            s.to_uppercase()
-        } else {
-            s
-        }
-    };
+    let maybe_upper = |s: String| -> String { maybe_uppercase(s, style) };
 
     // Base body without the speaker prefix (braces escaped, \n -> \N).
-    let body = maybe_upper(escape_braces(&sub.text).replace('\n', "\\N"));
+    let body = escaped_body(sub, style);
     // Speaker prefix "[Speaker] " (with trailing space), escaped + uppercased
     // the same way, kept separate so karaoke can lead with it as plain text.
-    let speaker_prefix = sub
-        .speaker
-        .as_ref()
-        .map(|sp| maybe_upper(format!("[{}] ", escape_braces(sp))));
+    let speaker_prefix = speaker_prefix(sub, style);
 
     let plain = || match &speaker_prefix {
         Some(p) => format!("{}{}", p, body),
@@ -107,10 +130,7 @@ fn dialogue_text(sub: &Subtitle, style: &CaptionStyle, animation: &CaptionAnimat
     };
 
     match animation.anim_type.as_str() {
-        "fade" => {
-            let d = animation.duration_ms.round().max(0.0) as i64;
-            format!("{{\\fad({},{})}}{}", d, d, plain())
-        }
+        "fade" => format!("{}{}", animation_prefix(style, animation).unwrap_or_default(), plain()),
         "karaoke" => {
             // (centiseconds, token-text) pairs.
             let tokens: Vec<(i64, String)> = if !sub.words.is_empty() {
@@ -156,35 +176,9 @@ fn dialogue_text(sub: &Subtitle, style: &CaptionStyle, animation: &CaptionAnimat
             }
             out.trim_end().to_string()
         }
-        "pop" => {
-            // Scale-in from nothing to full size over the animation duration.
-            // Divergence: the CSS preview starts at scale(.7); the export starts
-            // at \fscx0 per the task brief (a more dramatic pop). No \org — in
-            // libass \org only relocates the ROTATION origin, not the \fscx/\fscy
-            // scale origin; the line's Alignment point is the scale anchor and
-            // reads correctly.
-            let d = animation.duration_ms.round().max(0.0) as i64;
-            format!("{{\\fscx0\\fscy0\\t(0,{},\\fscx100\\fscy100)}}{}", d, plain())
-        }
-        "blur" => {
-            // Resolve from blurred to sharp. BLUR_AMOUNT=8 matches CSS blur(8px)
-            // (captionBlurIn in globals.css).
-            let d = animation.duration_ms.round().max(0.0) as i64;
-            format!("{{\\blur{}\\t(0,{},\\blur0)}}{}", 8, d, plain())
-        }
-        "slide" => {
-            // Rise into place: start one line-height below the resting anchor and
-            // \move up to it. \move (like \pos) makes libass ignore the Style
-            // MarginL/R for this line, but the computed x already reproduces them
-            // so the resting position matches non-slide lines. off is an absolute
-            // px rise (CSS preview uses translateY(18%), but ASS needs absolute
-            // px; one line-height reads correctly and is deterministic).
-            let d = animation.duration_ms.round().max(0.0) as i64;
-            let (x, y, an) = anchor_point(style);
-            let off = style.font_size.round().max(24.0) as i64;
-            let y1 = y + off;
-            format!("{{\\an{}\\move({},{},{},{},0,{})}}{}", an, x, y1, x, y, d, plain())
-        }
+        "pop" => format!("{}{}", animation_prefix(style, animation).unwrap_or_default(), plain()),
+        "blur" => format!("{}{}", animation_prefix(style, animation).unwrap_or_default(), plain()),
+        "slide" => format!("{}{}", animation_prefix(style, animation).unwrap_or_default(), plain()),
         "typewriter" => {
             // Per-character staggered \alpha reveal, left-to-right. Each logical
             // char is hidden (\alpha&HFF&) until its own time window, then \t
@@ -240,15 +234,123 @@ fn dialogue_text(sub: &Subtitle, style: &CaptionStyle, animation: &CaptionAnimat
     }
 }
 
+/// Unicode-uppercase `s` when `style.uppercase` is set, else pass through.
+/// Applied to the whole string first so multi-char foldings (ß→SS) are correct.
+fn maybe_uppercase(s: String, style: &CaptionStyle) -> String {
+    if style.uppercase {
+        s.to_uppercase()
+    } else {
+        s
+    }
+}
+
+/// The escaped, newline-converted, maybe-uppercased cue body WITHOUT the speaker
+/// prefix (braces escaped, `\n` -> `\N`).
+fn escaped_body(sub: &Subtitle, style: &CaptionStyle) -> String {
+    maybe_uppercase(escape_braces(&sub.text).replace('\n', "\\N"), style)
+}
+
+/// The `[Speaker] ` prefix (trailing space), escaped + uppercased the same way,
+/// or `None` when the cue has no speaker.
+fn speaker_prefix(sub: &Subtitle, style: &CaptionStyle) -> Option<String> {
+    sub.speaker
+        .as_ref()
+        .map(|sp| maybe_uppercase(format!("[{}] ", escape_braces(sp)), style))
+}
+
+/// The plain whole-text body (speaker prefix + escaped body), with no
+/// per-token/per-char animation splitting.
+fn plain_body(sub: &Subtitle, style: &CaptionStyle) -> String {
+    match speaker_prefix(sub, style) {
+        Some(p) => format!("{}{}", p, escaped_body(sub, style)),
+        None => escaped_body(sub, style),
+    }
+}
+
+/// The shared positional/entrance animation override block that leads a line,
+/// for the types that express as a single leading `{...}` block. Both the real
+/// caption line and the glow line prepend this so the halo stays locked to the
+/// moving/scaling text. Returns `None` for `karaoke` (interleaves `\k` per
+/// token), `typewriter` (interleaves `\alpha` per char) and `none` — none of
+/// which have a single shareable prefix.
+///   - `fade`  → `{\fad(d,d)}` (in+out ms; ASS \fad is linear).
+///   - `pop`   → `{\fscx0\fscy0\t(0,d,\fscx100\fscy100)}` (scale-in). No \org —
+///               in libass \org only relocates the ROTATION origin, not the
+///               scale origin; the line's Alignment point is the scale anchor.
+///   - `blur`  → `{\blur24\t(0,d,\blur0)}` (resolve from blurred to sharp).
+///   - `slide` → `{\an<a>\move(x,y1,x,y,0,d)}` rising one line-height into the
+///               rest anchor. \move (like \pos) makes libass ignore the Style
+///               MarginL/R, but the computed x reproduces them (see
+///               `dialogue_margins` for the wrap-box pinning).
+fn animation_prefix(style: &CaptionStyle, animation: &CaptionAnimation) -> Option<String> {
+    let d = animation.duration_ms.round().max(0.0) as i64;
+    match animation.anim_type.as_str() {
+        "fade" => Some(format!("{{\\fad({},{})}}", d, d)),
+        "pop" => Some(format!("{{\\fscx0\\fscy0\\t(0,{},\\fscx100\\fscy100)}}", d)),
+        "blur" => Some(format!("{{\\blur{}\\t(0,{},\\blur0)}}", BLUR_ENTRANCE_RADIUS, d)),
+        "slide" => {
+            let (x, y, an) = anchor_point(style);
+            let off = style.font_size.round().max(24.0) as i64;
+            let y1 = y + off;
+            Some(format!("{{\\an{}\\move({},{},{},{},0,{})}}", an, x, y1, x, y, d))
+        }
+        _ => None,
+    }
+}
+
+/// The glow override block painted on the BEHIND (Layer 0) line: a transparent
+/// fill (`\1a&HFF&`) with an opaque, blurred, coloured border so only a soft
+/// halo shows. `glow_strength` drives border width `\bord` (clamp 2..=20 of
+/// half the strength) and blur radius `\blur` (clamp 4..=40 of the strength).
+/// The glow colour goes through the same hex→ASS `&HAABBGGRR` conversion as the
+/// Style colours; its alpha byte is folded into `\3a` and the BGR into `\3c`.
+///
+/// When the animation type is `blur`, its own `\blur`/`\t(...,\blur0)` already
+/// drives the line's blur; emitting the glow's static `\blur<r>` too would
+/// double-apply the tag (the later block would clobber the animation), so we
+/// omit the glow's static blur in that one case and let the animation drive it.
+fn glow_prefix(style: &CaptionStyle, anim_is_blur: bool) -> String {
+    // "&HAABBGGRR" — always "&H" + 8 hex digits (valid parse or 6-digit
+    // fallback), so the byte slices below are always in range.
+    let ass = hex_to_ass_color(&style.glow_color, "22D3EE");
+    let hexpart = &ass[2..]; // "AABBGGRR"
+    let alpha = &hexpart[0..2]; // "AA"
+    let bgr = &hexpart[2..]; // "BBGGRR"
+    let b = (style.glow_strength * 0.5).round().clamp(2.0, 20.0) as i64;
+    let r = style.glow_strength.round().clamp(4.0, 40.0) as i64;
+    if anim_is_blur {
+        format!(
+            "{{\\1a&HFF&\\3a&H{}&\\3c&H{}&\\bord{}\\shad0}}",
+            alpha, bgr, b
+        )
+    } else {
+        format!(
+            "{{\\1a&HFF&\\3a&H{}&\\3c&H{}&\\bord{}\\shad0\\blur{}}}",
+            alpha, bgr, b, r
+        )
+    }
+}
+
+/// Build the BEHIND glow line's Dialogue text: the shared entrance/position
+/// animation prefix (so the halo tracks the moving text), then the glow
+/// override block, then the plain whole-text body (no karaoke `\k` / typewriter
+/// `\alpha` splitting — the halo is whole-text).
+fn glow_text(sub: &Subtitle, style: &CaptionStyle, animation: &CaptionAnimation) -> String {
+    let anim = animation_prefix(style, animation).unwrap_or_default();
+    let glow = glow_prefix(style, animation.anim_type == "blur");
+    format!("{}{}{}", anim, glow, plain_body(sub, style))
+}
+
 /// Escape literal `{` / `}` so ASS renderers show them instead of parsing an
 /// override-tag block. `\{` / `\}` are the conventional literal-brace escapes.
 fn escape_braces(text: &str) -> String {
     text.replace('{', "\\{").replace('}', "\\}")
 }
 
-/// Generate the Style line from a CaptionStyle. lineHeight, glow*, and align
-/// are intentionally ignored — they are preview-only per the decision in
-/// docs/new-design-agents.md (no honest ASS mapping exists for them).
+/// Generate the Style line from a CaptionStyle. lineHeight and align are
+/// intentionally ignored — they are preview-only (no honest ASS Style mapping
+/// exists for them). glow* IS exported, but not here: it becomes a second
+/// BEHIND Dialogue line per cue (see `glow_text`), not a Style field.
 /// Compute (margin_l, margin_r, margin_v) at PlayRes 1920x1080, mirroring
 /// captionBoxCss in src/lib/caption-style.ts: 2% side inset for left/right
 /// columns, symmetric (100 - width) / 2 for the center column. Applies the same
@@ -771,9 +873,144 @@ mod tests {
         };
         let out = write_ass(&subs, &CaptionStyle::default(), &anim);
         assert!(
-            out.contains(",,{\\blur8\\t(0,400,\\blur0)}hello world\n"),
+            out.contains(",,{\\blur24\\t(0,400,\\blur0)}hello world\n"),
             "got: {out}"
         );
+    }
+
+    #[test]
+    fn test_glow_off_single_layer0_line_unchanged() {
+        // glow off (default) → exactly one Dialogue line at Layer 0, no glow tags.
+        let subs = vec![make_sub(1, 1000, 3500, "Hello world")];
+        let out = write_ass(&subs, &CaptionStyle::default(), &CaptionAnimation::default());
+        let dialogue_lines: Vec<&str> = out.lines().filter(|l| l.starts_with("Dialogue:")).collect();
+        assert_eq!(dialogue_lines.len(), 1, "glow off must emit one line; got: {out}");
+        assert!(dialogue_lines[0].starts_with("Dialogue: 0,"), "got: {out}");
+        assert!(!out.contains("\\1a&HFF&"), "no glow tags when glow off; got: {out}");
+        // Byte-identical to the pre-glow golden line.
+        assert!(out.contains("Dialogue: 0,0:00:01.00,0:00:03.50,Default,,0,0,0,,Hello world\n"));
+    }
+
+    #[test]
+    fn test_glow_on_emits_behind_line_and_bumps_real_line() {
+        // glow on → a Layer 0 glow line (transparent fill, opaque coloured
+        // blurred border) BEHIND, and the real text bumped to Layer 1.
+        let style = CaptionStyle {
+            glow: true,
+            ..CaptionStyle::default()
+        };
+        let subs = vec![make_sub(1, 0, 2000, "hello world")];
+        let out = write_ass(&subs, &style, &CaptionAnimation::default());
+        let dialogue_lines: Vec<&str> = out.lines().filter(|l| l.starts_with("Dialogue:")).collect();
+        assert_eq!(dialogue_lines.len(), 2, "glow on must emit two lines; got: {out}");
+
+        // Glow line: Layer 0, whole-text halo. Default glowStrength 12 →
+        // \bord round(12*0.5)=6, \blur round(12)=12; glowColor #22D3EE →
+        // &H00EED322 → \3c&HEED322&, \3a&H00&.
+        assert!(
+            dialogue_lines[0].contains(
+                "Dialogue: 0,0:00:00.00,0:00:02.00,Default,,0,0,0,,{\\1a&HFF&\\3a&H00&\\3c&HEED322&\\bord6\\shad0\\blur12}hello world"
+            ),
+            "glow line; got: {out}"
+        );
+        // Real text bumped to Layer 1, unchanged body.
+        assert!(
+            dialogue_lines[1].contains(
+                "Dialogue: 1,0:00:00.00,0:00:02.00,Default,,0,0,0,,hello world"
+            ),
+            "real line bumped to Layer 1; got: {out}"
+        );
+    }
+
+    #[test]
+    fn test_glow_on_carries_animation_prefix_on_both_lines() {
+        // The glow line must carry the same entrance prefix as the real line so
+        // the halo tracks the moving text — here fade.
+        let style = CaptionStyle {
+            glow: true,
+            ..CaptionStyle::default()
+        };
+        let anim = CaptionAnimation {
+            anim_type: "fade".to_string(),
+            duration_ms: 400.0,
+            ..CaptionAnimation::default()
+        };
+        let subs = vec![make_sub(1, 0, 2000, "hello world")];
+        let out = write_ass(&subs, &style, &anim);
+        let dialogue_lines: Vec<&str> = out.lines().filter(|l| l.starts_with("Dialogue:")).collect();
+        // Glow line: fade prefix, then glow block, then body.
+        assert!(
+            dialogue_lines[0].contains(",,{\\fad(400,400)}{\\1a&HFF&\\3a&H00&\\3c&HEED322&\\bord6\\shad0\\blur12}hello world"),
+            "glow line carries fade prefix; got: {out}"
+        );
+        // Real line: fade prefix, Layer 1.
+        assert!(
+            dialogue_lines[1].contains("Dialogue: 1,") && dialogue_lines[1].contains(",,{\\fad(400,400)}hello world"),
+            "real line; got: {out}"
+        );
+    }
+
+    #[test]
+    fn test_glow_on_blur_animation_omits_static_blur() {
+        // With animation=blur, the glow line must NOT emit its own static
+        // \blur (the animation prefix's \blur drives it) — no double-apply.
+        let style = CaptionStyle {
+            glow: true,
+            ..CaptionStyle::default()
+        };
+        let anim = CaptionAnimation {
+            anim_type: "blur".to_string(),
+            duration_ms: 400.0,
+            ..CaptionAnimation::default()
+        };
+        let subs = vec![make_sub(1, 0, 2000, "hello world")];
+        let out = write_ass(&subs, &style, &anim);
+        let dialogue_lines: Vec<&str> = out.lines().filter(|l| l.starts_with("Dialogue:")).collect();
+        // Glow block ends at \shad0 (no \blur<r>); the entrance \blur24 leads.
+        assert!(
+            dialogue_lines[0].contains(",,{\\blur24\\t(0,400,\\blur0)}{\\1a&HFF&\\3a&H00&\\3c&HEED322&\\bord6\\shad0}hello world"),
+            "glow line omits static blur under blur animation; got: {out}"
+        );
+    }
+
+    #[test]
+    fn test_glow_color_alpha_folds_into_3a() {
+        // A glowColor with alpha folds the inverse-alpha byte into \3a and the
+        // BGR into \3c. #22D3EE80 → &H7FEED322 → \3a&H7F&, \3c&HEED322&.
+        let style = CaptionStyle {
+            glow: true,
+            glow_color: "#22D3EE80".to_string(),
+            glow_strength: 20.0,
+            ..CaptionStyle::default()
+        };
+        let subs = vec![make_sub(1, 0, 2000, "hi")];
+        let out = write_ass(&subs, &style, &CaptionAnimation::default());
+        // glowStrength 20 → \bord round(10)=10, \blur round(20)=20.
+        assert!(
+            out.contains("{\\1a&HFF&\\3a&H7F&\\3c&HEED322&\\bord10\\shad0\\blur20}hi"),
+            "glow alpha folded into \\3a; got: {out}"
+        );
+    }
+
+    #[test]
+    fn test_glow_strength_clamps() {
+        // Tiny strength clamps \bord to 2 and \blur to 4.
+        let style = CaptionStyle {
+            glow: true,
+            glow_strength: 1.0,
+            ..CaptionStyle::default()
+        };
+        let out = write_ass(&[make_sub(1, 0, 1000, "x")], &style, &CaptionAnimation::default());
+        assert!(out.contains("\\bord2\\shad0\\blur4}x"), "low clamp; got: {out}");
+
+        // Huge strength clamps \bord to 20 and \blur to 40.
+        let style = CaptionStyle {
+            glow: true,
+            glow_strength: 500.0,
+            ..CaptionStyle::default()
+        };
+        let out = write_ass(&[make_sub(1, 0, 1000, "x")], &style, &CaptionAnimation::default());
+        assert!(out.contains("\\bord20\\shad0\\blur40}x"), "high clamp; got: {out}");
     }
 
     #[test]
