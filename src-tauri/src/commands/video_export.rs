@@ -162,7 +162,17 @@ pub async fn export_video(
     let bundled_family = matches!(style.font_id.trim(), "Outfit" | "Inter" | "JetBrains Mono");
 
     // 2. Serialize ASS via the EXISTING serializer (no duplicated ASS logic).
-    let ass = crate::subtitle::ass::write_ass(&subtitles, &style, &animation);
+    //    Resolve the caption font so the text-hugging background pill is sized
+    //    to the real glyph metrics; degrade to None (rough estimate) if it can't
+    //    be resolved. Only actually measured when style.background is on.
+    let bundled_fonts_dir = app.path().resource_dir().ok().map(|d| d.join("fonts"));
+    let font_metrics = crate::subtitle::ass::resolve_font_metrics(&style, bundled_fonts_dir.as_deref());
+    let ass = crate::subtitle::ass::write_ass_with_metrics(
+        &subtitles,
+        &style,
+        &animation,
+        font_metrics.as_ref(),
+    );
 
     // 3. Per-export temp subdir holding both the .ass and the copied font
     //    TTFs; the RAII guard removes the whole dir on every exit path.
@@ -700,10 +710,24 @@ mod burn_smoke {
         assert!(ok, "generating the test input clip failed:\n{err}");
         assert!(input.exists(), "test input clip was not written");
 
-        // 2. The app's own ASS, with the default (bundled Outfit) style, plus
-        //    Unicode + a brace to exercise escaping.
+        // 2. The app's own ASS, with the bundled Outfit style, background pill +
+        //    drop shadow ENABLED (so the measured rounded-rect drawing and the
+        //    offset shadow copy are exercised by real libass), plus Unicode + a
+        //    brace to exercise escaping.
         let subs = vec![sub(1, 0, 900, "Smoke żółć {test}")];
-        let ass = crate::subtitle::ass::write_ass(&subs, &CaptionStyle::default(), &CaptionAnimation::default());
+        let style = CaptionStyle {
+            background: true,
+            shadow: true,
+            ..CaptionStyle::default()
+        };
+        let fonts = Path::new(env!("CARGO_MANIFEST_DIR")).join("fonts");
+        let metrics = crate::subtitle::ass::resolve_font_metrics(&style, Some(&fonts));
+        let ass = crate::subtitle::ass::write_ass_with_metrics(
+            &subs,
+            &style,
+            &CaptionAnimation::default(),
+            metrics.as_ref(),
+        );
         let ass_name = "smoke.ass";
         std::fs::write(dir.join(ass_name), &ass).unwrap();
 

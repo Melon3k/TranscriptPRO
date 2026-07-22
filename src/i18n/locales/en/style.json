@@ -16,7 +16,6 @@
   },
   "size": "Size",
   "letterSpacing": "Letter spacing",
-  "lineHeight": "Line height",
   "align": {
     "left": "Align left",
     "center": "Align center",
@@ -29,16 +28,21 @@
   "outline": "Outline",
   "outlineWidth": "Outline width",
   "shadow": "Shadow",
-  "shadowDepth": "Shadow depth",
+  "shadowAngle": "Angle",
+  "shadowDistance": "Distance",
+  "shadowSize": "Size",
+  "shadowBlur": "Blur",
   "glow": "Glow",
   "glowStrength": "Glow strength",
+  "background": "Background",
+  "backgroundColor": "Background color",
+  "backgroundRadius": "Corner radius",
+  "backgroundSpread": "Spread",
   "previewOnly": "preview only",
   "anim": {
     "appliesAll": "Applies to all captions",
     "exported": "exported",
     "duration": "Duration",
-    "perWordDelay": "Per-word delay",
-    "easing": "Easing",
     "highlightColor": "Karaoke highlight",
     "types": {
       "none": "None",
@@ -50,7 +54,6 @@
       "blur": "Blur in"
     }
   },
-  "colors": "COLORS",
   "textColor": "Text",
   "colorSwatchTip": "Color — click to pick",
   "fields": {

@@ -79,30 +79,63 @@ describe("captionBoxCss", () => {
 // ── captionTextCss ───────────────────────────────────────────────────────────
 
 describe("captionTextCss", () => {
-  it("default has the 4-layer outline shadow and no glow/shadow layer", () => {
+  it("default outline emits an 8-direction ring in the outline colour, no glow/shadow", () => {
     const css = captionTextCss(DEFAULT_CAPTION_STYLE);
-    // 2px outline / 48px font ≈ 0.0417em; colors emit as rgba() for alpha.
-    expect(css.textShadow).toBe(
-      `-0.0417em -0.0417em 0 rgba(11,15,22,1), 0.0417em -0.0417em 0 rgba(11,15,22,1), ` +
-        `-0.0417em 0.0417em 0 rgba(11,15,22,1), 0.0417em 0.0417em 0 rgba(11,15,22,1)`,
-    );
-    expect(css.textShadow).not.toContain("rgba(34,211,238");
-    expect(css.textShadow).not.toContain("rgba(0,0,0");
+    const layers = String(css.textShadow).split(", ");
+    // 8-way ring (4 cardinals + 4 corners) closes the outline; 2px/48px font:
+    // cardinals at 0.0417em, corners at 0.7071·w ≈ 0.0295em. All outline colour.
+    expect(layers).toHaveLength(8);
+    for (const l of layers) expect(l).toContain("rgba(11,15,22,1)");
+    expect(layers).toContain("0.0417em 0em 0 rgba(11,15,22,1)"); // a cardinal
+    expect(layers).toContain("0.0295em 0.0295em 0 rgba(11,15,22,1)"); // a corner
+    expect(css.textShadow).not.toContain("rgba(34,211,238"); // no glow
+    expect(css.textShadow).not.toContain("rgba(0,0,0"); // no shadow
   });
 
   it("glow:true appends the cyan glow layer last", () => {
     const css = captionTextCss(style({ glow: true }));
     const layers = String(css.textShadow).split(", ");
-    expect(layers).toHaveLength(5);
-    expect(layers[4]).toBe("0 0 0.25em rgba(34,211,238,1)");
+    expect(layers).toHaveLength(9); // 8 outline + 1 glow
+    expect(layers[8]).toBe("0 0 0.25em rgba(34,211,238,1)");
   });
 
   it("shadow layer sits between outline and glow", () => {
     const css = captionTextCss(style({ shadow: true, glow: true }));
     const layers = String(css.textShadow).split(", ");
-    expect(layers).toHaveLength(6);
-    expect(layers[4]).toBe("0 0.0417em 0.0833em rgba(0,0,0,1)");
-    expect(layers[5]).toBe("0 0 0.25em rgba(34,211,238,1)");
+    expect(layers).toHaveLength(10); // 8 outline + 1 shadow + 1 glow
+    // default 135° / distance 4 / blur 4 at fontSize 48 → down-left offset.
+    expect(layers[8]).toBe("-0.0589em 0.0589em 0.0833em rgba(0,0,0,1)");
+    expect(layers[9]).toBe("0 0 0.25em rgba(34,211,238,1)");
+  });
+
+  it("shadowAngle 0° offsets the shadow purely to the right (+y down)", () => {
+    const css = captionTextCss(style({ shadow: true, shadowAngle: 0, shadowDistance: 4, shadowBlur: 0 }));
+    const layers = String(css.textShadow).split(", ");
+    // cos0=1 → +x, sin0=0 → no y; 4/48 ≈ 0.0833em, blur 0.
+    expect(layers[layers.length - 1]).toBe("0.0833em 0em 0em rgba(0,0,0,1)");
+  });
+
+  it("shadowSize > 0 stacks a second, blurrier layer at the same offset", () => {
+    const withSize = captionTextCss(style({ shadow: true, shadowSize: 6 }));
+    const withoutSize = captionTextCss(style({ shadow: true, shadowSize: 0 }));
+    // one extra layer appears when size is on (outline 8 + shadow 1 + size 1).
+    expect(String(withSize.textShadow).split(", ")).toHaveLength(10);
+    expect(String(withoutSize.textShadow).split(", ")).toHaveLength(9);
+  });
+
+  it("background off adds no pill styling", () => {
+    const css = captionTextCss(DEFAULT_CAPTION_STYLE);
+    expect(css.backgroundColor).toBeUndefined();
+    expect(css.borderRadius).toBeUndefined();
+    expect(css.padding).toBeUndefined();
+  });
+
+  it("background on renders a text-hugging pill (color + em radius + em padding)", () => {
+    const css = captionTextCss(style({ background: true }));
+    // default #000000A6 → alpha 166/255 ≈ 0.651; radius 8 / spread 12 at 48px.
+    expect(css.backgroundColor).toBe("rgba(0,0,0,0.651)");
+    expect(css.borderRadius).toBe("0.1667em");
+    expect(css.padding).toBe("0.25em");
   });
 
   it("honors alpha in the outline color via rgba()", () => {
@@ -141,7 +174,6 @@ describe("captionTextCss", () => {
     const css = captionTextCss(style({ fontId: "JetBrains Mono" }));
     expect(css.fontFamily).toBe('"JetBrains Mono", ui-monospace, Menlo, monospace');
     expect(css.textAlign).toBe("center");
-    expect(css.lineHeight).toBe(1.15);
     expect(css.color).toBe("rgba(255,255,255,1)");
     expect(css.display).toBe("block");
   });
@@ -331,6 +363,36 @@ describe("sanitizeCaptionStyle", () => {
     expect(sanitizeCaptionStyle(persisted)).toEqual(persisted);
   });
 
+  it("exposes the caption-style defaults for the new fields", () => {
+    expect(DEFAULT_CAPTION_STYLE.shadowAngle).toBe(135);
+    expect(DEFAULT_CAPTION_STYLE.shadowDistance).toBe(4);
+    expect(DEFAULT_CAPTION_STYLE.shadowSize).toBe(0);
+    expect(DEFAULT_CAPTION_STYLE.shadowBlur).toBe(4);
+    expect(DEFAULT_CAPTION_STYLE.background).toBe(false);
+    expect(DEFAULT_CAPTION_STYLE.backgroundColor).toBe("#000000A6");
+    expect(DEFAULT_CAPTION_STYLE.backgroundRadius).toBe(8);
+    expect(DEFAULT_CAPTION_STYLE.backgroundSpread).toBe(12);
+  });
+
+  it("migrates a legacy shadowDepth into shadowDistance (clamped)", () => {
+    const out = sanitizeCaptionStyle({ shadowDepth: 7 } as never);
+    expect(out.shadowDistance).toBe(7);
+    // out of range clamps to shadowDistance's max
+    expect(sanitizeCaptionStyle({ shadowDepth: 999 } as never).shadowDistance).toBe(
+      STYLE_LIMITS.shadowDistance.max,
+    );
+  });
+
+  it("does not overwrite an explicit shadowDistance with the legacy shadowDepth", () => {
+    const out = sanitizeCaptionStyle({ shadowDepth: 7, shadowDistance: 2 } as never);
+    expect(out.shadowDistance).toBe(2);
+  });
+
+  it("ignores a non-numeric legacy shadowDepth (falls back to the default)", () => {
+    const out = sanitizeCaptionStyle({ shadowDepth: "deep" } as never);
+    expect(out.shadowDistance).toBe(DEFAULT_CAPTION_STYLE.shadowDistance);
+  });
+
   it("migrates persisted 6-digit colors to opaque 8-digit (no version bump)", () => {
     const out = sanitizeCaptionStyle({
       textColor: "#FACC15",
@@ -360,12 +422,10 @@ describe("sanitizeCaptionStyle", () => {
     const out = sanitizeCaptionStyle({
       fontSize: null,
       letterSpacing: "wide",
-      lineHeight: NaN,
       widthPct: Infinity,
     } as never);
     expect(out.fontSize).toBe(DEFAULT_CAPTION_STYLE.fontSize);
     expect(out.letterSpacing).toBe(DEFAULT_CAPTION_STYLE.letterSpacing);
-    expect(out.lineHeight).toBe(DEFAULT_CAPTION_STYLE.lineHeight);
     expect(out.widthPct).toBe(DEFAULT_CAPTION_STYLE.widthPct);
     expect(captionTextCss(out).letterSpacing).not.toContain("NaN");
   });

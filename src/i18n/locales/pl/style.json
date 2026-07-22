@@ -16,7 +16,6 @@
   },
   "size": "Rozmiar",
   "letterSpacing": "Odstęp liter",
-  "lineHeight": "Interlinia",
   "align": {
     "left": "Wyrównaj do lewej",
     "center": "Wyśrodkuj",
@@ -29,16 +28,21 @@
   "outline": "Obrys",
   "outlineWidth": "Grubość obrysu",
   "shadow": "Cień",
-  "shadowDepth": "Głębokość cienia",
+  "shadowAngle": "Kąt",
+  "shadowDistance": "Odległość",
+  "shadowSize": "Rozmiar",
+  "shadowBlur": "Rozmycie",
   "glow": "Poświata (glow)",
   "glowStrength": "Siła poświaty",
+  "background": "Tło",
+  "backgroundColor": "Kolor tła",
+  "backgroundRadius": "Zaokrąglenie",
+  "backgroundSpread": "Rozpiętość",
   "previewOnly": "tylko podgląd",
   "anim": {
     "appliesAll": "Dotyczy wszystkich napisów",
     "exported": "eksport",
     "duration": "Czas trwania",
-    "perWordDelay": "Opóźnienie na słowo",
-    "easing": "Wygładzanie",
     "highlightColor": "Podświetlenie karaoke",
     "types": {
       "none": "Brak",
@@ -50,7 +54,6 @@
       "blur": "Rozmycie"
     }
   },
-  "colors": "KOLORY",
   "textColor": "Tekst",
   "colorSwatchTip": "Kolor — kliknij, aby wybrać",
   "fields": {

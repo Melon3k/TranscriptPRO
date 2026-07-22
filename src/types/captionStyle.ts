@@ -1,14 +1,15 @@
 export type CaptionAlign = "left" | "center" | "right";
 /** Caption-box anchor on the video, ASS numpad convention:
- *  1|2|3 = bottom L/C/R, 4|5|6 = middle, 7|8|9 = top. F2 writes this number
- *  straight into the ASS Style `Alignment` field. */
+ *  1|2|3 = bottom L/C/R, 4|5|6 = middle, 7|8|9 = top. Drives the box REGION
+ *  (margins) + vertical band; `align` drives the horizontal justification
+ *  column, and the two combine into the exported ASS `Alignment`
+ *  (see effective_alignment in ass.rs). */
 export type CaptionBoxPosition = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 
 export interface CaptionStyle {
   fontId: string; // resolved font FAMILY name, e.g. "Outfit" | "Arial"; default "Outfit"
   fontSize: number; // px at 1080p reference height; 48
   letterSpacing: number; // px at reference size; 0
-  lineHeight: number; // unitless multiplier; 1.15
   align: CaptionAlign; // "center" (text-align inside the box)
   bold: boolean; // true (renders weight 700; ASS Bold=-1)
   italic: boolean; // false
@@ -16,9 +17,16 @@ export interface CaptionStyle {
   outline: boolean; // true
   outlineWidth: number; // px at reference; 2 (ASS Outline)
   shadow: boolean; // false (mock shows off)
-  shadowDepth: number; // px at reference; 2 (ASS Shadow)
+  shadowAngle: number; // shadow direction deg; 135 (0°=right, clockwise; +y down matches \pos)
+  shadowDistance: number; // shadow offset px at reference; 4 (ASS Shadow depth along the angle)
+  shadowSize: number; // shadow spread px; 0 (best-effort in the CSS preview)
+  shadowBlur: number; // shadow blur px at reference; 4
   glow: boolean; // false — preview-only field with no faithful ASS mapping; default must export honestly
   glowStrength: number; // blur px at reference; 12
+  background: boolean; // false — text-hugging pill behind the caption
+  backgroundColor: string; // "#000000A6" (#RRGGBBAA; alpha carries the box opacity)
+  backgroundRadius: number; // corner radius px at reference; 8
+  backgroundSpread: number; // padding px at reference around the text; 12
   textColor: string; // "#FFFFFF" (#RRGGBB; F2 converts to &HAABBGGRR)
   outlineColor: string; // "#0B0F16" (current overlay outline)
   shadowColor: string; // "#000000"
@@ -35,8 +43,8 @@ export interface CaptionStyle {
 // Item C: ONE global animation, a sibling of the global style in styleStore
 // (not per-segment). Every animation type now serializes to ASS override tags
 // (fade → \fad, karaoke → \k, pop → \fscx/\fscy \t, blur → \blur \t, slide →
-// \move, typewriter → per-char \alpha \t); only easing and perWordDelayMs stay
-// preview-only.
+// \move, typewriter → per-char \alpha \t). (The preview-only easing +
+// per-word-delay knobs were removed — the UI only exposes what exports.)
 export type CaptionAnimationType =
   | "none"
   | "fade"
@@ -45,12 +53,9 @@ export type CaptionAnimationType =
   | "typewriter"
   | "karaoke"
   | "blur";
-export type CaptionEasing = "linear" | "ease" | "ease-in" | "ease-out" | "ease-in-out";
 export interface CaptionAnimation {
   type: CaptionAnimationType; // default "none"
   durationMs: number; // 400 — fade in+out length / entrance length
-  perWordDelayMs: number; // 40 — stagger; PREVIEW-ONLY (slide/pop/typewriter/blur)
-  easing: CaptionEasing; // "ease-out" — PREVIEW-ONLY (ASS \fad is linear)
   highlightColor: string; // "#22D3EE" — karaoke sung-word colour → ASS PrimaryColour
 }
 // Same forward-compat contract as CaptionStyle above: the store merges persisted
@@ -59,8 +64,7 @@ export interface CaptionAnimation {
 
 // Every animation type except "none" serializes to ASS override tags; this set
 // only gates UI badges and the Rail export warning (the Rust serializer keys off
-// animation.anim_type strings directly). easing and perWordDelayMs remain
-// preview-only (ASS \t is linear; per-word entrance stagger is out of scope).
+// animation.anim_type strings directly).
 export const EXPORTED_ANIMATIONS: ReadonlySet<CaptionAnimationType> = new Set([
   "fade",
   "karaoke",
@@ -71,9 +75,9 @@ export const EXPORTED_ANIMATIONS: ReadonlySet<CaptionAnimationType> = new Set([
 ]);
 
 // Types whose entrance is exported but only approximately: they animate via ASS
-// \t (linear only), and their perWordDelayMs / easing are preview-only, so the
-// exported motion differs from the CSS preview. fade (\fad) and karaoke (\k
-// timings) map faithfully and are excluded. Gates the Rail export notice.
+// \t (linear only), so the exported motion differs slightly from the CSS
+// preview. fade (\fad) and karaoke (\k timings) map faithfully and are
+// excluded. Gates the Rail export notice.
 export const APPROXIMATE_ANIMATIONS: ReadonlySet<CaptionAnimationType> = new Set([
   "slide",
   "pop",

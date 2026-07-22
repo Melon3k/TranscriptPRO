@@ -5177,6 +5177,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
+ "ttf-parser",
  "uuid",
  "whisper-rs",
  "whisper-rs-sys",

@@ -31,7 +31,6 @@ export const DEFAULT_CAPTION_STYLE: CaptionStyle = {
   fontId: "Outfit",
   fontSize: 48,
   letterSpacing: 0,
-  lineHeight: 1.15,
   align: "center",
   bold: true,
   italic: false,
@@ -39,9 +38,16 @@ export const DEFAULT_CAPTION_STYLE: CaptionStyle = {
   outline: true,
   outlineWidth: 2,
   shadow: false,
-  shadowDepth: 2,
+  shadowAngle: 135,
+  shadowDistance: 4,
+  shadowSize: 0,
+  shadowBlur: 4,
   glow: false,
   glowStrength: 12,
+  background: false,
+  backgroundColor: "#000000A6",
+  backgroundRadius: 8,
+  backgroundSpread: 12,
   textColor: "#FFFFFFFF",
   outlineColor: "#0B0F16FF",
   shadowColor: "#000000FF",
@@ -58,10 +64,14 @@ export const BOX_GRID: readonly CaptionBoxPosition[] = [7, 8, 9, 4, 5, 6, 1, 2, 
 export type NumericStyleField =
   | "fontSize"
   | "letterSpacing"
-  | "lineHeight"
   | "outlineWidth"
-  | "shadowDepth"
+  | "shadowAngle"
+  | "shadowDistance"
+  | "shadowSize"
+  | "shadowBlur"
   | "glowStrength"
+  | "backgroundRadius"
+  | "backgroundSpread"
   | "widthPct"
   | "marginVPct";
 
@@ -73,10 +83,14 @@ export const STYLE_LIMITS: Record<
 > = {
   fontSize: { min: 16, max: 120, step: 1 },
   letterSpacing: { min: -2, max: 10, step: 0.5 },
-  lineHeight: { min: 0.9, max: 2, step: 0.05 },
   outlineWidth: { min: 0, max: 10, step: 0.5 },
-  shadowDepth: { min: 0, max: 10, step: 0.5 },
+  shadowAngle: { min: 0, max: 360, step: 1 },
+  shadowDistance: { min: 0, max: 40, step: 0.5 },
+  shadowSize: { min: 0, max: 20, step: 0.5 },
+  shadowBlur: { min: 0, max: 40, step: 1 },
   glowStrength: { min: 0, max: 40, step: 1 },
+  backgroundRadius: { min: 0, max: 60, step: 1 },
+  backgroundSpread: { min: 0, max: 60, step: 1 },
   widthPct: { min: 20, max: 100, step: 1 },
   marginVPct: { min: 0, max: 30, step: 0.5 },
 };
@@ -142,6 +156,7 @@ const BOOL_STYLE_FIELDS = [
   "outline",
   "shadow",
   "glow",
+  "background",
 ] as const;
 
 const COLOR_STYLE_FIELDS = [
@@ -149,6 +164,7 @@ const COLOR_STYLE_FIELDS = [
   "outlineColor",
   "shadowColor",
   "glowColor",
+  "backgroundColor",
 ] as const;
 
 /** Rebuild a full CaptionStyle from untrusted persisted data (hand-edited or
@@ -162,6 +178,17 @@ export function sanitizeCaptionStyle(persisted: unknown): CaptionStyle {
       ? (persisted as Partial<CaptionStyle>)
       : {};
   const style: CaptionStyle = { ...DEFAULT_CAPTION_STYLE, ...raw };
+
+  // MIGRATION: shadowDepth was replaced by shadowAngle/Distance/Size/Blur.
+  // Carry a legacy configured depth into shadowDistance so upgrades don't lose a
+  // set shadow. Reads the legacy value off persisted like the color-alpha
+  // migration; the numeric loop below clamps it to shadowDistance's range.
+  const legacyDepth: unknown = (raw as { shadowDepth?: unknown }).shadowDepth;
+  const hasNewDistance =
+    typeof (raw as { shadowDistance?: unknown }).shadowDistance === "number";
+  if (typeof legacyDepth === "number" && Number.isFinite(legacyDepth) && !hasNewDistance) {
+    style.shadowDistance = legacyDepth;
+  }
 
   // fontId is now an arbitrary family name. Migrate legacy bundled ids to
   // family names, accept any non-empty family verbatim, else default. No
@@ -296,21 +323,36 @@ export function captionTextCss(style: CaptionStyle): CSSProperties {
   const layers: string[] = [];
 
   if (style.outline) {
-    // Clean outline via layered shadows — avoids the "chewed" look
-    // that -webkit-text-stroke produces when the stroke overlaps the fill.
-    const w = em(style.outlineWidth, style.fontSize);
+    // Clean CONTINUOUS outline via a ring of shadow copies on a circle of
+    // radius = outlineWidth (avoids the "chewed" look -webkit-text-stroke gives
+    // when the stroke overlaps the fill). Four corners alone sit at (±w,±w) —
+    // i.e. w·√2 out — leaving the top/bottom/left/right edges bare, which reads
+    // as broken diagonal blobs. Eight evenly-spaced directions (cardinals at w,
+    // corners at 0.707·w) close the ring so the outline looks solid.
+    const w = style.outlineWidth;
     const c = hexToCssColor(style.outlineColor);
-    layers.push(
-      `-${w} -${w} 0 ${c}`,
-      `${w} -${w} 0 ${c}`,
-      `-${w} ${w} 0 ${c}`,
-      `${w} ${w} 0 ${c}`,
-    );
+    const k = 0.7071; // cos/sin 45°
+    const dirs: [number, number][] = [
+      [1, 0], [-1, 0], [0, 1], [0, -1],
+      [k, k], [-k, k], [k, -k], [-k, -k],
+    ];
+    for (const [dx, dy] of dirs) {
+      layers.push(`${em(w * dx, style.fontSize)} ${em(w * dy, style.fontSize)} 0 ${c}`);
+    }
   }
   if (style.shadow) {
-    layers.push(
-      `0 ${em(style.shadowDepth, style.fontSize)} ${em(style.shadowDepth * 2, style.fontSize)} ${hexToCssColor(style.shadowColor)}`,
-    );
+    // 0°=right, growing clockwise; +y is down to match ASS \pos screen coords.
+    const rad = (style.shadowAngle * Math.PI) / 180;
+    const ox = em(style.shadowDistance * Math.cos(rad), style.fontSize);
+    const oy = em(style.shadowDistance * Math.sin(rad), style.fontSize);
+    const c = hexToCssColor(style.shadowColor);
+    layers.push(`${ox} ${oy} ${em(style.shadowBlur, style.fontSize)} ${c}`);
+    // shadowSize has no CSS text-shadow spread equivalent — best-effort: stack a
+    // second, blurrier layer at the same offset so a larger size reads as a
+    // thicker shadow (libass applies true spread on export).
+    if (style.shadowSize > 0) {
+      layers.push(`${ox} ${oy} ${em(style.shadowBlur + style.shadowSize, style.fontSize)} ${c}`);
+    }
   }
   if (style.glow) {
     layers.push(
@@ -318,7 +360,19 @@ export function captionTextCss(style: CaptionStyle): CSSProperties {
     );
   }
 
+  // Text-hugging pill: the caption box is shrink-to-fit (abspos, auto width), so
+  // background + padding on the text element wraps the text tightly. px fields
+  // are em-scaled like the rest so they follow the Player's fontSize scaling.
+  const bg: CSSProperties = style.background
+    ? {
+        backgroundColor: hexToCssColor(style.backgroundColor),
+        borderRadius: em(style.backgroundRadius, style.fontSize),
+        padding: em(style.backgroundSpread, style.fontSize),
+      }
+    : {};
+
   return {
+    ...bg,
     display: "block",
     fontFamily: fontFamilyCss(style.fontId),
     fontWeight: style.bold ? 700 : 400,
@@ -326,9 +380,10 @@ export function captionTextCss(style: CaptionStyle): CSSProperties {
     textTransform: style.uppercase ? "uppercase" : "none",
     textAlign: style.align,
     // Preserve embedded \n from SRT cues so the preview line-breaks exactly
-    // where the ASS export (\N) will — F2 honesty guarantee.
+    // where the ASS export (\N) will — F2 honesty guarantee. Line spacing is
+    // left at the CSS default: ASS/libass has no per-style line-height the
+    // ffmpeg burn can carry, so the preview must not promise custom spacing.
     whiteSpace: "pre-line",
-    lineHeight: style.lineHeight,
     color: hexToCssColor(style.textColor),
     letterSpacing: em(style.letterSpacing, style.fontSize),
     textShadow: layers.length > 0 ? layers.join(", ") : undefined,

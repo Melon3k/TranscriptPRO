@@ -1,13 +1,122 @@
 use super::style::{ass_font_name, CaptionAnimation, CaptionStyle};
 use super::types::Subtitle;
+use std::path::Path;
 
 // Reference canvas — matches the Player overlay, which scales fontSize/1080
 // (Player.tsx). All CaptionStyle pixel values are defined at this resolution.
 const PLAY_RES_X: f64 = 1920.0;
 const PLAY_RES_Y: f64 = 1080.0;
 
+/// Resolved caption font bytes for glyph measurement (the text-hugging
+/// background pill). Holds the whole font file so a `ttf_parser::Face` can be
+/// (re)parsed on demand — `Face<'a>` borrows its data, so we cannot store it
+/// directly without a self-referential struct.
+///
+/// Resolution lives in the callers (they own the resource dir / fontdb); see
+/// `resolve_font_metrics`. `write_ass` (pure, no I/O) stays the default entry
+/// point; `write_ass_with_metrics` is the sibling that takes the resolved font
+/// so the background can be sized. When `None` (or the parse fails), background
+/// sizing DEGRADES to a rough average-advance estimate (see `Measurer::Rough`).
+pub struct FontMetrics {
+    data: Vec<u8>,
+    index: u32,
+}
+
+impl FontMetrics {
+    /// Read a font file and keep its bytes for later `Face` parsing. Returns
+    /// `None` on any I/O error (caller degrades to the rough estimate).
+    pub fn from_file(path: &Path, index: u32) -> Option<Self> {
+        let data = std::fs::read(path).ok()?;
+        // Sanity-parse once so a corrupt file degrades now, not mid-measure.
+        ttf_parser::Face::parse(&data, index).ok()?;
+        Some(FontMetrics { data, index })
+    }
+}
+
+/// Resolve the caption font for measurement. Bundled families (Outfit / Inter /
+/// JetBrains Mono) load their Regular/Bold TTF from `bundled_dir` (the app's
+/// `resource_dir()/fonts`, or `src-tauri/fonts` in tests); any other family is
+/// looked up on disk via fontdb (same source the picker used), picking the
+/// Bold or Regular face per `style.bold`. Returns `None` when nothing resolves
+/// — the background then falls back to a rough average-advance estimate.
+pub fn resolve_font_metrics(style: &CaptionStyle, bundled_dir: Option<&Path>) -> Option<FontMetrics> {
+    let family = style.font_id.trim();
+    // Bundled families ship as TTFs we control — a guaranteed exact match.
+    let bundled_file = match family {
+        "Outfit" => Some(if style.bold { "Outfit-Bold.ttf" } else { "Outfit-Regular.ttf" }),
+        "Inter" => Some(if style.bold { "Inter-Bold.ttf" } else { "Inter-Regular.ttf" }),
+        "JetBrains Mono" => Some(if style.bold {
+            "JetBrainsMono-Bold.ttf"
+        } else {
+            "JetBrainsMono-Regular.ttf"
+        }),
+        _ => None,
+    };
+    if let (Some(name), Some(dir)) = (bundled_file, bundled_dir) {
+        if let Some(m) = FontMetrics::from_file(&dir.join(name), 0) {
+            return Some(m);
+        }
+    }
+
+    // System family: locate the installed face via fontdb (the same enumeration
+    // the picker used), matched on family + weight.
+    let mut db = fontdb::Database::new();
+    db.load_system_fonts();
+    let weight = if style.bold {
+        fontdb::Weight::BOLD
+    } else {
+        fontdb::Weight::NORMAL
+    };
+    let query = fontdb::Query {
+        families: &[fontdb::Family::Name(family)],
+        weight,
+        ..Default::default()
+    };
+    let id = db.query(&query)?;
+    let info = db.face(id)?;
+    let index = info.index;
+    match &info.source {
+        fontdb::Source::File(p) | fontdb::Source::SharedFile(p, _) => {
+            FontMetrics::from_file(p, index)
+        }
+        // Binary sources (rare) aren't backed by a file path we can re-read;
+        // degrade to the rough estimate rather than plumbing the bytes through.
+        fontdb::Source::Binary(_) => None,
+    }
+}
+
 pub fn write_ass(subtitles: &[Subtitle], style: &CaptionStyle, animation: &CaptionAnimation) -> String {
+    write_ass_with_metrics(subtitles, style, animation, None)
+}
+
+/// Like `write_ass`, but with the resolved caption font so the background pill
+/// can be sized to the measured text. Background off ⇒ byte-identical to
+/// `write_ass` (no measurement, `WrapStyle: 0`, no extra layers).
+pub fn write_ass_with_metrics(
+    subtitles: &[Subtitle],
+    style: &CaptionStyle,
+    animation: &CaptionAnimation,
+    metrics: Option<&FontMetrics>,
+) -> String {
     let mut output = String::new();
+
+    // When the background pill is on we MEASURE the text and wrap it ourselves
+    // (hard `\N`), then tell libass NOT to re-wrap (`WrapStyle: 2`) so the lines
+    // it renders match the lines we measured — the pill hugs the real text.
+    // Background off keeps the historical `WrapStyle: 0` (byte-identical golden
+    // output). A `Face` is parsed once here; if it fails, `Measurer::Rough`
+    // supplies an average-advance estimate so the pill still draws.
+    let face = metrics.and_then(|m| ttf_parser::Face::parse(&m.data, m.index).ok());
+    let measurer = if style.background {
+        match &face {
+            Some(f) => Measurer::Real(f),
+            None => Measurer::Rough,
+        }
+    } else {
+        Measurer::Rough // unused when background is off
+    };
+    let manual_wrap = style.background;
+    let wrap_style = if manual_wrap { 2 } else { 0 };
 
     output.push_str("[Script Info]\n");
     output.push_str("Title: TranscriptPRO Export\n");
@@ -16,7 +125,7 @@ pub fn write_ass(subtitles: &[Subtitle], style: &CaptionStyle, animation: &Capti
     output.push_str("PlayDepth: 0\n");
     output.push_str("PlayResX: 1920\n");
     output.push_str("PlayResY: 1080\n");
-    output.push_str("WrapStyle: 0\n");
+    output.push_str(&format!("WrapStyle: {}\n", wrap_style));
     output.push_str("ScaledBorderAndShadow: yes\n\n");
 
     output.push_str("[V4+ Styles]\n");
@@ -31,40 +140,45 @@ pub fn write_ass(subtitles: &[Subtitle], style: &CaptionStyle, animation: &Capti
     for sub in subtitles {
         let start = format_ass_timestamp(sub.start_time);
         let end = format_ass_timestamp(sub.end_time);
-        // When glow is enabled we paint a colored-halo line BEHIND the real
-        // caption: the glow line sits at Layer 0, the real text at Layer 1 (so
-        // it draws on top). With glow off we emit a single Layer 0 line exactly
-        // as before — byte-identical golden output.
-        if style.glow {
-            output.push_str(&format!(
-                "Dialogue: 0,{},{},Default,,{},{},{},,{}\n",
-                start,
-                end,
-                evt_ml,
-                evt_mr,
-                evt_mv,
-                glow_text(sub, style, animation)
-            ));
-            output.push_str(&format!(
-                "Dialogue: 1,{},{},Default,,{},{},{},,{}\n",
-                start,
-                end,
-                evt_ml,
-                evt_mr,
-                evt_mv,
-                dialogue_text(sub, style, animation)
-            ));
+
+        // Manual word-wrap into the caption region width, applied to the LOGICAL
+        // text (before escaping / animation) so glow, shadow, background and the
+        // real text all agree. Skipped when background is off — the cue text is
+        // untouched and libass wraps as before.
+        let wrapped;
+        let sub_ref: &Subtitle = if manual_wrap {
+            wrapped = wrap_subtitle(sub, style, &measurer);
+            &wrapped
         } else {
-            output.push_str(&format!(
-                "Dialogue: 0,{},{},Default,,{},{},{},,{}\n",
-                start,
-                end,
-                evt_ml,
-                evt_mr,
-                evt_mv,
-                dialogue_text(sub, style, animation)
+            sub
+        };
+
+        // Z-ORDER: layers render low→high (behind→front). Assign incrementally in
+        // the order background < shadow < glow < text, so a cue with no
+        // decorations keeps the real text at Layer 0 (byte-identical golden
+        // output) and a glow-only cue keeps glow=0/text=1 (unchanged).
+        let mut layer = 0u32;
+        let mut emit = |out: &mut String, text: String| {
+            out.push_str(&format!(
+                "Dialogue: {},{},{},Default,,{},{},{},,{}\n",
+                layer, start, end, evt_ml, evt_mr, evt_mv, text
             ));
+            layer += 1;
+        };
+
+        if style.background {
+            let bg = background_text(sub_ref, style, animation, &measurer);
+            emit(&mut output, bg);
         }
+        if style.shadow {
+            let sh = shadow_text(sub_ref, style, animation);
+            emit(&mut output, sh);
+        }
+        if style.glow {
+            let gl = glow_text(sub_ref, style, animation);
+            emit(&mut output, gl);
+        }
+        emit(&mut output, dialogue_text(sub_ref, style, animation));
     }
 
     output
@@ -338,15 +452,427 @@ fn glow_text(sub: &Subtitle, style: &CaptionStyle, animation: &CaptionAnimation)
     format!("{}{}{}", anim, glow, plain_body(sub, style))
 }
 
+/// Text measurer for background-pill sizing. `Real` reads ttf-parser glyph
+/// advances + hhea vertical metrics; `Rough` is the graceful fallback used when
+/// no caption font could be resolved/parsed — an average advance (≈ 0.5 em) and
+/// line height (≈ 1.2 em) — so the pill still draws instead of panicking or
+/// dropping the cue.
+///
+/// ACCEPTED CAVEATS (explicitly approved best-effort): exact for Latin/Cyrillic;
+/// only APPROXIMATE for complex scripts (Arabic/Indic shaping), ligatures, emoji
+/// and glyph fallback — if the font lacks a glyph, libass substitutes a
+/// different face whose advance differs from the one measured here, so the pill
+/// width can be slightly off. This was signed off as acceptable.
+enum Measurer<'a> {
+    Real(&'a ttf_parser::Face<'a>),
+    Rough,
+}
+
+impl Measurer<'_> {
+    /// Horizontal advance of one char in px at `font_size` (no letter-spacing).
+    fn char_advance(&self, ch: char, font_size: f64) -> f64 {
+        match self {
+            Measurer::Real(face) => {
+                let upm = face.units_per_em() as f64;
+                if upm <= 0.0 {
+                    return font_size * 0.5;
+                }
+                let adv = face
+                    .glyph_index(ch)
+                    .and_then(|g| face.glyph_hor_advance(g))
+                    .map(|a| a as f64)
+                    // Missing glyph → libass substitutes; approximate at 0.5 em.
+                    .unwrap_or(upm * 0.5);
+                adv / upm * font_size
+            }
+            Measurer::Rough => font_size * 0.5,
+        }
+    }
+
+    /// Advance of a whole line: Σ char advances + `letter_spacing` per inter-char
+    /// gap (mirroring the ASS Spacing field, applied between glyphs).
+    fn line_advance(&self, line: &str, font_size: f64, letter_spacing: f64) -> f64 {
+        let mut total = 0.0;
+        let mut count: i64 = 0;
+        for ch in line.chars() {
+            total += self.char_advance(ch, font_size);
+            count += 1;
+        }
+        if count > 1 {
+            total += letter_spacing * (count - 1) as f64;
+        }
+        total
+    }
+
+    /// Font ascent/descent in px at `font_size` (descent returned POSITIVE).
+    /// This is the em-box libass stacks lines by. Prefers OS/2 typographic
+    /// metrics, falls back to hhea, then to 0.8/0.2·em.
+    fn v_metrics(&self, font_size: f64) -> (f64, f64) {
+        match self {
+            Measurer::Real(face) => {
+                let upm = face.units_per_em() as f64;
+                if upm <= 0.0 {
+                    return (font_size * 0.8, font_size * 0.2);
+                }
+                let (asc, desc) =
+                    match (face.typographic_ascender(), face.typographic_descender()) {
+                        (Some(a), Some(d)) if a as i32 - d as i32 > 0 => (a as f64, d as f64),
+                        _ => (face.ascender() as f64, face.descender() as f64),
+                    };
+                (asc / upm * font_size, -desc / upm * font_size)
+            }
+            Measurer::Rough => (font_size * 0.8, font_size * 0.2),
+        }
+    }
+
+    /// One line's em-box height in px — the vertical step libass uses BETWEEN
+    /// stacked lines. (Ascent + descent from `v_metrics`.)
+    fn line_height(&self, font_size: f64) -> f64 {
+        let (a, d) = self.v_metrics(font_size);
+        a + d
+    }
+
+    /// Actual INK extents of `line` in px at `font_size`: (max glyph top above
+    /// baseline, max glyph depth below baseline, both >= 0), from per-glyph
+    /// bounding boxes. This is TIGHTER than the em box — the font ascender sits
+    /// well above the caps/diacritics, so sizing the background pill to the em
+    /// box leaves a big empty band at the top. Measuring real ink (which still
+    /// includes accents like ą/ś because they're in the glyph bbox) lets the
+    /// pill hug the visible text symmetrically. Falls back to `v_metrics` when
+    /// no glyph is measurable (Rough, or a line of only spaces/unknowns).
+    fn ink_extents(&self, line: &str, font_size: f64) -> (f64, f64) {
+        match self {
+            Measurer::Real(face) => {
+                let upm = face.units_per_em() as f64;
+                if upm <= 0.0 {
+                    return self.v_metrics(font_size);
+                }
+                let mut top = f64::NEG_INFINITY;
+                let mut bot = f64::NEG_INFINITY; // tracks max(-y_min)
+                for ch in line.chars() {
+                    if let Some(bb) = face.glyph_index(ch).and_then(|g| face.glyph_bounding_box(g)) {
+                        top = top.max(bb.y_max as f64);
+                        bot = bot.max(-(bb.y_min as f64));
+                    }
+                }
+                if !top.is_finite() {
+                    return self.v_metrics(font_size);
+                }
+                (
+                    (top.max(0.0)) / upm * font_size,
+                    (bot.max(0.0)) / upm * font_size,
+                )
+            }
+            Measurer::Rough => self.v_metrics(font_size),
+        }
+    }
+}
+
+/// The caption region width in px at the 1920 canvas (PlayResX minus the box
+/// margins) — the wrap target for the background pill.
+fn region_width(style: &CaptionStyle) -> f64 {
+    let (ml, mr, _mv) = box_margins(style);
+    (PLAY_RES_X - ml as f64 - mr as f64).max(1.0)
+}
+
+/// Greedy word-wrap `text` to `max_width` px. Existing newlines are FORCED
+/// breaks (each paragraph wraps independently). A single word wider than the
+/// region is left on its own overflowing line (no mid-word splitting) — the
+/// background still hugs it (best-effort).
+///
+/// `first_line_reserve` is px already consumed on the VERY FIRST rendered line
+/// by a prefix that is prepended later (the "[Speaker] " label): the first
+/// line's budget is `max_width - first_line_reserve` so prefix + line-0 words
+/// stay inside the box. Every later line uses the full `max_width`.
+fn wrap_text(
+    text: &str,
+    font_size: f64,
+    letter_spacing: f64,
+    max_width: f64,
+    first_line_reserve: f64,
+    m: &Measurer,
+) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    // Consumed once the first line is emitted; only line 0 carries the prefix.
+    let mut first_line = true;
+    let budget = |first: bool| {
+        if first {
+            (max_width - first_line_reserve).max(1.0)
+        } else {
+            max_width
+        }
+    };
+    for paragraph in text.split('\n') {
+        let words: Vec<&str> = paragraph.split_whitespace().collect();
+        if words.is_empty() {
+            out.push(String::new());
+            first_line = false;
+            continue;
+        }
+        let mut current = String::new();
+        for w in words {
+            if current.is_empty() {
+                current.push_str(w);
+                continue;
+            }
+            let candidate = format!("{} {}", current, w);
+            if m.line_advance(&candidate, font_size, letter_spacing) <= budget(first_line) {
+                current = candidate;
+            } else {
+                out.push(std::mem::take(&mut current));
+                first_line = false;
+                current.push_str(w);
+            }
+        }
+        if !current.is_empty() {
+            out.push(current);
+            first_line = false;
+        }
+    }
+    if out.is_empty() {
+        out.push(String::new());
+    }
+    out
+}
+
+/// Re-wrap a cue's text to the caption region width so the rendered lines match
+/// the lines we measured for the pill (the caller sets `WrapStyle: 2` so libass
+/// honours these hard breaks). Returns a clone with `text` rewrapped; all other
+/// fields (words/speaker) are preserved.
+fn wrap_subtitle(sub: &Subtitle, style: &CaptionStyle, measurer: &Measurer) -> Subtitle {
+    let fs = style.font_size.max(0.0);
+    let ls = style.letter_spacing;
+    // The "[Speaker] " label is prepended to the first rendered line by
+    // `dialogue_text`/`plain_body`, so reserve its measured width when wrapping
+    // line 0 — otherwise a speaker cue near the width limit overflows the box on
+    // line 1 (and the pill, which measures prefix+line-0, overflows with it).
+    // Measured from the RAW "[name] " (no brace-escaping, which would inflate
+    // the width); uppercased to match how the prefix actually renders.
+    let reserve = sub.speaker.as_ref().map_or(0.0, |sp| {
+        let prefix = maybe_uppercase(format!("[{}] ", sp), style);
+        measurer.line_advance(&prefix, fs, ls)
+    });
+    let lines = wrap_text(&sub.text, fs, ls, region_width(style), reserve, measurer);
+    Subtitle {
+        text: lines.join("\n"),
+        ..sub.clone()
+    }
+}
+
+/// Shadow offset vector (px, rounded) from `shadow_angle`/`shadow_distance`.
+/// Screen coords: 0° = +x (right), 90° = +y (down).
+fn shadow_offset(style: &CaptionStyle) -> (i64, i64) {
+    let theta = style.shadow_angle.to_radians();
+    let d = style.shadow_distance;
+    let dx = (d * theta.cos()).round() as i64;
+    let dy = (d * theta.sin()).round() as i64;
+    (dx, dy)
+}
+
+/// The BEHIND shadow line: an OFFSET duplicate of the whole cue text, filled in
+/// `shadow_color` with its own `\bord`(shadow_size)/`\blur`(shadow_blur) and NO
+/// ASS shadow, positioned by `\pos` shifted from the text anchor by
+/// `shadow_offset`. Composes with animations like `glow_text`: fade/pop/blur
+/// reuse their position-independent entrance tags on top of the offset `\pos`,
+/// and `slide` offsets both `\move` endpoints. karaoke/typewriter/none render
+/// the static whole-text copy (like glow). Under the blur ENTRANCE animation the
+/// shadow's own static `\blur` is omitted so the entrance `\blur` isn't
+/// double-applied (matching `glow_prefix`).
+fn shadow_text(sub: &Subtitle, style: &CaptionStyle, animation: &CaptionAnimation) -> String {
+    let (ax, ay, an) = anchor_point(style);
+    let (dx, dy) = shadow_offset(style);
+    let sx = ax + dx;
+    let sy = ay + dy;
+
+    // "&HAABBGGRR" — always "&H" + 8 hex digits, so these slices are in range.
+    let ass = hex_to_ass_color(&style.shadow_color, "000000");
+    let hexpart = &ass[2..];
+    let alpha = &hexpart[0..2];
+    let bgr = &hexpart[2..];
+    let size = style.shadow_size.max(0.0);
+    let blur = style.shadow_blur.max(0.0);
+    let anim_is_blur = animation.anim_type == "blur";
+    let style_block = if anim_is_blur {
+        format!("\\bord{}\\shad0\\1c&H{}&\\1a&H{}&", fmt_num(size), bgr, alpha)
+    } else {
+        format!(
+            "\\bord{}\\shad0\\1c&H{}&\\1a&H{}&\\blur{}",
+            fmt_num(size),
+            bgr,
+            alpha,
+            fmt_num(blur)
+        )
+    };
+
+    let d = animation.duration_ms.round().max(0.0) as i64;
+    let pos_block = match animation.anim_type.as_str() {
+        "slide" => {
+            let off = style.font_size.round().max(24.0) as i64;
+            let y1 = sy + off;
+            format!("\\an{}\\move({},{},{},{},0,{})", an, sx, y1, sx, sy, d)
+        }
+        "fade" => format!("\\an{}\\pos({},{})\\fad({},{})", an, sx, sy, d, d),
+        "pop" => format!(
+            "\\an{}\\pos({},{})\\fscx0\\fscy0\\t(0,{},\\fscx100\\fscy100)",
+            an, sx, sy, d
+        ),
+        "blur" => format!(
+            "\\an{}\\pos({},{})\\blur{}\\t(0,{},\\blur0)",
+            an, sx, sy, BLUR_ENTRANCE_RADIUS, d
+        ),
+        // karaoke / typewriter / none → static whole-text copy (like glow).
+        _ => format!("\\an{}\\pos({},{})", an, sx, sy),
+    };
+
+    format!("{{{}{}}}{}", pos_block, style_block, plain_body(sub, style))
+}
+
+/// Kappa constant: control-handle length for approximating a quarter circle of
+/// radius 1 with a cubic Bézier.
+const BEZIER_KAPPA: f64 = 0.5522847498307936;
+
+/// An ASS `\p` vector path for a rounded rectangle: local coords, top-left at
+/// (0,0), size `w`×`h`, corner radius `r` (clamped to ≤ min(w,h)/2). The four
+/// corners are `b` (cubic Bézier) quarter-circle approximations; edges are `l`.
+/// Coordinates are rounded to integers (best-effort; sub-pixel corner error is
+/// negligible at caption sizes).
+fn rounded_rect_drawing(w: f64, h: f64, r: f64) -> String {
+    let r = r.max(0.0).min(w.min(h) / 2.0);
+    let f = |v: f64| -> i64 { v.round() as i64 };
+    if r <= 0.5 {
+        // Degenerate radius → plain rectangle.
+        return format!("m 0 0 l {} 0 {} {} 0 {} 0 0", f(w), f(w), f(h), f(h));
+    }
+    let c = r * BEZIER_KAPPA;
+    let r_ = f(r);
+    let wr = f(w - r);
+    let wrc = f(w - r + c);
+    let w_ = f(w);
+    let rc = f(r - c);
+    let hr = f(h - r);
+    let hrc = f(h - r + c);
+    let h_ = f(h);
+    format!(
+        "m {r_} 0 l {wr} 0 b {wrc} 0 {w_} {rc} {w_} {r_} l {w_} {hr} \
+         b {w_} {hrc} {wrc} {h_} {wr} {h_} l {r_} {h_} \
+         b {rc} {h_} 0 {hrc} 0 {hr} l 0 {r_} b 0 {rc} {rc} 0 {r_} 0"
+    )
+}
+
+/// The BEHIND background line: a filled rounded-rectangle vector drawing sized
+/// to hug the (already-wrapped) cue text. Positioned with `\an7\pos` at the
+/// pill's top-left corner (with `\an7` libass aligns the drawing bbox's
+/// top-left to `\pos`, and the path's bbox top-left is (0,0) — so local (0,0)
+/// lands exactly at the corner). The corner is derived from the text-block bbox
+/// (placed by `anchor_point`'s alignment at the anchor) expanded by
+/// `background_spread` on all four sides. Fills `\1c`(background_color) +
+/// `\1a`(its alpha), `\bord0\shad0`. Fades with the text when the animation is
+/// `fade`; other animations leave the pill static (best-effort).
+fn background_text(
+    sub: &Subtitle,
+    style: &CaptionStyle,
+    animation: &CaptionAnimation,
+    m: &Measurer,
+) -> String {
+    let fs = style.font_size.max(0.0);
+    let ls = style.letter_spacing;
+
+    // `sub` is already wrapped (hard newlines == rendered lines). Measure each
+    // line; the first line also carries the "[Speaker] " prefix the real text
+    // prepends, so the pill covers it too.
+    let prefix = sub
+        .speaker
+        .as_ref()
+        .map(|sp| format!("[{}] ", sp))
+        .unwrap_or_default();
+    let lines: Vec<&str> = sub.text.split('\n').collect();
+    let block_w = lines
+        .iter()
+        .enumerate()
+        .map(|(i, l)| {
+            if i == 0 && !prefix.is_empty() {
+                m.line_advance(&format!("{}{}", prefix, l), fs, ls)
+            } else {
+                m.line_advance(l, fs, ls)
+            }
+        })
+        .fold(0.0_f64, f64::max);
+    // Em-box block height (the step libass stacks lines by) — used to place the
+    // block relative to the anchor. The visible INK is tighter: the font
+    // ascender sits well above the caps and the last line's descent may be
+    // shallow, so a pill sized to the em box leaves an empty band (top-heavy —
+    // "sticks out above the text"). Trim the em box down to the real ink of the
+    // first (top) and last (bottom) rendered lines so the pill hugs the glyphs
+    // symmetrically. Accents (ą/ś/…) stay inside because they're in the bbox.
+    let block_h = lines.len().max(1) as f64 * m.line_height(fs);
+    let (font_asc, font_desc) = m.v_metrics(fs);
+    let first_line = match (lines.first(), prefix.is_empty()) {
+        (Some(l), false) => format!("{}{}", prefix, l),
+        (Some(l), true) => (*l).to_string(),
+        (None, _) => String::new(),
+    };
+    let last_line = lines.last().copied().unwrap_or("");
+    let (ink_asc, _) = m.ink_extents(&first_line, fs);
+    let (_, ink_desc) = m.ink_extents(last_line, fs);
+    let top_trim = (font_asc - ink_asc).max(0.0);
+    let bot_trim = (font_desc - ink_desc).max(0.0);
+    let ink_h = (block_h - top_trim - bot_trim).max(0.0);
+
+    let (ax, ay, an) = anchor_point(style);
+    let spread = style.background_spread.max(0.0);
+    let pill_w = block_w + 2.0 * spread;
+    let pill_h = ink_h + 2.0 * spread;
+
+    // Text block bbox relative to the anchor, from the numpad alignment.
+    let col = (an - 1) % 3; // 0=left 1=center 2=right
+    let row = (an - 1) / 3; // 0=bottom 1=middle 2=top
+    let text_left = match col {
+        0 => ax as f64,
+        2 => ax as f64 - block_w,
+        _ => ax as f64 - block_w / 2.0,
+    };
+    // Em-box top per row, then drop to the ink top (skip the empty ascender band).
+    let em_top = match row {
+        0 => ay as f64 - block_h,
+        1 => ay as f64 - block_h / 2.0,
+        _ => ay as f64,
+    };
+    let ink_top = em_top + top_trim;
+    let px = (text_left - spread).round() as i64;
+    let py = (ink_top - spread).round() as i64;
+
+    let radius = style
+        .background_radius
+        .max(0.0)
+        .min(pill_w.min(pill_h) / 2.0);
+    let drawing = rounded_rect_drawing(pill_w, pill_h, radius);
+
+    let ass = hex_to_ass_color(&style.background_color, "000000");
+    let hexpart = &ass[2..];
+    let alpha = &hexpart[0..2];
+    let bgr = &hexpart[2..];
+
+    let fade = if animation.anim_type == "fade" {
+        let d = animation.duration_ms.round().max(0.0) as i64;
+        format!("\\fad({},{})", d, d)
+    } else {
+        String::new()
+    };
+
+    format!(
+        "{{\\an7\\pos({},{})\\bord0\\shad0\\1c&H{}&\\1a&H{}&{}\\p1}}{}",
+        px, py, bgr, alpha, fade, drawing
+    )
+}
+
 /// Escape literal `{` / `}` so ASS renderers show them instead of parsing an
 /// override-tag block. `\{` / `\}` are the conventional literal-brace escapes.
 fn escape_braces(text: &str) -> String {
     text.replace('{', "\\{").replace('}', "\\}")
 }
 
-/// Generate the Style line from a CaptionStyle. lineHeight and align are
-/// intentionally ignored — they are preview-only (no honest ASS Style mapping
-/// exists for them). glow* IS exported, but not here: it becomes a second
+/// Generate the Style line from a CaptionStyle. `align` IS exported via the
+/// numpad Alignment (see `effective_alignment`). glow* IS exported, but not here: it becomes a second
 /// BEHIND Dialogue line per cue (see `glow_text`), not a Style field.
 /// Compute (margin_l, margin_r, margin_v) at PlayRes 1920x1080, mirroring
 /// captionBoxCss in src/lib/caption-style.ts: 2% side inset for left/right
@@ -379,43 +905,77 @@ fn box_margins(style: &CaptionStyle) -> (i64, i64, i64) {
     (margin_l, margin_r, margin_v)
 }
 
-/// Compute the on-canvas anchor point (x, y, an) for a cue, where `an` is the
-/// clamped boxPosition (numpad alignment 1..=9, else 2). The point matches where
-/// the Style Alignment + margins already place the line, so \pos/\move-based
-/// animations rest exactly where a non-animated line would sit.
+/// Horizontal justification column from the `align` field: 0=left, 1=center,
+/// 2=right. Unknown values fall back to center (the style default).
+fn align_col(align: &str) -> u8 {
+    match align {
+        "left" => 0,
+        "right" => 2,
+        _ => 1,
+    }
+}
+
+/// The numpad row base (1=bottom, 4=middle, 7=top) — the VERTICAL band the
+/// caption box sits in — from the clamped box_position.
+fn row_base(box_position: u8) -> u8 {
+    let bp = if (1..=9).contains(&box_position) {
+        box_position
+    } else {
+        2
+    };
+    if bp <= 3 {
+        1
+    } else if bp <= 6 {
+        4
+    } else {
+        7
+    }
+}
+
+/// Effective ASS numpad Alignment: vertical band from `box_position`, horizontal
+/// justification from `align`. Decoupling these is what lets text justification
+/// (left/center/right *within* the positioned box) round-trip to the export,
+/// matching the CSS preview's `text-align`. The box's on-screen REGION is still
+/// driven by box_position via `box_margins`; alignment only justifies text
+/// inside that region.
+fn effective_alignment(style: &CaptionStyle) -> u8 {
+    row_base(style.box_position) + align_col(&style.align)
+}
+
+/// Compute the on-canvas anchor point (x, y, an) for a cue. `an` is the
+/// effective alignment (vertical band from box_position, justification from
+/// align); the reference point x/y matches where the Style Alignment + margins
+/// place the line, so \pos/\move-based animations rest exactly where a
+/// non-animated line would sit — justified per `align` too.
 fn anchor_point(style: &CaptionStyle) -> (i64, i64, u8) {
-    let a: u8 = if (1..=9).contains(&style.box_position) {
+    let bp: u8 = if (1..=9).contains(&style.box_position) {
         style.box_position
     } else {
         2
     };
     let (ml, mr, mv) = box_margins(style);
-    let col = (a - 1) % 3; // 0=left 1=center 2=right
-    let x = match col {
+    let acol = align_col(&style.align); // 0=left 1=center 2=right
+    let x = match acol {
         0 => ml,
         2 => (PLAY_RES_X as i64) - mr,
         _ => (ml + (PLAY_RES_X as i64 - mr)) / 2,
     };
-    let y = if a <= 3 {
+    let y = if bp <= 3 {
         (PLAY_RES_Y as i64) - mv
-    } else if a <= 6 {
+    } else if bp <= 6 {
         (PLAY_RES_Y as i64) / 2
     } else {
         mv
     };
-    (x, y, a)
+    (x, y, effective_alignment(style))
 }
 
 fn style_line(style: &CaptionStyle, animation: &CaptionAnimation) -> String {
-    // Clamp everything crossing IPC before use.
-    let box_position = if (1..=9).contains(&style.box_position) {
-        style.box_position
-    } else {
-        2
-    };
+    // Clamp everything crossing IPC before use. The numpad Alignment field is
+    // `effective_alignment` (box_position row + align column), so text
+    // justification is honoured in the export, not just the preview.
     let font_size = style.font_size.max(0.0);
     let outline_width = style.outline_width.max(0.0);
-    let shadow_depth = style.shadow_depth.max(0.0);
 
     // Karaoke uses ASS \k semantics: unsung text is SecondaryColour (the base
     // text colour) and sweeps to PrimaryColour (the highlight) as it's "sung".
@@ -450,12 +1010,10 @@ fn style_line(style: &CaptionStyle, animation: &CaptionAnimation) -> String {
         } else {
             "0".to_string()
         },
-        if style.shadow {
-            fmt_num(shadow_depth)
-        } else {
-            "0".to_string()
-        },
-        box_position,
+        // Shadow is rendered as a separate OFFSET behind-layer copy of the cue
+        // (see `shadow_text`), never the ASS Style `Shadow` depth field — always 0.
+        "0",
+        effective_alignment(style),
         margin_l,
         margin_r,
         margin_v,
@@ -637,15 +1195,17 @@ mod tests {
 
     #[test]
     fn test_outline_shadow_fields() {
+        // The ASS Style Shadow depth field is ALWAYS 0 now — the drop shadow is
+        // a separate offset behind-layer copy (see `shadow_text`), not the Style
+        // Shadow field. Even with shadow ON, the Style line shows Shadow = 0.
         let style = CaptionStyle {
             outline: false,
             shadow: true,
-            shadow_depth: 3.0,
             ..CaptionStyle::default()
         };
         let line = style_line(&style, &CaptionAnimation::default());
-        // ...Angle,BorderStyle,Outline,Shadow,Alignment...
-        assert!(line.contains(",0,1,0,3,2,"));
+        // ...Angle,BorderStyle,Outline,Shadow,Alignment... → 0,1,0,0,2
+        assert!(line.contains(",0,1,0,0,2,"), "Style Shadow must be 0; got: {line}");
     }
 
     #[test]
@@ -694,28 +1254,61 @@ mod tests {
 
     #[test]
     fn test_alignment_and_margins() {
+        // box_position picks the REGION (margins) + vertical band; `align` picks
+        // the numpad COLUMN (justification). Default align is center.
+        // Top-left cell, default (center) align -> numpad 8 (top-CENTER),
+        // MarginL 38 (2% side inset), MarginR = round(1920*(98-62)/100) = 691,
+        // MarginV 86. The region still hugs the left (box_position col 0).
         let style = CaptionStyle {
             box_position: 7,
             margin_v_pct: 8.0,
             ..CaptionStyle::default()
         };
-        let line = style_line(&style, &CaptionAnimation::default());
-        // Alignment 7 (top-left column), MarginL 38 (2% side inset),
-        // MarginR = round(1920*(98-62)/100) = 691, MarginV 86.
-        assert!(line.contains(",7,38,691,86,1"));
+        assert!(style_line(&style, &CaptionAnimation::default()).contains(",8,38,691,86,1"));
 
+        // Bottom-left region, default center -> numpad 2, same margins.
         let left = CaptionStyle {
             box_position: 1,
+            margin_v_pct: 8.0,
             ..CaptionStyle::default()
         };
-        assert!(style_line(&left, &CaptionAnimation::default()).contains(",1,38,691,86,1"));
+        assert!(style_line(&left, &CaptionAnimation::default()).contains(",2,38,691,86,1"));
 
-        // Out-of-range boxPosition clamps to 2 (bottom-center).
+        // Out-of-range boxPosition clamps to 2 (bottom-center region + band).
         let bad = CaptionStyle {
             box_position: 0,
             ..CaptionStyle::default()
         };
         assert!(style_line(&bad, &CaptionAnimation::default()).contains(",2,365,365,86,1"));
+    }
+
+    #[test]
+    fn test_align_drives_numpad_column_independent_of_box_position() {
+        // Same top-left region (box_position 7 -> row base 7, margins hug left);
+        // `align` alone moves the numpad column, matching the preview's
+        // text-align within the positioned box.
+        let base = CaptionStyle {
+            box_position: 7,
+            margin_v_pct: 8.0,
+            ..CaptionStyle::default()
+        };
+        let left = CaptionStyle { align: "left".into(), ..base.clone() };
+        let center = CaptionStyle { align: "center".into(), ..base.clone() };
+        let right = CaptionStyle { align: "right".into(), ..base.clone() };
+        // Region margins are identical (38/691); only the numpad digit changes.
+        assert!(style_line(&left, &CaptionAnimation::default()).contains(",7,38,691,86,1"));
+        assert!(style_line(&center, &CaptionAnimation::default()).contains(",8,38,691,86,1"));
+        assert!(style_line(&right, &CaptionAnimation::default()).contains(",9,38,691,86,1"));
+
+        // Bottom band (box_position 2) keeps the same columns: 1 / 2 / 3.
+        let bl = CaptionStyle { align: "left".into(), box_position: 2, ..CaptionStyle::default() };
+        let br = CaptionStyle { align: "right".into(), box_position: 2, ..CaptionStyle::default() };
+        assert!(style_line(&bl, &CaptionAnimation::default()).contains(",1,365,365,86,1"));
+        assert!(style_line(&br, &CaptionAnimation::default()).contains(",3,365,365,86,1"));
+
+        // Unknown align falls back to center (column 1).
+        let weird = CaptionStyle { align: "justify".into(), box_position: 2, ..CaptionStyle::default() };
+        assert!(style_line(&weird, &CaptionAnimation::default()).contains(",2,365,365,86,1"));
     }
 
     #[test]
@@ -1134,5 +1727,243 @@ mod tests {
             let line = style_line(&CaptionStyle::default(), &anim);
             assert!(line.contains(",&H00FFFFFF,&H00FFFFFF,"));
         }
+    }
+
+    // ---- Drop shadow (offset behind-layer copy) ----
+
+    #[test]
+    fn test_shadow_offset_pos_math() {
+        // Shadow on → an offset behind-layer copy at Layer 0, real text at
+        // Layer 1. angle 0°, distance 10 → offset (+10, 0). Default anchor is
+        // (960, 994) with numpad an 2 → shadow \pos(970, 994).
+        let style = CaptionStyle {
+            shadow: true,
+            shadow_angle: 0.0,
+            shadow_distance: 10.0,
+            ..CaptionStyle::default()
+        };
+        let out = write_ass(&[make_sub(1, 0, 2000, "hi")], &style, &CaptionAnimation::default());
+        let lines: Vec<&str> = out.lines().filter(|l| l.starts_with("Dialogue:")).collect();
+        assert_eq!(lines.len(), 2, "shadow behind + text; got: {out}");
+        // Default shadow_color #000000FF → &H00000000 (alpha 00), bord 0, blur 4.
+        assert!(
+            lines[0].starts_with("Dialogue: 0,")
+                && lines[0].contains(
+                    ",,{\\an2\\pos(970,994)\\bord0\\shad0\\1c&H000000&\\1a&H00&\\blur4}hi"
+                ),
+            "shadow offset \\pos + style block; got: {}",
+            lines[0]
+        );
+        assert!(
+            lines[1].starts_with("Dialogue: 1,") && lines[1].contains(",,hi"),
+            "real text is the front (Layer 1) line; got: {}",
+            lines[1]
+        );
+
+        // 90° → straight down: distance 6 → (0, +6) → \pos(960,1000).
+        let s90 = CaptionStyle {
+            shadow: true,
+            shadow_angle: 90.0,
+            shadow_distance: 6.0,
+            ..CaptionStyle::default()
+        };
+        let out = write_ass(&[make_sub(1, 0, 2000, "x")], &s90, &CaptionAnimation::default());
+        assert!(out.contains("\\pos(960,1000)"), "90° offset down; got: {out}");
+
+        // Default angle 135°, distance 4 → (-3, +3) → \pos(957,997).
+        let s135 = CaptionStyle { shadow: true, ..CaptionStyle::default() };
+        let out = write_ass(&[make_sub(1, 0, 2000, "x")], &s135, &CaptionAnimation::default());
+        assert!(out.contains("\\pos(957,997)"), "135° default offset; got: {out}");
+    }
+
+    #[test]
+    fn test_shadow_color_alpha_bord_blur() {
+        // #0000FF80 → BGR FF0000, alpha 0x80 → ass_alpha 255-128=127=0x7F.
+        // shadow_size 2 → \bord2; shadow_blur 8 → \blur8.
+        let style = CaptionStyle {
+            shadow: true,
+            shadow_color: "#0000FF80".to_string(),
+            shadow_size: 2.0,
+            shadow_blur: 8.0,
+            ..CaptionStyle::default()
+        };
+        let out = write_ass(&[make_sub(1, 0, 1000, "x")], &style, &CaptionAnimation::default());
+        assert!(
+            out.contains("\\bord2\\shad0\\1c&HFF0000&\\1a&H7F&\\blur8}x"),
+            "shadow colour/alpha/bord/blur; got: {out}"
+        );
+    }
+
+    #[test]
+    fn test_shadow_slide_offsets_both_move_endpoints() {
+        // slide default: x=960, y=994, off=48, y1=1042. angle 0/distance 10 →
+        // +10 x on both endpoints: \move(970,1042,970,994,0,400).
+        let style = CaptionStyle {
+            shadow: true,
+            shadow_angle: 0.0,
+            shadow_distance: 10.0,
+            ..CaptionStyle::default()
+        };
+        let anim = CaptionAnimation {
+            anim_type: "slide".to_string(),
+            duration_ms: 400.0,
+            ..CaptionAnimation::default()
+        };
+        let out = write_ass(&[make_sub(1, 0, 2000, "hi")], &style, &anim);
+        assert!(
+            out.contains("\\an2\\move(970,1042,970,994,0,400)"),
+            "shadow slide offsets both move endpoints; got: {out}"
+        );
+    }
+
+    // ---- Background pill (measured rounded-rect drawing) ----
+
+    #[test]
+    fn test_background_rounded_rect_and_wrapstyle_and_alpha() {
+        // Resolve the bundled Outfit font for real glyph measurement.
+        let style = CaptionStyle { background: true, ..CaptionStyle::default() };
+        let fonts = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fonts");
+        let metrics = resolve_font_metrics(&style, Some(&fonts));
+        assert!(metrics.is_some(), "bundled Outfit font should resolve for measurement");
+
+        let subs = vec![make_sub(1, 0, 2000, "Hello")];
+        let out = write_ass_with_metrics(&subs, &style, &CaptionAnimation::default(), metrics.as_ref());
+
+        // Manual wrap ⇒ WrapStyle 2 so libass renders exactly our lines.
+        assert!(out.contains("WrapStyle: 2\n"), "background on must set WrapStyle 2; got: {out}");
+
+        let lines: Vec<&str> = out.lines().filter(|l| l.starts_with("Dialogue:")).collect();
+        assert_eq!(lines.len(), 2, "background pill (behind) + real text; got: {out}");
+        // Behind pill: Layer 0, an7-anchored, positioned, a filled rounded-rect
+        // drawing (m … l … b … Bézier corners) in \p1 mode.
+        assert!(lines[0].starts_with("Dialogue: 0,"), "bg is behind; got: {}", lines[0]);
+        assert!(lines[0].contains("\\an7\\pos("), "bg positioned at pill top-left; got: {}", lines[0]);
+        assert!(lines[0].contains("\\p1}m "), "bg enters drawing mode; got: {}", lines[0]);
+        assert!(lines[0].contains(" b "), "rounded corners drawn with Bézier; got: {}", lines[0]);
+        // Default background_color #000000A6 → alpha 0xA6=166 → ass_alpha 89=0x59.
+        assert!(lines[0].contains("\\1c&H000000&"), "bg fill colour; got: {}", lines[0]);
+        assert!(lines[0].contains("\\1a&H59&"), "bg alpha via hex_to_ass_color; got: {}", lines[0]);
+        // Real text is the front (Layer 1) line.
+        assert!(
+            lines[1].starts_with("Dialogue: 1,") && lines[1].contains(",,Hello"),
+            "real text front; got: {}",
+            lines[1]
+        );
+    }
+
+    #[test]
+    fn test_ink_extents_hug_tighter_than_em_box() {
+        // The pill sizes to real glyph ink, not the loose font em box — this is
+        // what stops the background from "sticking out above the text".
+        let fonts = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fonts");
+        let data = std::fs::read(fonts.join("Outfit-Bold.ttf")).unwrap();
+        let face = ttf_parser::Face::parse(&data, 0).unwrap();
+        let m = Measurer::Real(&face);
+        let fs = 48.0;
+        let (font_asc, font_desc) = m.v_metrics(fs);
+
+        // Caps sit well below the font ascender → ink ascent is strictly less.
+        let (caps_asc, caps_desc) = m.ink_extents("HELLO", fs);
+        assert!(caps_asc < font_asc, "caps ink top {caps_asc} must be below the ascender {font_asc}");
+        assert!(caps_desc < font_desc + 0.5, "caps have ~no descent; got {caps_desc}");
+
+        // A TOP accent (Ó = acute above O) rises above bare caps but still
+        // stays inside the font ascender, so the pill keeps it covered.
+        let (acc_asc, _) = m.ink_extents("Ó", fs);
+        assert!(
+            acc_asc > caps_asc && acc_asc <= font_asc + 0.5,
+            "accent {acc_asc} must sit above caps {caps_asc} yet within ascender {font_asc}"
+        );
+
+        // Descenders push the ink below the baseline.
+        let (_, desc_desc) = m.ink_extents("gjy", fs);
+        assert!(desc_desc > caps_desc, "descenders extend ink below the baseline");
+    }
+
+    #[test]
+    fn test_background_off_keeps_wrapstyle_zero() {
+        // Background off (default) → WrapStyle 0, single Layer 0 text line.
+        let out = write_ass(&[make_sub(1, 0, 2000, "Hello")], &CaptionStyle::default(), &CaptionAnimation::default());
+        assert!(out.contains("WrapStyle: 0\n"), "background off keeps WrapStyle 0; got: {out}");
+        let n = out.lines().filter(|l| l.starts_with("Dialogue:")).count();
+        assert_eq!(n, 1, "no decorations → one line; got: {out}");
+    }
+
+    #[test]
+    fn test_wrap_reserves_first_line_for_speaker_prefix() {
+        // Rough measurer = 0.5em/char (deterministic). fs=48 ⇒ 24px/char, ls=0.
+        // "aaa bbb ccc ddd" in a 300px region: with no reserve, line 0 packs
+        // "aaa bbb ccc" (11 chars = 264px); a large first-line reserve (the
+        // "[Speaker] " label) must shrink line 0 so the prefix + words fit.
+        let m = Measurer::Rough;
+        let text = "aaa bbb ccc ddd";
+        let no_reserve = wrap_text(text, 48.0, 0.0, 300.0, 0.0, &m);
+        let with_reserve = wrap_text(text, 48.0, 0.0, 300.0, 290.0, &m);
+        assert!(
+            with_reserve[0].split_whitespace().count() < no_reserve[0].split_whitespace().count(),
+            "prefix reserve must shorten line 0: no_reserve={no_reserve:?} with_reserve={with_reserve:?}"
+        );
+        // Later lines still use the FULL width (reserve is line-0 only).
+        assert!(with_reserve.len() >= 2 && !with_reserve[1].is_empty());
+    }
+
+    #[test]
+    fn test_wrap_subtitle_measures_speaker_reserve() {
+        // A speaker cue reserves a non-zero first-line budget; the same cue with
+        // no speaker does not — so a speaker can force an extra wrap the plain
+        // cue avoids (F2: keeps prefix + line 0 inside the box).
+        let m = Measurer::Rough;
+        // Narrow region via a small width_pct (clamped to 10 ⇒ ~192px region).
+        let style = CaptionStyle { width_pct: 10.0, font_size: 48.0, ..CaptionStyle::default() };
+        let mut with_sp = make_sub(1, 0, 2000, "aa bb");
+        with_sp.speaker = Some("Speaker 1".to_string());
+        let no_sp = make_sub(1, 0, 2000, "aa bb");
+        let wrapped_sp = wrap_subtitle(&with_sp, &style, &m);
+        let wrapped_plain = wrap_subtitle(&no_sp, &style, &m);
+        assert!(
+            wrapped_sp.text.matches('\n').count() >= wrapped_plain.text.matches('\n').count(),
+            "speaker cue wraps at least as much as the plain cue: sp={:?} plain={:?}",
+            wrapped_sp.text, wrapped_plain.text
+        );
+    }
+
+    #[test]
+    fn test_background_degrades_without_font() {
+        // No metrics → rough average-advance estimate, but the pill still draws
+        // (never a panic or a dropped cue).
+        let style = CaptionStyle { background: true, ..CaptionStyle::default() };
+        let out = write_ass_with_metrics(&[make_sub(1, 0, 2000, "Hello")], &style, &CaptionAnimation::default(), None);
+        assert!(out.contains("WrapStyle: 2\n"), "rough path still manual-wraps; got: {out}");
+        let lines: Vec<&str> = out.lines().filter(|l| l.starts_with("Dialogue:")).collect();
+        assert_eq!(lines.len(), 2, "bg + text even without a font; got: {out}");
+        assert!(lines[0].contains("\\p1}m "), "bg still drawn; got: {}", lines[0]);
+    }
+
+    #[test]
+    fn test_rounded_rect_degenerate_radius_is_plain_rect() {
+        // r ≤ 0.5 → a plain rectangle path (no Bézier corners).
+        let d = rounded_rect_drawing(100.0, 40.0, 0.0);
+        assert_eq!(d, "m 0 0 l 100 0 100 40 0 40 0 0");
+        assert!(!d.contains('b'), "degenerate radius has no Bézier; got: {d}");
+    }
+
+    // ---- Z-order ----
+
+    #[test]
+    fn test_z_order_layers_background_shadow_glow_text() {
+        // background(0) < shadow(1) < glow(2) < text(3), lowest renders behind.
+        let style = CaptionStyle {
+            background: true,
+            shadow: true,
+            glow: true,
+            ..CaptionStyle::default()
+        };
+        let out = write_ass(&[make_sub(1, 0, 2000, "Hi")], &style, &CaptionAnimation::default());
+        let lines: Vec<&str> = out.lines().filter(|l| l.starts_with("Dialogue:")).collect();
+        assert_eq!(lines.len(), 4, "bg + shadow + glow + text; got: {out}");
+        assert!(lines[0].starts_with("Dialogue: 0,") && lines[0].contains("\\p1}"), "bg Layer 0; got: {}", lines[0]);
+        assert!(lines[1].starts_with("Dialogue: 1,") && lines[1].contains("\\pos("), "shadow Layer 1; got: {}", lines[1]);
+        assert!(lines[2].starts_with("Dialogue: 2,") && lines[2].contains("\\blur"), "glow Layer 2; got: {}", lines[2]);
+        assert!(lines[3].starts_with("Dialogue: 3,") && lines[3].contains(",,Hi"), "text Layer 3; got: {}", lines[3]);
     }
 }

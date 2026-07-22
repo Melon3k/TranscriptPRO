@@ -1,7 +1,6 @@
 import type {
   CaptionAnimation,
   CaptionAnimationType,
-  CaptionEasing,
 } from "../types/captionStyle";
 import type { Subtitle } from "../types/subtitle";
 import { normalizeHexColor } from "./caption-style";
@@ -9,12 +8,10 @@ import { normalizeHexColor } from "./caption-style";
 export const DEFAULT_CAPTION_ANIMATION: CaptionAnimation = {
   type: "none",
   durationMs: 400,
-  perWordDelayMs: 40,
-  easing: "ease-out",
   highlightColor: "#22D3EEFF",
 };
 
-export type NumericAnimationField = "durationMs" | "perWordDelayMs";
+export type NumericAnimationField = "durationMs";
 
 // Slider ranges — single source of truth for the Animations tab UI.
 export const ANIMATION_LIMITS: Record<
@@ -22,16 +19,7 @@ export const ANIMATION_LIMITS: Record<
   { min: number; max: number; step: number }
 > = {
   durationMs: { min: 0, max: 2000, step: 50 },
-  perWordDelayMs: { min: 0, max: 300, step: 10 },
 };
-
-export const EASINGS: readonly CaptionEasing[] = [
-  "linear",
-  "ease",
-  "ease-in",
-  "ease-out",
-  "ease-in-out",
-];
 
 export const ANIMATION_TYPES: readonly CaptionAnimationType[] = [
   "none",
@@ -58,9 +46,6 @@ export function sanitizeCaptionAnimation(persisted: unknown): CaptionAnimation {
 
   if (!ANIMATION_TYPES.includes(anim.type)) {
     anim.type = DEFAULT_CAPTION_ANIMATION.type;
-  }
-  if (!EASINGS.includes(anim.easing)) {
-    anim.easing = DEFAULT_CAPTION_ANIMATION.easing;
   }
   for (const field of Object.keys(ANIMATION_LIMITS) as NumericAnimationField[]) {
     const v: unknown = anim[field];

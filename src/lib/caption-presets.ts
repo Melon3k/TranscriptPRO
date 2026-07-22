@@ -46,7 +46,8 @@ export const BUILTIN_PRESETS: readonly BuiltinPreset[] = [
       outlineWidth: 1,
       outlineColor: "#0B0F16FF",
       shadow: true,
-      shadowDepth: 5,
+      shadowDistance: 5,
+      shadowBlur: 0, // hard = crisp offset, no blur
       shadowColor: "#000000FF",
       glow: false,
     },
@@ -72,7 +73,8 @@ export const BUILTIN_PRESETS: readonly BuiltinPreset[] = [
       bold: false,
       outline: false,
       shadow: true,
-      shadowDepth: 3,
+      shadowDistance: 3,
+      shadowBlur: 8, // soft = diffuse blur
       shadowColor: "#000000FF",
       glow: false,
       textColor: "#FFFFFFFF",
