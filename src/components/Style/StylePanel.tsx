@@ -1,7 +1,7 @@
 import { useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
-import { Sparkles, Layers, ChevronDown, Search, Plus, RotateCcw, Copy, Trash2, Pencil, Check, X } from "lucide-react";
+import { Sparkles, Layers, Search, Plus, RotateCcw, Copy, Trash2, Pencil, Check, X, AlignLeft, AlignCenter, AlignRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { COLORS, f, FONTS, tabStyle, sectionLabel, selectStyle, toggle } from "../../lib/ui";
+import { COLORS, f, FONTS, tabStyle, sectionLabel, toggle } from "../../lib/ui";
 import { useStyleStore } from "../../stores/styleStore";
 import ColorField from "./ColorField";
 import FontPicker from "./FontPicker";
@@ -14,17 +14,14 @@ import {
 import {
   ANIMATION_TYPES,
   ANIMATION_LIMITS,
-  EASINGS,
   type NumericAnimationField,
 } from "../../lib/caption-animation";
 import { BUILTIN_PRESETS, uniquePresetName } from "../../lib/caption-presets";
 import { useNotifyStore } from "../../stores/notifyStore";
 import type {
   CaptionAlign,
-  CaptionEasing,
   CaptionStyle,
 } from "../../types/captionStyle";
-import { EXPORTED_ANIMATIONS } from "../../types/captionStyle";
 
 type StyleTab = "inspector" | "anim" | "effects";
 
@@ -93,14 +90,12 @@ function Inspector({ t }: { t: TFn }) {
       <div style={{ display: "flex", gap: 6, margin: "0 0 12px", alignItems: "center" }}>
         {(["left", "center", "right"] as const).map((a) => (
           <IconBtn key={a} on={style.align === a} label={t(`style:align.${a}`)} onClick={() => setStyle({ align: a as CaptionAlign })}>
-            {a === "left" ? "L" : a === "center" ? "C" : "R"}
+            {a === "left" ? <AlignLeft size={15} /> : a === "center" ? <AlignCenter size={15} /> : <AlignRight size={15} />}
           </IconBtn>
         ))}
-        {/* align is preview-only: ASS ties justification to the numpad Alignment
-            (driven by boxPosition), so ass.rs deliberately does not export it. */}
-        <span style={f(600, 8, "body", { color: COLORS.amber, border: `1px solid ${COLORS.amber}55`, borderRadius: 4, padding: "1px 5px", letterSpacing: ".06em", textTransform: "uppercase" })}>
-          {t("style:previewOnly")}
-        </span>
+        {/* align now exports: ass.rs maps it to the numpad Alignment COLUMN
+            (justification) while boxPosition drives the box region — see
+            effective_alignment. So no preview-only badge here anymore. */}
         <div style={{ width: 1, background: "var(--c-border)", margin: "0 2px" }} />
         <IconBtn on={style.bold} label={t("style:boldToggle")} onClick={() => setStyle({ bold: !style.bold })}>
           B
@@ -113,27 +108,43 @@ function Inspector({ t }: { t: TFn }) {
         </IconBtn>
       </div>
       <StyleSlider label={t("style:letterSpacing")} field="letterSpacing" value={style.letterSpacing} onChange={setNum("letterSpacing")} unit=" px" />
-      <StyleSlider label={t("style:lineHeight")} field="lineHeight" value={style.lineHeight} onChange={setNum("lineHeight")} badge={t("style:previewOnly")} />
+      <ColorField label={t("style:textColor")} value={style.textColor} onChange={(v) => setStyle({ textColor: v })} hint={t("style:alphaTextHint")} />
 
       <div style={{ ...sectionLabel, marginTop: 6 }}>{t("style:outlineShadowGlow")}</div>
       <ToggleRow label={t("style:outline")} on={style.outline} onClick={() => setStyle({ outline: !style.outline })} />
       {style.outline && (
-        <StyleSlider label={t("style:outlineWidth")} field="outlineWidth" value={style.outlineWidth} onChange={setNum("outlineWidth")} unit=" px" />
+        <>
+          <ColorField label={t("style:outline")} value={style.outlineColor} onChange={(v) => setStyle({ outlineColor: v })} />
+          <StyleSlider label={t("style:outlineWidth")} field="outlineWidth" value={style.outlineWidth} onChange={setNum("outlineWidth")} unit=" px" />
+        </>
       )}
       <ToggleRow label={t("style:shadow")} on={style.shadow} onClick={() => setStyle({ shadow: !style.shadow })} />
       {style.shadow && (
-        <StyleSlider label={t("style:shadowDepth")} field="shadowDepth" value={style.shadowDepth} onChange={setNum("shadowDepth")} unit=" px" />
+        <>
+          <ColorField label={t("style:shadow")} value={style.shadowColor} onChange={(v) => setStyle({ shadowColor: v })} />
+          <StyleSlider label={t("style:shadowAngle")} field="shadowAngle" value={style.shadowAngle} onChange={setNum("shadowAngle")} unit=" °" />
+          <StyleSlider label={t("style:shadowDistance")} field="shadowDistance" value={style.shadowDistance} onChange={setNum("shadowDistance")} unit=" px" />
+          <StyleSlider label={t("style:shadowSize")} field="shadowSize" value={style.shadowSize} onChange={setNum("shadowSize")} unit=" px" />
+          <StyleSlider label={t("style:shadowBlur")} field="shadowBlur" value={style.shadowBlur} onChange={setNum("shadowBlur")} unit=" px" />
+        </>
       )}
       <ToggleRow label={t("style:glow")} on={style.glow} onClick={() => setStyle({ glow: !style.glow })} />
       {style.glow && (
-        <StyleSlider label={t("style:glowStrength")} field="glowStrength" value={style.glowStrength} onChange={setNum("glowStrength")} unit=" px" />
+        <>
+          <ColorField label={t("style:glow")} value={style.glowColor} onChange={(v) => setStyle({ glowColor: v })} />
+          <StyleSlider label={t("style:glowStrength")} field="glowStrength" value={style.glowStrength} onChange={setNum("glowStrength")} unit=" px" />
+        </>
       )}
 
-      <div style={{ ...sectionLabel, marginTop: 6 }}>{t("style:colors")}</div>
-      <ColorField label={t("style:textColor")} value={style.textColor} onChange={(v) => setStyle({ textColor: v })} hint={t("style:alphaTextHint")} />
-      <ColorField label={t("style:outline")} value={style.outlineColor} onChange={(v) => setStyle({ outlineColor: v })} />
-      <ColorField label={t("style:shadow")} value={style.shadowColor} onChange={(v) => setStyle({ shadowColor: v })} />
-      <ColorField label={t("style:glow")} value={style.glowColor} onChange={(v) => setStyle({ glowColor: v })} />
+      <div style={{ ...sectionLabel, marginTop: 6 }}>{t("style:background")}</div>
+      <ToggleRow label={t("style:background")} on={style.background} onClick={() => setStyle({ background: !style.background })} />
+      {style.background && (
+        <>
+          <ColorField label={t("style:backgroundColor")} value={style.backgroundColor} onChange={(v) => setStyle({ backgroundColor: v })} />
+          <StyleSlider label={t("style:backgroundRadius")} field="backgroundRadius" value={style.backgroundRadius} onChange={setNum("backgroundRadius")} unit=" px" />
+          <StyleSlider label={t("style:backgroundSpread")} field="backgroundSpread" value={style.backgroundSpread} onChange={setNum("backgroundSpread")} unit=" px" />
+        </>
+      )}
 
       <div style={{ ...sectionLabel, marginTop: 12 }}>{t("style:captionBox")}</div>
       <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12 }}>
@@ -285,9 +296,6 @@ function Animations({ t }: { t: TFn }) {
   const setAnimation = useStyleStore((s) => s.setAnimation);
 
   const type = animation.type;
-  // Preview-only stagger + easing apply to the CSS-driven entrance types; ASS
-  // export ignores them (see item C decision), so they hide for none/karaoke.
-  const isEntrance = type === "slide" || type === "pop" || type === "typewriter" || type === "blur";
 
   return (
     <>
@@ -298,7 +306,6 @@ function Animations({ t }: { t: TFn }) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
         {ANIMATION_TYPES.map((at) => {
           const active = type === at;
-          const exported = EXPORTED_ANIMATIONS.has(at);
           return (
             <button
               key={at}
@@ -323,8 +330,8 @@ function Animations({ t }: { t: TFn }) {
                 <span style={{ fontFamily: FONTS.display, fontWeight: 800, fontSize: 22, color: "#fff", WebkitTextStroke: "0.5px #0D1117" }}>Aa</span>
               </div>
               {at !== "none" && (
-                <span style={{ position: "absolute", top: 4, right: 4, ...badge(exported ? COLORS.cyan : COLORS.amber) }}>
-                  {exported ? t("style:anim.exported") : t("style:previewOnly")}
+                <span style={{ position: "absolute", top: 4, right: 4, ...badge(COLORS.cyan) }}>
+                  {t("style:anim.exported")}
                 </span>
               )}
               <div style={{ ...f(600, 10), padding: "5px 8px", borderTop: "1px solid var(--c-border)", color: active ? COLORS.violetLight : "var(--c-text)" }}>
@@ -341,34 +348,6 @@ function Animations({ t }: { t: TFn }) {
           rather than shown as an inert control. */}
       {type !== "none" && type !== "karaoke" && (
         <AnimSlider label={t("style:anim.duration")} field="durationMs" value={animation.durationMs} onChange={(v) => setAnimation({ durationMs: v })} unit=" ms" />
-      )}
-      {isEntrance && (
-        <AnimSlider label={t("style:anim.perWordDelay")} field="perWordDelayMs" value={animation.perWordDelayMs} onChange={(v) => setAnimation({ perWordDelayMs: v })} unit=" ms" badge={t("style:previewOnly")} />
-      )}
-      {type !== "none" && type !== "karaoke" && (
-        <>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, ...f(400, 10, "body", { color: "var(--c-text2)" }) }}>
-            {t("style:anim.easing")}
-            <span style={f(600, 8, "body", { color: COLORS.amber, border: `1px solid ${COLORS.amber}55`, borderRadius: 4, padding: "1px 5px", letterSpacing: ".06em", textTransform: "uppercase" })}>
-              {t("style:previewOnly")}
-            </span>
-          </div>
-          <div style={{ position: "relative", marginBottom: 12 }}>
-            <select
-              value={animation.easing}
-              onChange={(e) => setAnimation({ easing: e.target.value as CaptionEasing })}
-              style={selectStyle}
-              aria-label={t("style:anim.easing")}
-            >
-              {EASINGS.map((ez) => (
-                <option key={ez} value={ez}>
-                  {ez}
-                </option>
-              ))}
-            </select>
-            <ChevronDown size={13} color="var(--c-muted)" style={{ position: "absolute", right: 10, top: 10, pointerEvents: "none" }} />
-          </div>
-        </>
       )}
       {type === "karaoke" && (
         <ColorField label={t("style:anim.highlightColor")} value={animation.highlightColor} onChange={(v) => setAnimation({ highlightColor: v })} badge={t("style:anim.exported")} />

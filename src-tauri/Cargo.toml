@@ -50,6 +50,10 @@ regex = "1"
 encoding_rs = "0.8"
 # Pure-Rust system-font enumeration (no system libs) for the caption font picker.
 fontdb = "0.23"
+# Pure-Rust glyph metrics (advance widths + hhea/OS2 vertical metrics) used to
+# measure caption text for the text-hugging background pill. Matches the version
+# fontdb 0.23 pulls in transitively, so no extra crate is added to the lock.
+ttf-parser = "0.25"
 # whisper-rs Metal backend is macOS-only (links Apple's Foundation.framework).
 # Windows/Linux fall back to the default CPU backend.
 whisper-rs-sys = "0.15"

@@ -202,6 +202,36 @@ or a single focused agent where the workflow's spec phase kept failing):
   fixed (orphaned-id prune + clear-on-row-click); **custom tooltips** app-wide (native
   `title` doesn't render in the macOS WKWebView).
 
+### Inspector styling follow-on (2026-07-22, branch `claude/verify-backlog-changelog-ddbde3`)
+
+Live-feedback pass on the running app (each verified `tsc` + `vitest` + `cargo test`):
+
+- ✅ **Alignment now EXPORTS.** Was preview-only; ass.rs `effective_alignment` maps
+  `align` to the numpad Alignment COLUMN (justification) while `boxPosition` drives the
+  box REGION. L/C/R letters → alignment icons.
+- ✅ **Line-height REMOVED.** No honest ASS/libass mapping the ffmpeg `ass` filter can
+  carry (confirmed: only the `ass_set_line_spacing` C-API, not exposed) → dropped the
+  control rather than ship a preview-only knob.
+- ✅ **Background pill (NEW):** color+alpha / corner radius / spread, text-hugging,
+  rounded `\p` drawing on a behind-layer. Sizing MEASURES the text in Rust (ttf-parser,
+  own greedy wrap → hard `\N`, WrapStyle 2) — bundled+system fonts via fontdb.
+- ✅ **Rich shadow:** angle/distance/size/blur/alpha as an offset behind-layer (replaced
+  the single depth). z-order background < shadow < glow < text.
+- ✅ **Colors moved into each category** (Text/Outline/Shadow/Glow/Background); the
+  separate "Colors" section is gone.
+- ✅ **Animation preview-only knobs removed** (`perWordDelayMs`, `easing`) — TS + Rust +
+  i18n + tests; all animation TYPES still export.
+- ✅ **Outline preview fixed** — 8-direction shadow ring (was 4 corners at w·√2, which
+  left the cardinal edges bare and looked "torn").
+- ✅ **Background pill vertical hug fixed** — sized to real glyph bounding-box INK
+  (first/last line), not the loose font em box, so it no longer "sticks out above the
+  text". Verified by burning a test frame and inspecting it. Diacritics stay covered.
+
+Known limits carried forward: pill hug exact for Latin/Cyrillic, APPROXIMATE for complex
+scripts/ligatures/emoji/glyph-fallback (documented, accepted); a speaker cue + background
+reserves the "[Speaker] " width on line 0 (F2 fix). Still uncommitted-then-committed on
+this branch; NOT yet through a real `tauri build` or Windows pass.
+
 ### To take care of (known limitations / follow-ups)
 
 - **Everything here was verified by `tsc` + `vitest` + `cargo test` and, for the burn,

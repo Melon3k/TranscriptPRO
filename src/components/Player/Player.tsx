@@ -485,7 +485,9 @@ function AnimatedCaption({
       <span
         style={{
           ...base,
-          animation: `${ENTRANCE_KEYFRAME[type]} ${animation.durationMs}ms ${animation.easing} both`,
+          // Fixed ease-out: the export's ASS \t transitions are linear anyway,
+          // so a per-style easing knob was preview-only and has been removed.
+          animation: `${ENTRANCE_KEYFRAME[type]} ${animation.durationMs}ms ease-out both`,
         }}
       >
         {sub.text}

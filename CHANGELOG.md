@@ -5,12 +5,14 @@ Wszystkie zmiany widoczne dla użytkowników. Format: [Keep a Changelog](https:/
 ## [Unreleased]
 
 ### Added
-- **Stylizacja napisów (panel Stylizacja).** Inspektor: czcionka, rozmiar, odstęp liter, interlinia, wyrównanie, pogrubienie/kursywa/wersaliki, obrys, cień, poświata (glow), pozycja i szerokość boxa napisów. Wszystko na żywo w podglądzie.
+- **Stylizacja napisów (panel Stylizacja).** Inspektor: czcionka, rozmiar, odstęp liter, wyrównanie, pogrubienie/kursywa/wersaliki, obrys, cień, poświata (glow), tło, pozycja i szerokość boxa napisów. Wszystko na żywo w podglądzie.
+- **Tło napisów (pigułka)** — kolor z przezroczystością, zaokrąglenie rogów i rozpiętość (padding); tło oblewa tekst i jest wypalane do MP4. Ikony wyrównania (L/C/P) zamiast liter.
+- **Rozbudowany cień** — kolor z przezroczystością, kąt, odległość, rozmiar i rozmycie (zamiast pojedynczej głębi); wypalany do MP4.
 - **Dowolna czcionka z komputera** — wyszukiwarka fontów systemowych obok trzech wbudowanych (Outfit / Inter / JetBrains Mono, dołączone do aplikacji).
-- **Pełny wybór koloru z przezroczystością** — picker z polem nasycenia/barwy, suwakiem alfy i polami Hex / R / G / B / Alpha; osobne kolory tekstu, obrysu, cienia i poświaty.
+- **Pełny wybór koloru z przezroczystością** — picker z polem nasycenia/barwy, suwakiem alfy i polami Hex / R / G / B / Alpha; kolor przy każdej kategorii (tekst, obrys, cień, poświata, tło).
 - **Przeciągalny box napisów** na playerze (tryb „Pozycja") — zsynchronizowany z siatką pozycji w Inspektorze.
 - **Presety stylu** (zakładka Efekty) — cztery wbudowane (Neon, Twardy cień, Gruby obrys, Miękki) + własne: Nowy / Duplikuj / Zapisz / Usuń / zmiana nazwy / wyszukiwanie, zapamiętywane.
-- **Animacje napisów** — zanikanie (fade), karaoke, wjazd, pop, maszyna do pisania, rozmycie; z regulacją czasu, koloru podświetlenia karaoke i in.
+- **Animacje napisów** — zanikanie (fade), karaoke, wjazd, pop, maszyna do pisania, rozmycie; z regulacją czasu i koloru podświetlenia karaoke. Wszystkie typy wypalane do MP4.
 - **Eksport wideo MP4 z wypalonymi napisami** — styl, kolory (z przezroczystością), pozycja, czcionki i animacje wtapiane w wideo (ffmpeg + libass), z paskiem postępu i anulowaniem.
 - **Modal „Podgląd i eksport"** dla SRT/VTT — podgląd wygenerowanego pliku przed zapisem.
 - **Podpowiedzi (tooltips)** na ikonach w całej aplikacji.
@@ -18,11 +20,15 @@ Wszystkie zmiany widoczne dla użytkowników. Format: [Keep a Changelog](https:/
 - CHANGELOG.md — sekcja per wersja wyciągana automatycznie do release notes na GitHubie.
 
 ### Changed
+- **Wyrównanie tekstu jest teraz eksportowane** — justowanie (lewo/środek/prawo) w obrębie boxa napisów przenosi się do ASS/MP4 (wcześniej działało tylko w podglądzie).
+- Kolory przeniesione do swoich sekcji w Inspektorze (osobna sekcja „Kolory" usunięta) — kolor obok kontrolki, do której należy.
 - Kolory napisów są zapisywane w formacie `#RRGGBBAA` (z kanałem alfa); starsze zapisy migrują automatycznie jako nieprzezroczyste.
 - Ostrzeżenie o odwróconych czasach (koniec ≤ początek) — wiersz podświetlany na czerwono i potwierdzenie przy eksporcie formatów z czasem.
 - Branch protection na `main`: każda zmiana musi przejść przez PR z zielonym CI (macOS Universal + Windows). Bezpośredni push i force-push zablokowane.
 
 ### Fixed
+- Obrys w podglądzie nie „rozjeżdża się" już na krawędziach (rysowany pełnym pierścieniem zamiast czterech rogów).
+- Tło napisów po wypaleniu do MP4 nie „wystaje" nad tekstem — pigułka dopasowana do rzeczywistych glifów (uwzględnia diakrytyki), nie do luźnego pola em fontu.
 - Przeciąganie plików na okno (otwieranie) — przywrócone; przeciąganie słów między segmentami przepisane na zdarzenia wskaźnika (bez blokowania natywnego drop plików).
 - Zaznaczenie słów nie „przykleja się" już po przeniesieniu słowa do innego segmentu.
 - Panel porównania tłumaczenia pokazuje się tylko w trybie Tłumaczenie (wcześniej wchodził w transkrypcję i zasłaniał pasek postępu).

@@ -13,6 +13,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # NOTE: do NOT add matrix keys here — GitHub bakes every matrix value
+        # into the auto-generated job name, which is the required-status-check
+        # CONTEXT the `main` ruleset pins ("build (macos-latest, …)" /
+        # "build (windows-latest)"). A new key renames the check and blocks every
+        # merge on a phantom context. Per-platform values go in step `env:` via
+        # an expression instead (see the burn-smoke test step).
         include:
           - platform: macos-latest
             args: "--target universal-apple-darwin"
@@ -78,6 +84,23 @@ jobs:
       - name: Build llama-server sidecar (Windows)
         if: matrix.platform == 'windows-latest'
         run: bash scripts/build-llama-server.sh windows
+
+      # Tests run before the bundle build so a red test fails the PR fast. Both
+      # sidecars must already exist above: the Rust build script treats them as
+      # required externalBin resources. The burn smoke exercises the real
+      # shipped ffmpeg (which carries libass) via TPRO_TEST_FFMPEG; if that
+      # binary ever lacked the `ass` filter the smoke would skip (logged), not
+      # silently pass.
+      - name: Frontend unit tests (vitest)
+        run: npm test
+
+      - name: Rust tests incl. MP4 burn-in smoke
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
+        env:
+          # Per-platform via expression (NOT a matrix key — see the matrix note).
+          # macOS: the universal fat binary runs on the runner arch. Relative to
+          # the workspace root; the test canonicalizes it to an absolute path.
+          TPRO_TEST_FFMPEG: ${{ matrix.platform == 'windows-latest' && 'src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe' || 'src-tauri/binaries/ffmpeg-universal-apple-darwin' }}
 
       # tauri-action with no tagName performs build+bundle without publishing.
       # We re-use the exact same action + args + signing env as release.yml so

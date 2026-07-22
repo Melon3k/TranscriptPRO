@@ -4,7 +4,6 @@ import {
   ANIMATION_LIMITS,
   ANIMATION_TYPES,
   DEFAULT_CAPTION_ANIMATION,
-  EASINGS,
   sanitizeCaptionAnimation,
 } from "./caption-animation";
 
@@ -21,9 +20,8 @@ describe("animation constants", () => {
     }
   });
 
-  it("default enums are members of their unions", () => {
+  it("default type is a member of its union", () => {
     expect(ANIMATION_TYPES).toContain(DEFAULT_CAPTION_ANIMATION.type);
-    expect(EASINGS).toContain(DEFAULT_CAPTION_ANIMATION.easing);
   });
 
   it("all types except none export to ASS", () => {
@@ -51,39 +49,45 @@ describe("sanitizeCaptionAnimation", () => {
     const persisted = {
       type: "karaoke" as const,
       durationMs: 600,
-      perWordDelayMs: 80,
-      easing: "linear" as const,
       highlightColor: "#FACC15FF",
     };
     expect(sanitizeCaptionAnimation(persisted)).toEqual(persisted);
+  });
+
+  it("legacy preview-only keys (perWordDelayMs/easing) don't break sanitize", () => {
+    // sanitize merges over defaults (doesn't whitelist), so stray legacy keys
+    // may ride along harmlessly — TS never reads them and Rust serde ignores
+    // unknown fields. What matters: the known contract fields are correct.
+    const out = sanitizeCaptionAnimation({
+      type: "fade",
+      durationMs: 500,
+      perWordDelayMs: 80,
+      easing: "linear",
+    } as never);
+    expect(out.type).toBe("fade");
+    expect(out.durationMs).toBe(500);
+    expect(out.highlightColor).toBe(DEFAULT_CAPTION_ANIMATION.highlightColor);
   });
 
   it("missing fields fall back to defaults (forward-compat contract)", () => {
     const out = sanitizeCaptionAnimation({ type: "fade" });
     expect(out.type).toBe("fade");
     expect(out.durationMs).toBe(DEFAULT_CAPTION_ANIMATION.durationMs);
-    expect(out.easing).toBe(DEFAULT_CAPTION_ANIMATION.easing);
   });
 
-  it("unknown enums reset to defaults", () => {
-    const out = sanitizeCaptionAnimation({ type: "explode", easing: "bounce" } as never);
+  it("unknown type resets to default", () => {
+    const out = sanitizeCaptionAnimation({ type: "explode" } as never);
     expect(out.type).toBe(DEFAULT_CAPTION_ANIMATION.type);
-    expect(out.easing).toBe(DEFAULT_CAPTION_ANIMATION.easing);
   });
 
-  it("non-numeric numbers reset to defaults", () => {
-    const out = sanitizeCaptionAnimation({
-      durationMs: null,
-      perWordDelayMs: NaN,
-    } as never);
+  it("non-numeric duration resets to default", () => {
+    const out = sanitizeCaptionAnimation({ durationMs: null } as never);
     expect(out.durationMs).toBe(DEFAULT_CAPTION_ANIMATION.durationMs);
-    expect(out.perWordDelayMs).toBe(DEFAULT_CAPTION_ANIMATION.perWordDelayMs);
   });
 
-  it("out-of-range numbers clamp to the limits", () => {
-    const out = sanitizeCaptionAnimation({ durationMs: 9000, perWordDelayMs: -5 });
+  it("out-of-range duration clamps to the limits", () => {
+    const out = sanitizeCaptionAnimation({ durationMs: 9000 });
     expect(out.durationMs).toBe(ANIMATION_LIMITS.durationMs.max);
-    expect(out.perWordDelayMs).toBe(ANIMATION_LIMITS.perWordDelayMs.min);
   });
 
   it("malformed highlightColor resets, valid one is canonicalized to uppercase", () => {
