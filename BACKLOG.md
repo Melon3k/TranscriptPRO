@@ -232,15 +232,33 @@ scripts/ligatures/emoji/glyph-fallback (documented, accepted); a speaker cue + b
 reserves the "[Speaker] " width on line 0 (F2 fix). Still uncommitted-then-committed on
 this branch; NOT yet through a real `tauri build` or Windows pass.
 
+### Release-prep pass (2026-07-22)
+
+- ✅ **macOS packaged `tauri build` + burn smoke.** Built `TranscriptPRO.app` (release,
+  `--bundles app`; `createUpdaterArtifacts` temporarily off — the updater signing key
+  lives only in CI). Verified the bundle: 6 caption TTFs in `Contents/Resources/fonts/`,
+  the real ffmpeg sidecar (~50 MB) in `Contents/MacOS/ffmpeg`. Then burned a frame with
+  the **bundled** ffmpeg over the **bundled** Outfit font (`fontsdir` → the packaged
+  fonts) → Polish text + outline + background band render correctly. So font bundling
+  fidelity and `resource_dir()` paths are confirmed in a packaged build (the thing that
+  can't be seen in dev). NOTE: `llama-server` sidecar was a 0-byte placeholder for this
+  smoke — a real release must ship the built sidecar; local translation was out of scope.
+- ✅ **Gemma Terms — draft in-repo.** Added `TERMS.md` (use-restrictions pass-through
+  clause for the TranslateGemma model + Whisper/FFmpeg/font component terms) + a `README`
+  pointer, marked **DRAFT pending legal review** (the mirror-vs-gated + final ToS wording
+  still need a lawyer — see the open item below).
+
 ### To take care of (known limitations / follow-ups)
 
-- **Everything here was verified by `tsc` + `vitest` + `cargo test` and, for the burn,
-  by inspecting fixture frames — but NOT by a real `tauri build` + release run.** Font
-  bundling fidelity and resource paths only fully manifest in a packaged build; do a
-  build + smoke before any release.
-- **Windows unverified** for the new surfaces: system-font enumeration, burn-in fonts,
-  and the still-open **Cmd+Q guard** (P2) need a Windows pass. `tauri-driver` E2E is
-  Linux/Windows-only (no macOS), so automated end-to-end stays CI-only.
+- **DMG/updater packaged build still unverified.** The macOS smoke built only the `.app`
+  with updater artifacts OFF; a real release build (`dmg` + `createUpdaterArtifacts: true`,
+  signed with the CI key) hasn't been run end-to-end locally. CI does the signed
+  build+bundle on every PR, so this is covered there.
+- **Windows unverified (runtime).** CI builds + tests Windows green, but nobody has run
+  the packaged `.exe` on a real machine: system-font enumeration, burn-in fonts,
+  llama-server runtime, and the still-open **Cmd+Q guard** (P2) need a Windows pass.
+  `tauri-driver` E2E is Linux/Windows-only (no macOS), so automated end-to-end stays
+  CI-only.
 - **Test automation deferred** (user's call): the UI/burn behaviours are covered by unit
   tests + manual QA only. No component (jsdom/RTL) or burn-smoke tests yet — EDT-1 in
   particular shipped without a regression test. First automation slice, when wanted:

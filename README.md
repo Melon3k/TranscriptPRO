@@ -147,3 +147,7 @@ współistnieją: `@fontsource` .woff2 obsługuje UI aplikacji, a TTF-y obsługu
 ## Licencja
 
 Prywatny projekt. Wszelkie prawa zastrzeżone.
+
+Warunki komponentów firm trzecich (model TranslateGemma / Gemma Terms, Whisper,
+FFmpeg, czcionki) oraz klauzula pass-through użycia dla Gemma — zob.
+[TERMS.md](TERMS.md) (**draft do przeglądu prawnego** przed publicznym wydaniem).
