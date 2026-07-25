@@ -43,15 +43,41 @@
     "appliesAll": "Dotyczy wszystkich napisów",
     "exported": "eksport",
     "duration": "Czas trwania",
-    "highlightColor": "Podświetlenie karaoke",
+    "highlightColor": "Kolor akcentu",
+    "stagger": "Odstęp",
+    "granularity": {
+      "label": "Pojawianie",
+      "char": "Znak",
+      "word": "Słowo",
+      "line": "Linijka",
+      "sentence": "Zdanie"
+    },
+    "direction": {
+      "label": "Kierunek",
+      "in": "W miejscu",
+      "up": "Z góry",
+      "down": "Z dołu",
+      "left": "Z lewej",
+      "right": "Z prawej"
+    },
+    "karaokeHighlight": {
+      "label": "Podświetlenie",
+      "text": "Tekst",
+      "background": "Tło",
+      "both": "Oba"
+    },
     "types": {
       "none": "Brak",
       "fade": "Zanikanie",
-      "slide": "Wjazd w górę",
-      "pop": "Pop",
+      "scale": "Skalowanie",
       "typewriter": "Maszyna do pisania",
-      "karaoke": "Karaoke",
-      "blur": "Rozmycie"
+      "decode": "Dekodowanie",
+      "slide": "Wjazd w górę",
+      "blur": "Rozmycie",
+      "colorShift": "Zmiana koloru",
+      "blurDrop": "Rozmyty spadek",
+      "staircase": "Schodki",
+      "karaoke": "Karaoke"
     }
   },
   "textColor": "Tekst",

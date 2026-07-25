@@ -41,26 +41,101 @@ export interface CaptionStyle {
 // every missing field falls back to the default. Never rename fields; only add.
 
 // Item C: ONE global animation, a sibling of the global style in styleStore
-// (not per-segment). Every animation type now serializes to ASS override tags
-// (fade → \fad, karaoke → \k, pop → \fscx/\fscy \t, blur → \blur \t, slide →
-// \move, typewriter → per-char \alpha \t). (The preview-only easing +
-// per-word-delay knobs were removed — the UI only exposes what exports.)
+// (not per-segment). The set + granularity/direction knobs mirror the
+// "100 Text Animations" gallery the product is standardising on. Every type
+// except "none" serializes to ASS override tags (see ass.rs dialogue_text):
+// fade → \fad, scale → \fscx/\fscy \t, slide → \move, blur → \blur \t,
+// blurDrop → \move + \blur \t, colorShift → \t \1c, typewriter/decode →
+// per-char \alpha \t, staircase → per-unit positioned \move, karaoke → \k.
+// The animation renders on the MP4 ONLY through these tags (MP4 = libass
+// burn-in of the exported ASS), so the CSS preview mirrors the ASS, never the
+// other way round.
 export type CaptionAnimationType =
   | "none"
   | "fade"
-  | "slide"
-  | "pop"
+  | "scale" // gallery "Scale In"
   | "typewriter"
-  | "karaoke"
-  | "blur";
+  | "decode" // gallery "Shuffle" made burn-in-safe: random-order per-char reveal
+  | "slide" // gallery "Slide Up"
+  | "blur" // gallery "Blur In" (+ left/right)
+  | "colorShift" // gallery "Color Shift"
+  | "blurDrop" // gallery "Blur Drop"
+  | "staircase" // gallery "Staircase"
+  | "karaoke";
+
+// The unit that animates as one step. Empty granularity options (below) means
+// the type animates as a whole line (this field is ignored for it).
+export type AnimationGranularity = "char" | "word" | "line" | "sentence";
+// Entrance origin edge. "in" = animate in place (no translation).
+export type AnimationDirection = "in" | "up" | "down" | "left" | "right";
+// Karaoke highlight target: recolour the word ("text"), draw a moving box behind
+// it ("background"), or both.
+export type KaraokeHighlight = "text" | "background" | "both";
+
 export interface CaptionAnimation {
   type: CaptionAnimationType; // default "none"
-  durationMs: number; // 400 — fade in+out length / entrance length
-  highlightColor: string; // "#22D3EE" — karaoke sung-word colour → ASS PrimaryColour
+  durationMs: number; // 400 — fade in+out length / per-unit entrance length
+  highlightColor: string; // karaoke sung-word colour / colorShift accent → ASS colours
+  granularity: AnimationGranularity; // default "word" (only read where options non-empty)
+  direction: AnimationDirection; // default "in" (only read where options non-empty)
+  staggerMs: number; // 40 — delay step between units (gallery delayStep)
+  karaokeHighlight: KaraokeHighlight; // default "text" (only read for karaoke)
 }
 // Same forward-compat contract as CaptionStyle above: the store merges persisted
 // animation over DEFAULT_CAPTION_ANIMATION, so later-added fields rehydrate to
 // their defaults. Never rename fields; only add.
+
+// Per-type sub-option menus — the SINGLE source of truth shared by the sanitizer
+// (which clamps persisted values into the allowed set) and the Style panel UI
+// (which only renders a control when its option list is non-empty). The FIRST
+// entry is the default picked when switching into that type.
+export const ANIMATION_GRANULARITY_OPTIONS: Record<
+  CaptionAnimationType,
+  readonly AnimationGranularity[]
+> = {
+  none: [],
+  fade: [],
+  scale: ["word", "line"],
+  typewriter: [], // fixed per-char cadence
+  decode: [], // fixed per-char
+  slide: ["word", "line"],
+  blur: [],
+  colorShift: [],
+  blurDrop: [],
+  staircase: ["word", "sentence"],
+  karaoke: [], // per-word, driven by word timings
+};
+
+export const ANIMATION_DIRECTION_OPTIONS: Record<
+  CaptionAnimationType,
+  readonly AnimationDirection[]
+> = {
+  none: [],
+  fade: [],
+  scale: [],
+  typewriter: [],
+  decode: [],
+  slide: [], // always rises up
+  blur: ["in", "left", "right"],
+  colorShift: [],
+  blurDrop: ["up", "down"], // from top / from bottom
+  staircase: ["up", "down"],
+  karaoke: [],
+};
+
+export const KARAOKE_HIGHLIGHT_OPTIONS: readonly KaraokeHighlight[] = [
+  "text",
+  "background",
+  "both",
+];
+
+// Types whose per-unit stagger (staggerMs) knob is meaningful in the UI.
+export const STAGGERED_ANIMATIONS: ReadonlySet<CaptionAnimationType> = new Set([
+  "scale",
+  "decode",
+  "slide",
+  "staircase",
+]);
 
 // Every animation type except "none" serializes to ASS override tags; this set
 // only gates UI badges and the Rail export warning (the Rust serializer keys off
@@ -68,10 +143,14 @@ export interface CaptionAnimation {
 export const EXPORTED_ANIMATIONS: ReadonlySet<CaptionAnimationType> = new Set([
   "fade",
   "karaoke",
-  "slide",
-  "pop",
+  "scale",
   "typewriter",
+  "decode",
+  "slide",
   "blur",
+  "colorShift",
+  "blurDrop",
+  "staircase",
 ]);
 
 // Types whose entrance is exported but only approximately: they animate via ASS
@@ -79,8 +158,12 @@ export const EXPORTED_ANIMATIONS: ReadonlySet<CaptionAnimationType> = new Set([
 // preview. fade (\fad) and karaoke (\k timings) map faithfully and are
 // excluded. Gates the Rail export notice.
 export const APPROXIMATE_ANIMATIONS: ReadonlySet<CaptionAnimationType> = new Set([
-  "slide",
-  "pop",
+  "scale",
   "typewriter",
+  "decode",
+  "slide",
   "blur",
+  "colorShift",
+  "blurDrop",
+  "staircase",
 ]);

@@ -84,7 +84,17 @@ button, [role="button"] {
 @keyframes captionFadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes captionSlideUp { from { opacity: 0; transform: translateY(18%); } to { opacity: 1; transform: none; } }
 @keyframes captionPop { from { opacity: 0; transform: scale(.7); } to { opacity: 1; transform: scale(1); } }
+@keyframes captionScaleIn { from { opacity: 0; transform: scale(0); } to { opacity: 1; transform: scale(1); } }
 @keyframes captionBlurIn { from { opacity: 0; filter: blur(8px); } to { opacity: 1; filter: blur(0); } }
+@keyframes captionBlurLeft { from { opacity: 0; filter: blur(8px); transform: translateX(-40%); } to { opacity: 1; filter: blur(0); transform: none; } }
+@keyframes captionBlurRight { from { opacity: 0; filter: blur(8px); transform: translateX(40%); } to { opacity: 1; filter: blur(0); transform: none; } }
+@keyframes captionBlurDropTop { from { opacity: 0; filter: blur(8px); transform: translateY(-45%); } to { opacity: 1; filter: blur(0); transform: none; } }
+@keyframes captionBlurDropBottom { from { opacity: 0; filter: blur(8px); transform: translateY(45%); } to { opacity: 1; filter: blur(0); transform: none; } }
+@keyframes captionStairFromTop { from { opacity: 0; transform: translateY(-60%); } to { opacity: 1; transform: none; } }
+@keyframes captionStairFromBottom { from { opacity: 0; transform: translateY(60%); } to { opacity: 1; transform: none; } }
+/* Color sweep to the chosen accent (--kf-accent), settling back to the
+   element's inherited textColor via `inherit`. */
+@keyframes captionColorShift { 0% { color: inherit; } 50% { color: var(--kf-accent, #22d3ee); } 100% { color: inherit; } }
 
 /* ── Range sliders (subtitle inspector) ──────────────────────────────────── */
 input[type=range] {

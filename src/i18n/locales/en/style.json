@@ -43,15 +43,41 @@
     "appliesAll": "Applies to all captions",
     "exported": "exported",
     "duration": "Duration",
-    "highlightColor": "Karaoke highlight",
+    "highlightColor": "Highlight color",
+    "stagger": "Stagger",
+    "granularity": {
+      "label": "Reveal by",
+      "char": "Character",
+      "word": "Word",
+      "line": "Line",
+      "sentence": "Sentence"
+    },
+    "direction": {
+      "label": "Direction",
+      "in": "In place",
+      "up": "From top",
+      "down": "From bottom",
+      "left": "From left",
+      "right": "From right"
+    },
+    "karaokeHighlight": {
+      "label": "Highlight",
+      "text": "Text",
+      "background": "Background",
+      "both": "Both"
+    },
     "types": {
       "none": "None",
       "fade": "Fade",
-      "slide": "Slide up",
-      "pop": "Pop",
+      "scale": "Scale in",
       "typewriter": "Typewriter",
-      "karaoke": "Karaoke",
-      "blur": "Blur in"
+      "decode": "Decode",
+      "slide": "Slide up",
+      "blur": "Blur in",
+      "colorShift": "Color shift",
+      "blurDrop": "Blur drop",
+      "staircase": "Staircase",
+      "karaoke": "Karaoke"
     }
   },
   "textColor": "Text",

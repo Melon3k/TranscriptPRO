@@ -107,13 +107,22 @@ pub fn write_ass_with_metrics(
     // output). A `Face` is parsed once here; if it fails, `Measurer::Rough`
     // supplies an average-advance estimate so the pill still draws.
     let face = metrics.and_then(|m| ttf_parser::Face::parse(&m.data, m.index).ok());
-    let measurer = if style.background {
+    // Positioned per-unit motion (slide/staircase) and karaoke highlight boxes
+    // reconstruct the layout from measured advances, so they need a measurer too
+    // — not just the background pill.
+    let karaoke_boxes =
+        animation.anim_type == "karaoke" && matches!(animation.karaoke_highlight.as_str(), "background" | "both");
+    let need_measure = style.background
+        || wants_positioned_motion(animation)
+        || karaoke_boxes
+        || animation.anim_type == "decode";
+    let measurer = if need_measure {
         match &face {
             Some(f) => Measurer::Real(f),
             None => Measurer::Rough,
         }
     } else {
-        Measurer::Rough // unused when background is off
+        Measurer::Rough // unused
     };
     let manual_wrap = style.background;
     let wrap_style = if manual_wrap { 2 } else { 0 };
@@ -153,6 +162,24 @@ pub fn write_ass_with_metrics(
             sub
         };
 
+        // Karaoke highlight boxes (background/both): behind-layer rounded rects,
+        // one per word, each with its OWN start time (when the word is sung) held
+        // to the cue end. Emitted first at Layer 0 so the caption text draws on
+        // top of them.
+        if karaoke_boxes {
+            for (box_start, drawing) in karaoke_box_events(sub_ref, style, animation, &measurer) {
+                output.push_str(&format!(
+                    "Dialogue: 0,{},{},Default,,{},{},{},,{}\n",
+                    format_ass_timestamp(box_start),
+                    end,
+                    evt_ml,
+                    evt_mr,
+                    evt_mv,
+                    drawing
+                ));
+            }
+        }
+
         // Z-ORDER: layers render low→high (behind→front). Assign incrementally in
         // the order background < shadow < glow < text, so a cue with no
         // decorations keeps the real text at Layer 0 (byte-identical golden
@@ -178,7 +205,43 @@ pub fn write_ass_with_metrics(
             let gl = glow_text(sub_ref, style, animation);
             emit(&mut output, gl);
         }
-        emit(&mut output, dialogue_text(sub_ref, style, animation));
+        // decode: positioned per-character scramble → settled events, each with
+        // its own time window. Emitted above any decoration (fixed high layer)
+        // since it IS the caption text. Falls back to the inline form if there's
+        // nothing to place.
+        if animation.anim_type == "decode" {
+            let events = positioned_decode_events(sub_ref, style, animation, &measurer);
+            if events.is_empty() {
+                emit(&mut output, dialogue_text(sub_ref, style, animation));
+            } else {
+                for (s, e, text) in events {
+                    output.push_str(&format!(
+                        "Dialogue: 5,{},{},Default,,{},{},{},,{}\n",
+                        format_ass_timestamp(s),
+                        format_ass_timestamp(e),
+                        evt_ml,
+                        evt_mr,
+                        evt_mv,
+                        text
+                    ));
+                }
+            }
+        }
+        // Positioned per-unit motion (slide/staircase): one \move event per unit,
+        // replacing the single caption line. Falls back to the inline whole-line
+        // form when there's no visible text to place.
+        else if wants_positioned_motion(animation) {
+            let events = positioned_motion_events(sub_ref, style, animation, &measurer);
+            if events.is_empty() {
+                emit(&mut output, dialogue_text(sub_ref, style, animation));
+            } else {
+                for ev in events {
+                    emit(&mut output, ev);
+                }
+            }
+        } else {
+            emit(&mut output, dialogue_text(sub_ref, style, animation));
+        }
     }
 
     output
@@ -191,16 +254,23 @@ const BLUR_ENTRANCE_RADIUS: i64 = 24;
 
 /// Per-cue Dialogue MarginL/MarginR/MarginV.
 ///
-/// For every type except `slide` this is `0,0,0`, which ASS reads as "inherit
-/// the Style margins" — so wrapping and placement follow the Style box exactly
-/// as before. `slide` uses `\move`, and libass treats a `\move`/`\pos` event
-/// with 0 event-margins as full-frame width for line wrapping (it stops
-/// inheriting the Style MarginL/R), so a long slide cue would wrap wider than
-/// every other type. Emitting the box margins explicitly on the event pins the
-/// wrap box back to the configured width, matching the non-slide cues and the
-/// CSS preview. The `\move` coordinates still drive the final position.
+/// For types that emit a `\move`/`\pos` (slide, staircase, blurDrop, and blur
+/// with a left/right direction) this returns the box margins; for every other
+/// type it is `0,0,0` (inherit the Style margins). libass treats a `\move`/`\pos`
+/// event with 0 event-margins as full-frame width for line wrapping (it stops
+/// inheriting the Style MarginL/R), so such a cue would wrap wider than every
+/// other type. Emitting the box margins explicitly pins the wrap box back to the
+/// configured width; the `\move` coordinates still drive the final position.
+fn uses_positional_move(animation: &CaptionAnimation) -> bool {
+    match animation.anim_type.as_str() {
+        "slide" | "staircase" | "blurDrop" => true,
+        "blur" => matches!(animation.direction.as_str(), "left" | "right"),
+        _ => false,
+    }
+}
+
 fn dialogue_margins(style: &CaptionStyle, animation: &CaptionAnimation) -> (i64, i64, i64) {
-    if animation.anim_type == "slide" {
+    if uses_positional_move(animation) {
         box_margins(style)
     } else {
         (0, 0, 0)
@@ -246,6 +316,11 @@ fn dialogue_text(sub: &Subtitle, style: &CaptionStyle, animation: &CaptionAnimat
     match animation.anim_type.as_str() {
         "fade" => format!("{}{}", animation_prefix(style, animation).unwrap_or_default(), plain()),
         "karaoke" => {
+            // "background" mode highlights via per-word boxes (emitted separately
+            // in write_ass), so the caption text itself stays plain — no \k sweep.
+            if animation.karaoke_highlight == "background" {
+                return plain();
+            }
             // (centiseconds, token-text) pairs.
             let tokens: Vec<(i64, String)> = if !sub.words.is_empty() {
                 sub.words
@@ -290,9 +365,102 @@ fn dialogue_text(sub: &Subtitle, style: &CaptionStyle, animation: &CaptionAnimat
             }
             out.trim_end().to_string()
         }
-        "pop" => format!("{}{}", animation_prefix(style, animation).unwrap_or_default(), plain()),
-        "blur" => format!("{}{}", animation_prefix(style, animation).unwrap_or_default(), plain()),
-        "slide" => format!("{}{}", animation_prefix(style, animation).unwrap_or_default(), plain()),
+        // Whole-line entrance tags (position/blur/color) then the plain body.
+        "blur" | "blurDrop" => {
+            format!("{}{}", animation_prefix(style, animation).unwrap_or_default(), plain())
+        }
+        // Per-unit scale-in cascade: each unit starts at scale 0 and pops to 100
+        // over durationMs, staggered by staggerMs. Layout-safe (\fscx doesn't
+        // reflow neighbours). `line` units are rejoined with \N.
+        "scale" => {
+            let d = animation.duration_ms.round().max(0.0) as i64;
+            let step = animation.stagger_ms.round().max(0.0) as i64;
+            let g = animation.granularity.as_str();
+            let units = animation_units(sub, style, g);
+            let sep = if g == "line" { "\\N" } else { "" };
+            let body = units
+                .iter()
+                .enumerate()
+                .map(|(i, u)| {
+                    let t0 = (i as i64) * step;
+                    format!(
+                        "{{\\fscx0\\fscy0\\t({},{},\\fscx100\\fscy100)}}{}",
+                        t0,
+                        t0 + d,
+                        u
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(sep);
+            format!("{}{}", speaker_prefix.unwrap_or_default(), body)
+        }
+        // slide / staircase: a whole-line directional \move (from animation_prefix)
+        // plus a per-unit \alpha cascade so units resolve in sequence. True
+        // per-unit translation isn't expressible inline in libass, so the motion
+        // is the shared line drift + staggered reveal (approximate, but burns).
+        "slide" | "staircase" => {
+            let d = animation.duration_ms.round().max(0.0) as i64;
+            let step = animation.stagger_ms.round().max(0.0) as i64;
+            let g = animation.granularity.as_str();
+            let units = animation_units(sub, style, g);
+            let sep = if g == "line" { "\\N" } else { "" };
+            let move_prefix = animation_prefix(style, animation).unwrap_or_default();
+            let body = units
+                .iter()
+                .enumerate()
+                .map(|(i, u)| {
+                    let t0 = (i as i64) * step;
+                    format!("{{\\alpha&HFF&\\t({},{},\\alpha&H00&)}}{}", t0, t0 + d, u)
+                })
+                .collect::<Vec<_>>()
+                .join(sep);
+            format!("{}{}{}", move_prefix, speaker_prefix.unwrap_or_default(), body)
+        }
+        // colorShift: sweep the fill colour to the accent by mid-entrance, then
+        // back to the base text colour. \1c takes BGR (the last 6 hex of the
+        // &HAABBGGRR conversion).
+        "colorShift" => {
+            let d = animation.duration_ms.round().max(0.0) as i64;
+            let half = d / 2;
+            let accent = hex_to_ass_color(&animation.highlight_color, "22D3EE");
+            let text = hex_to_ass_color(&style.text_color, "FFFFFF");
+            let accent_bgr = &accent[4..];
+            let text_bgr = &text[4..];
+            format!(
+                "{{\\t(0,{},\\1c&H{}&)\\t({},{},\\1c&H{}&)}}{}",
+                half,
+                accent_bgr,
+                half,
+                d,
+                text_bgr,
+                plain()
+            )
+        }
+        // decode: burn-safe "shuffle" — per-char \alpha reveal in a stable random
+        // order (hash-seeded by cue id, matching the preview), each char resolving
+        // over durationMs once its ranked window opens.
+        "decode" => {
+            let d = animation.duration_ms.round().max(0.0) as i64;
+            let step = animation.stagger_ms.round().max(1.0) as i64;
+            let raw = maybe_upper(sub.text.clone());
+            let chars: Vec<char> = raw.chars().collect();
+            let ranks = decode_ranks(&sub.id, chars.len());
+            let mut out = speaker_prefix.unwrap_or_default();
+            for (i, c) in chars.iter().enumerate() {
+                if *c == '\n' {
+                    out.push_str("\\N");
+                    continue;
+                }
+                let t0 = (ranks[i] as i64) * step;
+                out.push_str(&format!(
+                    "{{\\alpha&HFF&\\t({},{},\\alpha&H00&)}}{}",
+                    t0,
+                    t0 + d,
+                    escape_braces(&c.to_string())
+                ));
+            }
+            out
+        }
         "typewriter" => {
             // Per-character staggered \alpha reveal, left-to-right. Each logical
             // char is hidden (\alpha&HFF&) until its own time window, then \t
@@ -381,6 +549,119 @@ fn plain_body(sub: &Subtitle, style: &CaptionStyle) -> String {
     }
 }
 
+/// Split raw cue text into the units that animate as one staggered step,
+/// mirroring the frontend `splitUnits` in Player.tsx so preview and export
+/// agree. Word/sentence tokens keep their trailing whitespace so inter-token
+/// spacing survives; each unit is then brace-escaped and its `\n` → `\N`.
+/// (`line` units carry no `\N`; the caller rejoins them with `\N`.)
+fn animation_units(sub: &Subtitle, style: &CaptionStyle, granularity: &str) -> Vec<String> {
+    let raw = maybe_uppercase(sub.text.clone(), style);
+    let units: Vec<String> = match granularity {
+        "char" => raw.chars().map(|c| c.to_string()).collect(),
+        "line" => raw.split('\n').map(|s| s.to_string()).collect(),
+        "sentence" => split_sentences(&raw),
+        // "word" (default): runs of non-whitespace + trailing whitespace.
+        _ => split_words(&raw),
+    };
+    units
+        .into_iter()
+        .map(|u| escape_braces(&u).replace('\n', "\\N"))
+        .collect()
+}
+
+/// `\S+\s*` tokeniser: each token is one word plus the whitespace that follows
+/// it; leading whitespace before the first word is dropped (matches the regex).
+fn split_words(s: &str) -> Vec<String> {
+    let chars: Vec<char> = s.chars().collect();
+    let n = chars.len();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < n {
+        while i < n && chars[i].is_whitespace() {
+            i += 1;
+        }
+        if i >= n {
+            break;
+        }
+        let start = i;
+        while i < n && !chars[i].is_whitespace() {
+            i += 1;
+        }
+        while i < n && chars[i].is_whitespace() {
+            i += 1;
+        }
+        out.push(chars[start..i].iter().collect());
+    }
+    if out.is_empty() {
+        out.push(s.to_string());
+    }
+    out
+}
+
+/// `[^.!?]+[.!?]*\s*` tokeniser: text up to and including a run of sentence
+/// terminators plus trailing whitespace.
+fn split_sentences(s: &str) -> Vec<String> {
+    let chars: Vec<char> = s.chars().collect();
+    let n = chars.len();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < n {
+        let start = i;
+        while i < n && !matches!(chars[i], '.' | '!' | '?') {
+            i += 1;
+        }
+        while i < n && matches!(chars[i], '.' | '!' | '?') {
+            i += 1;
+        }
+        while i < n && chars[i].is_whitespace() {
+            i += 1;
+        }
+        if i > start {
+            out.push(chars[start..i].iter().collect());
+        } else {
+            break;
+        }
+    }
+    if out.is_empty() {
+        out.push(s.to_string());
+    }
+    out
+}
+
+/// FNV-1a 32-bit hash, mirroring the frontend `hashStr` (Player.tsx) so the
+/// `decode` scramble order matches the preview for a given cue id.
+fn hash_str(s: &str) -> u32 {
+    let mut h: u32 = 2166136261;
+    for c in s.chars() {
+        h ^= c as u32;
+        h = h.wrapping_mul(16777619);
+    }
+    h
+}
+
+/// Stable per-cue reveal RANK for each char index of a `decode` cue: sort the
+/// indices by `hash(id:i)` (stable), then invert to per-index rank. Identical
+/// ordering to the frontend `decodeRanks`.
+fn decode_ranks(id: &str, n: usize) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..n).collect();
+    order.sort_by_key(|&i| hash_str(&format!("{}:{}", id, i)));
+    let mut rank = vec![0usize; n];
+    for (pos, &ci) in order.iter().enumerate() {
+        rank[ci] = pos;
+    }
+    rank
+}
+
+/// Vertical entrance travel (px) for slide/staircase/blurDrop `\move`, and
+/// horizontal travel for blur left/right — both derived from the font size so
+/// the motion scales with the caption.
+fn move_off_v(style: &CaptionStyle) -> i64 {
+    style.font_size.round().max(24.0) as i64
+}
+fn move_off_h(style: &CaptionStyle) -> i64 {
+    (style.font_size.round().max(24.0) as i64) * 3
+}
+
 /// The shared positional/entrance animation override block that leads a line,
 /// for the types that express as a single leading `{...}` block. Both the real
 /// caption line and the glow line prepend this so the halo stays locked to the
@@ -400,14 +681,49 @@ fn animation_prefix(style: &CaptionStyle, animation: &CaptionAnimation) -> Optio
     let d = animation.duration_ms.round().max(0.0) as i64;
     match animation.anim_type.as_str() {
         "fade" => Some(format!("{{\\fad({},{})}}", d, d)),
-        "pop" => Some(format!("{{\\fscx0\\fscy0\\t(0,{},\\fscx100\\fscy100)}}", d)),
-        "blur" => Some(format!("{{\\blur{}\\t(0,{},\\blur0)}}", BLUR_ENTRANCE_RADIUS, d)),
+        // scale reuses the old pop scale-in as the WHOLE-LINE approximation for
+        // shadow/glow; the real caption line does the per-unit stagger itself.
+        "scale" => Some(format!("{{\\fscx0\\fscy0\\t(0,{},\\fscx100\\fscy100)}}", d)),
+        "blur" => match animation.direction.as_str() {
+            // Motion-blur in from the left/right edge: horizontal \move + deblur.
+            "left" | "right" => {
+                let (x, y, an) = anchor_point(style);
+                let off = move_off_h(style);
+                let x1 = if animation.direction == "left" { x - off } else { x + off };
+                Some(format!(
+                    "{{\\an{}\\move({},{},{},{},0,{})\\blur{}\\t(0,{},\\blur0)}}",
+                    an, x1, y, x, y, d, BLUR_ENTRANCE_RADIUS, d
+                ))
+            }
+            _ => Some(format!("{{\\blur{}\\t(0,{},\\blur0)}}", BLUR_ENTRANCE_RADIUS, d)),
+        },
+        // blurDrop: whole-line drop from the top ("up") or rise from the bottom
+        // ("down"), deblurring on the way in.
+        "blurDrop" => {
+            let (x, y, an) = anchor_point(style);
+            let off = move_off_v(style);
+            let y1 = if animation.direction == "down" { y + off } else { y - off };
+            Some(format!(
+                "{{\\an{}\\move({},{},{},{},0,{})\\blur{}\\t(0,{},\\blur0)}}",
+                an, x, y1, x, y, d, BLUR_ENTRANCE_RADIUS, d
+            ))
+        }
+        // slide always rises up from one travel-step below the rest anchor.
         "slide" => {
             let (x, y, an) = anchor_point(style);
-            let off = style.font_size.round().max(24.0) as i64;
-            let y1 = y + off;
+            let y1 = y + move_off_v(style);
             Some(format!("{{\\an{}\\move({},{},{},{},0,{})}}", an, x, y1, x, y, d))
         }
+        // staircase: whole-line directional drift; the per-unit \alpha cascade
+        // (added in dialogue_text) makes it read as a stepping reveal.
+        "staircase" => {
+            let (x, y, an) = anchor_point(style);
+            let off = move_off_v(style);
+            let y1 = if animation.direction == "down" { y + off } else { y - off };
+            Some(format!("{{\\an{}\\move({},{},{},{},0,{})}}", an, x, y1, x, y, d))
+        }
+        // colorShift / decode / typewriter / karaoke / none have no single
+        // shareable positional prefix.
         _ => None,
     }
 }
@@ -691,8 +1007,10 @@ fn shadow_text(sub: &Subtitle, style: &CaptionStyle, animation: &CaptionAnimatio
     let bgr = &hexpart[2..];
     let size = style.shadow_size.max(0.0);
     let blur = style.shadow_blur.max(0.0);
-    let anim_is_blur = animation.anim_type == "blur";
-    let style_block = if anim_is_blur {
+    // Both blur entrances animate their own \blur in the pos_block, so the
+    // static shadow \blur is omitted to avoid double-applying it.
+    let anim_has_blur = matches!(animation.anim_type.as_str(), "blur" | "blurDrop");
+    let style_block = if anim_has_blur {
         format!("\\bord{}\\shad0\\1c&H{}&\\1a&H{}&", fmt_num(size), bgr, alpha)
     } else {
         format!(
@@ -705,22 +1023,45 @@ fn shadow_text(sub: &Subtitle, style: &CaptionStyle, animation: &CaptionAnimatio
     };
 
     let d = animation.duration_ms.round().max(0.0) as i64;
+    let off_v = move_off_v(style);
     let pos_block = match animation.anim_type.as_str() {
         "slide" => {
-            let off = style.font_size.round().max(24.0) as i64;
-            let y1 = sy + off;
+            let y1 = sy + off_v;
             format!("\\an{}\\move({},{},{},{},0,{})", an, sx, y1, sx, sy, d)
         }
+        // scale/staircase per-unit motion is on the real line; the shadow tracks
+        // the whole-line approximation so its halo follows the caption.
+        "staircase" => {
+            let y1 = if animation.direction == "down" { sy + off_v } else { sy - off_v };
+            format!("\\an{}\\move({},{},{},{},0,{})", an, sx, y1, sx, sy, d)
+        }
+        "blurDrop" => {
+            let y1 = if animation.direction == "down" { sy + off_v } else { sy - off_v };
+            format!(
+                "\\an{}\\move({},{},{},{},0,{})\\blur{}\\t(0,{},\\blur0)",
+                an, sx, y1, sx, sy, d, BLUR_ENTRANCE_RADIUS, d
+            )
+        }
         "fade" => format!("\\an{}\\pos({},{})\\fad({},{})", an, sx, sy, d, d),
-        "pop" => format!(
+        "scale" => format!(
             "\\an{}\\pos({},{})\\fscx0\\fscy0\\t(0,{},\\fscx100\\fscy100)",
             an, sx, sy, d
         ),
-        "blur" => format!(
-            "\\an{}\\pos({},{})\\blur{}\\t(0,{},\\blur0)",
-            an, sx, sy, BLUR_ENTRANCE_RADIUS, d
-        ),
-        // karaoke / typewriter / none → static whole-text copy (like glow).
+        "blur" => match animation.direction.as_str() {
+            "left" | "right" => {
+                let off = move_off_h(style);
+                let x1 = if animation.direction == "left" { sx - off } else { sx + off };
+                format!(
+                    "\\an{}\\move({},{},{},{},0,{})\\blur{}\\t(0,{},\\blur0)",
+                    an, x1, sy, sx, sy, d, BLUR_ENTRANCE_RADIUS, d
+                )
+            }
+            _ => format!(
+                "\\an{}\\pos({},{})\\blur{}\\t(0,{},\\blur0)",
+                an, sx, sy, BLUR_ENTRANCE_RADIUS, d
+            ),
+        },
+        // colorShift / decode / typewriter / karaoke / none → static copy.
         _ => format!("\\an{}\\pos({},{})", an, sx, sy),
     };
 
@@ -865,6 +1206,337 @@ fn background_text(
     )
 }
 
+// ── Positioned per-unit layout (slide/staircase motion + karaoke boxes) ──────
+//
+// libass can't translate a sub-span of an auto-laid-out line independently, so
+// true per-word/-line motion is emitted as SEPARATE positioned Dialogue events,
+// one per unit. To rest exactly where a normal line sits, we reconstruct the
+// layout (wrap → per-line justification → per-word advance) from the same
+// anchor_point / region / measurer the background pill already uses. Positions
+// are exact for Latin/Cyrillic and approximate for complex scripts (the measurer
+// caveat) — accepted, matching the pill.
+
+/// One laid-out text run: escaped-later RAW text plus its canvas geometry. Used
+/// for both whole lines and individual words (an4 middle-left reference).
+struct LaidRun {
+    text: String,
+    left: f64,
+    mid_y: f64,
+}
+
+/// Position pre-split lines: per-line left edge from the justification column,
+/// vertical middle from the box-position band stacked by line height. Mirrors
+/// anchor_point + background_text so a positioned unit rests where libass would
+/// draw the normal line.
+fn place_lines(lines: &[String], style: &CaptionStyle, m: &Measurer) -> Vec<LaidRun> {
+    let fs = style.font_size.max(0.0);
+    let ls = style.letter_spacing;
+    let (ax, ay, an) = anchor_point(style);
+    let acol = (an - 1) % 3; // 0=left 1=center 2=right
+    let row = (an - 1) / 3; // 0=bottom 1=middle 2=top
+    let lh = m.line_height(fs);
+    let n = lines.len().max(1) as f64;
+    let block_h = n * lh;
+    let block_top = match row {
+        0 => ay as f64 - block_h,
+        1 => ay as f64 - block_h / 2.0,
+        _ => ay as f64,
+    };
+    lines
+        .iter()
+        .enumerate()
+        .map(|(i, line)| {
+            let width = m.line_advance(line, fs, ls);
+            let left = match acol {
+                0 => ax as f64,
+                2 => ax as f64 - width,
+                _ => ax as f64 - width / 2.0,
+            };
+            LaidRun {
+                text: line.clone(),
+                left,
+                mid_y: block_top + (i as f64 + 0.5) * lh,
+            }
+        })
+        .collect()
+}
+
+/// Wrap the (uppercased) cue text to the region — speaker prefix on line 0 — and
+/// position the resulting lines.
+fn wrap_and_place(sub: &Subtitle, style: &CaptionStyle, m: &Measurer) -> Vec<LaidRun> {
+    let fs = style.font_size.max(0.0);
+    let ls = style.letter_spacing;
+    let text = maybe_uppercase(sub.text.clone(), style);
+    let prefix = sub
+        .speaker
+        .as_ref()
+        .map(|sp| maybe_uppercase(format!("[{}] ", sp), style))
+        .unwrap_or_default();
+    let reserve = if prefix.is_empty() {
+        0.0
+    } else {
+        m.line_advance(&prefix, fs, ls)
+    };
+    let mut lines = wrap_text(&text, fs, ls, region_width(style), reserve, m);
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    if !prefix.is_empty() {
+        lines[0] = format!("{}{}", prefix, lines[0]);
+    }
+    place_lines(&lines, style, m)
+}
+
+/// Per-word runs within a placed line: each word's left edge is the line left
+/// plus the advance of everything before it (measured, so no cumulative drift).
+fn words_in_line(line: &LaidRun, style: &CaptionStyle, m: &Measurer) -> Vec<LaidRun> {
+    let fs = style.font_size.max(0.0);
+    let ls = style.letter_spacing;
+    let mut acc = String::new();
+    let mut out = Vec::new();
+    for w in split_words(&line.text) {
+        let left = if acc.is_empty() {
+            line.left
+        } else {
+            line.left + m.line_advance(&acc, fs, ls) + ls
+        };
+        out.push(LaidRun {
+            left,
+            mid_y: line.mid_y,
+            text: w.clone(),
+        });
+        acc.push_str(&w);
+    }
+    out
+}
+
+/// The laid-out units for a motion type's granularity: whole lines, per-word
+/// runs (flattened across wrapped lines), or one sentence per stacked row.
+fn motion_units(sub: &Subtitle, style: &CaptionStyle, granularity: &str, m: &Measurer) -> Vec<LaidRun> {
+    match granularity {
+        "line" => wrap_and_place(sub, style, m),
+        "sentence" => {
+            let text = maybe_uppercase(sub.text.clone(), style);
+            place_lines(&split_sentences(&text), style, m)
+        }
+        // "word" (default)
+        _ => wrap_and_place(sub, style, m)
+            .iter()
+            .flat_map(|l| words_in_line(l, style, m))
+            .collect(),
+    }
+}
+
+/// slide / staircase as positioned per-unit `\move` events (one Dialogue payload
+/// per unit). Each unit enters from a directional offset with per-unit stagger
+/// and rests at its laid-out position. Empty when the cue has no visible text
+/// (the caller then falls back to the inline whole-line form).
+fn positioned_motion_events(
+    sub: &Subtitle,
+    style: &CaptionStyle,
+    animation: &CaptionAnimation,
+    m: &Measurer,
+) -> Vec<String> {
+    let d = animation.duration_ms.round().max(0.0) as i64;
+    let step = animation.stagger_ms.round().max(0.0) as i64;
+    let off = move_off_v(style);
+    let units = motion_units(sub, style, animation.granularity.as_str(), m);
+    // slide always rises from below; staircase honours direction (up = from top).
+    let from_top = animation.anim_type == "staircase" && animation.direction != "down";
+    units
+        .iter()
+        .filter(|u| !u.text.trim().is_empty())
+        .enumerate()
+        .map(|(i, u)| {
+            let t1 = (i as i64) * step;
+            let t2 = t1 + d;
+            let wx = u.left.round() as i64;
+            let wy = u.mid_y.round() as i64;
+            let sy = if from_top { wy - off } else { wy + off };
+            let esc = escape_braces(&u.text).replace('\n', "\\N");
+            format!(
+                "{{\\an4\\move({},{},{},{},{},{})\\alpha&HFF&\\t({},{},\\alpha&H00&)}}{}",
+                wx, sy, wx, wy, t1, t2, t1, t2, esc
+            )
+        })
+        .collect()
+}
+
+/// Whether this cue+animation should emit positioned per-unit motion events
+/// (instead of the inline whole-line form) — requires a resolved measurer.
+fn wants_positioned_motion(animation: &CaptionAnimation) -> bool {
+    matches!(animation.anim_type.as_str(), "slide" | "staircase")
+}
+
+/// Glyph pool for the `decode` scramble (ASCII only, so libass never has to
+/// substitute a face mid-scramble). Mirrors the preview's DECODE_GLYPHS.
+const DECODE_GLYPHS: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#%&@$*<>/\\";
+/// Milliseconds each scramble glyph is shown before flipping.
+const DECODE_GLYPH_MS: i64 = 45;
+/// Cap on scramble glyph events per character (keeps the .ass bounded).
+const DECODE_MAX_FRAMES: i64 = 8;
+
+/// Per-character runs within a placed line (cumulative advance per char).
+fn chars_in_line(line: &LaidRun, style: &CaptionStyle, m: &Measurer) -> Vec<LaidRun> {
+    let fs = style.font_size.max(0.0);
+    let ls = style.letter_spacing;
+    let mut acc = String::new();
+    let mut out = Vec::new();
+    for ch in line.text.chars() {
+        let left = if acc.is_empty() {
+            line.left
+        } else {
+            line.left + m.line_advance(&acc, fs, ls) + ls
+        };
+        out.push(LaidRun {
+            left,
+            mid_y: line.mid_y,
+            text: ch.to_string(),
+        });
+        acc.push(ch);
+    }
+    out
+}
+
+/// `decode` as positioned per-character events: each printable char cycles a few
+/// random glyphs during its scramble window, then a settled event holds the real
+/// char to the cue end. Left-to-right: char `gi` starts at `gi * staggerMs`.
+/// Returns (start_ms, end_ms, payload) — each glyph frame has its own window, so
+/// these can't share the cue's fixed timing. Deterministic glyphs (hash-keyed by
+/// cue id, char index, frame) mirror the preview. Empty when no visible chars.
+fn positioned_decode_events(
+    sub: &Subtitle,
+    style: &CaptionStyle,
+    animation: &CaptionAnimation,
+    m: &Measurer,
+) -> Vec<(u64, u64, String)> {
+    let step = animation.stagger_ms.round().max(1.0) as i64;
+    let scramble = animation.duration_ms.round().max(0.0) as i64;
+    let n_glyphs = DECODE_GLYPHS.chars().count();
+    let cue_end = sub.end_time;
+    let mut out = Vec::new();
+    let mut gi: i64 = 0; // global char index (spaces/line breaks consume a step)
+    for line in wrap_and_place(sub, style, m) {
+        for cr in chars_in_line(&line, style, m) {
+            let ch = cr.text.chars().next().unwrap_or(' ');
+            if ch.is_whitespace() {
+                gi += 1;
+                continue;
+            }
+            let x = cr.left.round() as i64;
+            let y = cr.mid_y.round() as i64;
+            let start = gi * step;
+            let settle = start + scramble;
+            // Scramble frames spanning the WHOLE window (bounded count): the last
+            // frame holds to `settle` so there's no blank gap before the char
+            // resolves. glyph_ms stretches when the cap would leave a hole.
+            let frames = (scramble / DECODE_GLYPH_MS).clamp(1, DECODE_MAX_FRAMES);
+            let glyph_ms = (scramble / frames).max(1);
+            for f in 0..frames {
+                let fs_ms = start + f * glyph_ms;
+                let fe_ms = if f == frames - 1 { settle } else { start + (f + 1) * glyph_ms };
+                let s = sub.start_time.saturating_add(fs_ms.max(0) as u64);
+                let e = sub.start_time.saturating_add(fe_ms.max(0) as u64).min(cue_end);
+                if e <= s {
+                    break;
+                }
+                let idx = (hash_str(&format!("{}:{}:{}", sub.id, gi, f)) as usize) % n_glyphs.max(1);
+                let g = DECODE_GLYPHS.chars().nth(idx).unwrap_or('#');
+                out.push((s, e, format!("{{\\an4\\pos({},{})}}{}", x, y, escape_braces(&g.to_string()))));
+            }
+            // Settled real character, held to the cue end.
+            let s = sub.start_time.saturating_add(settle.max(0) as u64).min(cue_end);
+            if s < cue_end {
+                out.push((s, cue_end, format!("{{\\an4\\pos({},{})}}{}", x, y, escape_braces(&cr.text))));
+            }
+            gi += 1;
+        }
+        gi += 1; // the line break between wrapped lines consumes a step too
+    }
+    out
+}
+
+/// Per-whitespace-token centisecond durations for karaoke — word timings when
+/// present, else the even cue-duration split — matching `dialogue_text`.
+fn karaoke_token_cs(sub: &Subtitle) -> Vec<i64> {
+    if !sub.words.is_empty() {
+        return sub
+            .words
+            .iter()
+            .map(|w| {
+                (((w.end_time.saturating_sub(w.start_time)) as f64) / 10.0)
+                    .round()
+                    .max(0.0) as i64
+            })
+            .collect();
+    }
+    let toks: Vec<&str> = sub.text.split_whitespace().collect();
+    let n = toks.len() as i64;
+    if n == 0 {
+        return vec![];
+    }
+    let total = (((sub.end_time.saturating_sub(sub.start_time)) as f64) / 10.0)
+        .round()
+        .max(0.0) as i64;
+    let base = total / n;
+    let rem = total % n;
+    (0..n).map(|i| base + if i < rem { 1 } else { 0 }).collect()
+}
+
+/// Per-word highlight boxes for karaoke background/both: a rounded-rect drawing
+/// behind each word in the accent colour, each appearing at that word's sung
+/// time and holding to the cue end. Returns (box_start_ms, drawing_payload).
+fn karaoke_box_events(
+    sub: &Subtitle,
+    style: &CaptionStyle,
+    animation: &CaptionAnimation,
+    m: &Measurer,
+) -> Vec<(u64, String)> {
+    let fs = style.font_size.max(0.0);
+    let ls = style.letter_spacing;
+    let words: Vec<LaidRun> = wrap_and_place(sub, style, m)
+        .iter()
+        .flat_map(|l| words_in_line(l, style, m))
+        .collect();
+    let cs = karaoke_token_cs(sub);
+    if words.is_empty() || cs.is_empty() {
+        return vec![];
+    }
+    let (asc, desc) = m.v_metrics(fs);
+    let box_h = asc + desc;
+    let pad = (fs * 0.12).max(1.0);
+    let ass = hex_to_ass_color(&animation.highlight_color, "22D3EE");
+    let alpha = &ass[2..4];
+    let bgr = &ass[4..];
+    let mut out = Vec::new();
+    let mut acc_ms: u64 = 0;
+    let count = words.len().min(cs.len());
+    for i in 0..count {
+        let w = &words[i];
+        let start_ms = sub.start_time + acc_ms;
+        acc_ms += (cs[i].max(0) as u64) * 10;
+        let trimmed = w.text.trim_end();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let ww = m.line_advance(trimmed, fs, ls);
+        let bw = ww + 2.0 * pad;
+        let bh = box_h + 2.0 * pad;
+        let px = (w.left - pad).round() as i64;
+        let py = (w.mid_y - box_h / 2.0 - pad).round() as i64;
+        let radius = style.background_radius.max(0.0).min(bw.min(bh) / 2.0);
+        let drawing = rounded_rect_drawing(bw, bh, radius);
+        out.push((
+            start_ms,
+            format!(
+                "{{\\an7\\pos({},{})\\bord0\\shad0\\1c&H{}&\\1a&H{}&\\p1}}{}",
+                px, py, bgr, alpha, drawing
+            ),
+        ));
+    }
+    out
+}
+
 /// Escape literal `{` / `}` so ASS renderers show them instead of parsing an
 /// override-tag block. `\{` / `\}` are the conventional literal-brace escapes.
 fn escape_braces(text: &str) -> String {
@@ -979,8 +1651,12 @@ fn style_line(style: &CaptionStyle, animation: &CaptionAnimation) -> String {
 
     // Karaoke uses ASS \k semantics: unsung text is SecondaryColour (the base
     // text colour) and sweeps to PrimaryColour (the highlight) as it's "sung".
-    // Every other type keeps Primary = Secondary = base text colour.
-    let (primary, secondary) = if animation.anim_type == "karaoke" {
+    // In "background" mode the highlight is a per-word box, not a text recolour,
+    // so the fill stays the base colour (Primary = Secondary). Every other type
+    // also keeps Primary = Secondary = base text colour.
+    let karaoke_recolours =
+        animation.anim_type == "karaoke" && animation.karaoke_highlight != "background";
+    let (primary, secondary) = if karaoke_recolours {
         (
             hex_to_ass_color(&animation.highlight_color, "FFFFFF"),
             hex_to_ass_color(&style.text_color, "FFFFFF"),
@@ -1439,17 +2115,156 @@ mod tests {
     }
 
     #[test]
-    fn test_animation_pop() {
+    fn test_animation_scale_per_word_stagger() {
         let subs = vec![make_sub(1, 0, 2000, "hello world")];
+        // Default granularity "word", stagger 40 → word 0 pops 0..400, word 1
+        // pops 40..440, each from scale 0 to 100.
         let anim = CaptionAnimation {
-            anim_type: "pop".to_string(),
+            anim_type: "scale".to_string(),
             duration_ms: 400.0,
             ..CaptionAnimation::default()
         };
         let out = write_ass(&subs, &CaptionStyle::default(), &anim);
         assert!(
-            out.contains(",,{\\fscx0\\fscy0\\t(0,400,\\fscx100\\fscy100)}hello world\n"),
+            out.contains(
+                ",,{\\fscx0\\fscy0\\t(0,400,\\fscx100\\fscy100)}hello \
+                 {\\fscx0\\fscy0\\t(40,440,\\fscx100\\fscy100)}world\n"
+            ),
             "got: {out}"
+        );
+    }
+
+    #[test]
+    fn test_animation_scale_line_granularity_joins_with_newline() {
+        let subs = vec![make_sub(1, 0, 2000, "top\nbottom")];
+        let anim = CaptionAnimation {
+            anim_type: "scale".to_string(),
+            duration_ms: 400.0,
+            granularity: "line".to_string(),
+            ..CaptionAnimation::default()
+        };
+        let out = write_ass(&subs, &CaptionStyle::default(), &anim);
+        // Two line-units, rejoined with \N, staggered by 40 ms.
+        assert!(
+            out.contains(
+                ",,{\\fscx0\\fscy0\\t(0,400,\\fscx100\\fscy100)}top\
+                 \\N{\\fscx0\\fscy0\\t(40,440,\\fscx100\\fscy100)}bottom\n"
+            ),
+            "got: {out}"
+        );
+    }
+
+    #[test]
+    fn test_animation_blur_left_moves_and_deblurs() {
+        let subs = vec![make_sub(1, 0, 2000, "hi")];
+        // blur + direction left → horizontal \move (x - 3·fontSize = 960-144=816)
+        // into place, deblurring over the duration.
+        let anim = CaptionAnimation {
+            anim_type: "blur".to_string(),
+            duration_ms: 400.0,
+            direction: "left".to_string(),
+            ..CaptionAnimation::default()
+        };
+        let out = write_ass(&subs, &CaptionStyle::default(), &anim);
+        assert!(
+            out.contains(",,{\\an2\\move(816,994,960,994,0,400)\\blur24\\t(0,400,\\blur0)}hi\n"),
+            "got: {out}"
+        );
+    }
+
+    #[test]
+    fn test_animation_blurdrop_from_top() {
+        let subs = vec![make_sub(1, 0, 2000, "hi")];
+        // blurDrop "up" (from top): y starts one travel-step above (994-48=946).
+        let anim = CaptionAnimation {
+            anim_type: "blurDrop".to_string(),
+            duration_ms: 400.0,
+            direction: "up".to_string(),
+            ..CaptionAnimation::default()
+        };
+        let out = write_ass(&subs, &CaptionStyle::default(), &anim);
+        assert!(
+            out.contains(",,{\\an2\\move(960,946,960,994,0,400)\\blur24\\t(0,400,\\blur0)}hi\n"),
+            "got: {out}"
+        );
+    }
+
+    #[test]
+    fn test_animation_colorshift_sweeps_to_accent_and_back() {
+        let subs = vec![make_sub(1, 0, 2000, "hi")];
+        // Accent #22D3EE → BGR EED322; base text #FFFFFF → FFFFFF. Sweep to
+        // accent by 200 ms, back to text by 400 ms.
+        let anim = CaptionAnimation {
+            anim_type: "colorShift".to_string(),
+            duration_ms: 400.0,
+            highlight_color: "#22D3EE".to_string(),
+            ..CaptionAnimation::default()
+        };
+        let out = write_ass(&subs, &CaptionStyle::default(), &anim);
+        assert!(
+            out.contains(",,{\\t(0,200,\\1c&HEED322&)\\t(200,400,\\1c&HFFFFFF&)}hi\n"),
+            "got: {out}"
+        );
+    }
+
+    #[test]
+    fn test_animation_decode_positions_chars_left_to_right() {
+        let subs = vec![make_sub(1, 0, 2000, "abc")];
+        // step 40 (default), scramble 300 → char 0 settles at 300 ms, char 1 at
+        // 340, char 2 at 380 (left→right). Rough measurer: "abc" width 72, centred
+        // → 'a' left 924, 'b' 948, 'c' 972; mid_y 970.
+        let anim = CaptionAnimation {
+            anim_type: "decode".to_string(),
+            duration_ms: 300.0,
+            ..CaptionAnimation::default()
+        };
+        let out = write_ass(&subs, &CaptionStyle::default(), &anim);
+        // Each char settles as a positioned event, staggered left→right.
+        assert!(
+            out.contains("Dialogue: 5,0:00:00.30,0:00:02.00,Default,,0,0,0,,{\\an4\\pos(924,970)}a\n"),
+            "char 'a' settles first at its slot; got: {out}"
+        );
+        assert!(
+            out.contains("Dialogue: 5,0:00:00.34,0:00:02.00,Default,,0,0,0,,{\\an4\\pos(948,970)}b\n"),
+            "char 'b' settles later, next slot; got: {out}"
+        );
+        assert!(
+            out.contains("Dialogue: 5,0:00:00.38,0:00:02.00,Default,,0,0,0,,{\\an4\\pos(972,970)}c\n"),
+            "char 'c' settles last; got: {out}"
+        );
+        // The scramble adds several extra timed events at each char's slot.
+        assert!(
+            out.matches("\\an4\\pos(924,970)").count() > 1,
+            "char 'a' should scramble (multiple timed glyph events) before settling; got: {out}"
+        );
+    }
+
+    #[test]
+    fn test_animation_staircase_positions_words_and_cascades() {
+        let subs = vec![make_sub(1, 0, 2000, "a b")];
+        // staircase down (from bottom): each word is its OWN positioned \move
+        // event rising from +off, staggered by 40 ms. Rough measurer (no metrics):
+        // 0.5·em advances → "a b" (3 chars) width 72, centred at x=960 → left 924,
+        // mid_y 965; word "a " left 924, "b" left 972; off=48 → start y 1013.
+        let anim = CaptionAnimation {
+            anim_type: "staircase".to_string(),
+            duration_ms: 400.0,
+            direction: "down".to_string(),
+            granularity: "word".to_string(),
+            ..CaptionAnimation::default()
+        };
+        let out = write_ass(&subs, &CaptionStyle::default(), &anim);
+        assert!(
+            out.contains(
+                ",,{\\an4\\move(924,1018,924,970,0,400)\\alpha&HFF&\\t(0,400,\\alpha&H00&)}a \n"
+            ),
+            "word 0 positioned event; got: {out}"
+        );
+        assert!(
+            out.contains(
+                ",,{\\an4\\move(972,1018,972,970,40,440)\\alpha&HFF&\\t(40,440,\\alpha&H00&)}b\n"
+            ),
+            "word 1 positioned event; got: {out}"
         );
     }
 
@@ -1604,10 +2419,10 @@ mod tests {
     }
 
     #[test]
-    fn test_animation_slide() {
-        // Default style: box 2, width 62, marginV 8%, fontSize 48.
-        // x = 960 (center), y = 1080 - round(1080*0.08=86) = 994,
-        // off = 48 → y1 = 1042, an = 2.
+    fn test_animation_slide_positions_words() {
+        // slide = per-word positioned \move events rising from +off (48), staggered
+        // by 40 ms. Rough measurer: "hello world" (11 chars) width 264, centred at
+        // x=960 → left 828, mid_y 970; "hello " left 828, "world" left 972.
         let subs = vec![make_sub(1, 0, 2000, "hello world")];
         let anim = CaptionAnimation {
             anim_type: "slide".to_string(),
@@ -1616,8 +2431,16 @@ mod tests {
         };
         let out = write_ass(&subs, &CaptionStyle::default(), &anim);
         assert!(
-            out.contains(",,{\\an2\\move(960,1042,960,994,0,400)}hello world\n"),
-            "got: {out}"
+            out.contains(
+                ",,{\\an4\\move(828,1018,828,970,0,400)\\alpha&HFF&\\t(0,400,\\alpha&H00&)}hello \n"
+            ),
+            "word 0; got: {out}"
+        );
+        assert!(
+            out.contains(
+                ",,{\\an4\\move(972,1018,972,970,40,440)\\alpha&HFF&\\t(40,440,\\alpha&H00&)}world\n"
+            ),
+            "word 1; got: {out}"
         );
     }
 
@@ -1693,18 +2516,70 @@ mod tests {
             ..CaptionAnimation::default()
         };
         let out = write_ass(&subs, &CaptionStyle::default(), &anim);
+        // Positioned per-word events still carry the box margins on each line.
         assert!(
-            out.contains("Default,,365,365,86,,{\\an2\\move("),
+            out.contains("Default,,365,365,86,,{\\an4\\move("),
             "slide should carry box margins on the event; got: {out}"
         );
 
-        // Non-slide types keep 0,0,0 (inherit Style margins) — unchanged.
+        // Non-move types keep 0,0,0 (inherit Style margins). scale is per-unit
+        // \fscx with no \move, so it stays on the inherited margins.
         let anim = CaptionAnimation {
-            anim_type: "pop".to_string(),
+            anim_type: "scale".to_string(),
             ..CaptionAnimation::default()
         };
         let out = write_ass(&subs, &CaptionStyle::default(), &anim);
         assert!(out.contains("Default,,0,0,0,,{\\fscx0"), "got: {out}");
+    }
+
+    #[test]
+    fn test_karaoke_background_emits_per_word_boxes() {
+        let mut sub = make_sub(1, 0, 1000, "hi there");
+        sub.words = vec![
+            crate::subtitle::types::Word { text: "hi".to_string(), start_time: 0, end_time: 300 },
+            crate::subtitle::types::Word { text: "there".to_string(), start_time: 300, end_time: 1000 },
+        ];
+        let anim = CaptionAnimation {
+            anim_type: "karaoke".to_string(),
+            karaoke_highlight: "background".to_string(),
+            highlight_color: "#22D3EE".to_string(),
+            ..CaptionAnimation::default()
+        };
+        let out = write_ass(&[sub], &CaptionStyle::default(), &anim);
+
+        // background mode → caption text stays plain (no \k sweep) and the Style
+        // keeps Primary = Secondary = base text colour (no fill recolour).
+        assert!(out.contains(",,hi there\n"), "text should be plain; got: {out}");
+        assert!(!out.contains("{\\k"), "background mode must not emit \\k; got: {out}");
+        let line = style_line(&CaptionStyle::default(), &anim);
+        assert!(line.contains(",&H00FFFFFF,&H00FFFFFF,"), "no fill recolour; got: {line}");
+
+        // Two behind-layer accent boxes (Rough measurer: "hi there" width 192,
+        // centred → left 864; "hi " left 864, "there" left 936; mid_y 970).
+        assert_eq!(out.matches("\\p1}m ").count(), 2, "one box per word; got: {out}");
+        // Box 0 appears at the cue start; box 1 when "there" is sung (300 ms).
+        assert!(
+            out.contains("Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,{\\an7\\pos(858,940)\\bord0\\shad0\\1c&HEED322&\\1a&H00&\\p1}m "),
+            "box 0 at word 0 position/time; got: {out}"
+        );
+        assert!(
+            out.contains("Dialogue: 0,0:00:00.30,0:00:01.00,Default,,0,0,0,,{\\an7\\pos(930,940)"),
+            "box 1 appears at 'there' sung time; got: {out}"
+        );
+    }
+
+    #[test]
+    fn test_karaoke_both_keeps_k_sweep_and_boxes() {
+        let subs = vec![make_sub(1, 0, 1000, "hi there")];
+        let anim = CaptionAnimation {
+            anim_type: "karaoke".to_string(),
+            karaoke_highlight: "both".to_string(),
+            ..CaptionAnimation::default()
+        };
+        let out = write_ass(&subs, &CaptionStyle::default(), &anim);
+        // both → \k fill sweep (text recolours) AND per-word boxes.
+        assert!(out.contains("{\\k"), "both mode keeps \\k sweep; got: {out}");
+        assert_eq!(out.matches("\\p1}m ").count(), 2, "both mode still draws boxes; got: {out}");
     }
 
     #[test]

@@ -1,6 +1,14 @@
 import type {
+  AnimationDirection,
+  AnimationGranularity,
   CaptionAnimation,
   CaptionAnimationType,
+  KaraokeHighlight,
+} from "../types/captionStyle";
+import {
+  ANIMATION_DIRECTION_OPTIONS,
+  ANIMATION_GRANULARITY_OPTIONS,
+  KARAOKE_HIGHLIGHT_OPTIONS,
 } from "../types/captionStyle";
 import type { Subtitle } from "../types/subtitle";
 import { normalizeHexColor } from "./caption-style";
@@ -9,9 +17,13 @@ export const DEFAULT_CAPTION_ANIMATION: CaptionAnimation = {
   type: "none",
   durationMs: 400,
   highlightColor: "#22D3EEFF",
+  granularity: "word",
+  direction: "in",
+  staggerMs: 40,
+  karaokeHighlight: "text",
 };
 
-export type NumericAnimationField = "durationMs";
+export type NumericAnimationField = "durationMs" | "staggerMs";
 
 // Slider ranges — single source of truth for the Animations tab UI.
 export const ANIMATION_LIMITS: Record<
@@ -19,19 +31,37 @@ export const ANIMATION_LIMITS: Record<
   { min: number; max: number; step: number }
 > = {
   durationMs: { min: 0, max: 2000, step: 50 },
+  staggerMs: { min: 0, max: 200, step: 5 },
 };
 
 export const ANIMATION_TYPES: readonly CaptionAnimationType[] = [
   "none",
   "fade",
-  "slide",
-  "pop",
+  "scale",
   "typewriter",
-  "karaoke",
+  "decode",
+  "slide",
   "blur",
+  "colorShift",
+  "blurDrop",
+  "staircase",
+  "karaoke",
 ];
 
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
+
+// Clamp a persisted enum value into the type's allowed menu. When the menu is
+// empty the field is ignored downstream, so it is normalised to the default.
+function clampChoice<T extends string>(
+  raw: unknown,
+  options: readonly T[],
+  fallback: T,
+): T {
+  if (options.length === 0) return fallback;
+  return typeof raw === "string" && (options as readonly string[]).includes(raw)
+    ? (raw as T)
+    : options[0];
+}
 
 /** Rebuild a full CaptionAnimation from untrusted persisted data, mirroring
  *  sanitizeCaptionStyle: missing fields fall back to defaults per the
@@ -44,6 +74,8 @@ export function sanitizeCaptionAnimation(persisted: unknown): CaptionAnimation {
       : {};
   const anim: CaptionAnimation = { ...DEFAULT_CAPTION_ANIMATION, ...raw };
 
+  // Legacy "pop" (removed) is subsumed by "scale" — migrate rather than drop.
+  if ((anim.type as string) === "pop") anim.type = "scale";
   if (!ANIMATION_TYPES.includes(anim.type)) {
     anim.type = DEFAULT_CAPTION_ANIMATION.type;
   }
@@ -61,6 +93,23 @@ export function sanitizeCaptionAnimation(persisted: unknown): CaptionAnimation {
     /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(anim.highlightColor)
       ? normalizeHexColor(anim.highlightColor)
       : DEFAULT_CAPTION_ANIMATION.highlightColor;
+
+  // Clamp sub-options into the menu their type exposes (empty menu → default).
+  anim.granularity = clampChoice<AnimationGranularity>(
+    anim.granularity,
+    ANIMATION_GRANULARITY_OPTIONS[anim.type],
+    DEFAULT_CAPTION_ANIMATION.granularity,
+  );
+  anim.direction = clampChoice<AnimationDirection>(
+    anim.direction,
+    ANIMATION_DIRECTION_OPTIONS[anim.type],
+    DEFAULT_CAPTION_ANIMATION.direction,
+  );
+  anim.karaokeHighlight = clampChoice<KaraokeHighlight>(
+    anim.karaokeHighlight,
+    anim.type === "karaoke" ? KARAOKE_HIGHLIGHT_OPTIONS : [],
+    DEFAULT_CAPTION_ANIMATION.karaokeHighlight,
+  );
 
   return anim;
 }
