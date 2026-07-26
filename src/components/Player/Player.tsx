@@ -9,7 +9,11 @@ import { formatDuration } from "../../lib/time-format";
 import { captionBoxCss, captionTextCss, hexToCssColor, pointerToBoxPlacement, pointerToWidthPct } from "../../lib/caption-style";
 import { karaokeSegments } from "../../lib/caption-animation";
 import { COLORS, FONTS } from "../../lib/ui";
-import type { CaptionAnimation, CaptionStyle } from "../../types/captionStyle";
+import type {
+  AnimationGranularity,
+  CaptionAnimation,
+  CaptionStyle,
+} from "../../types/captionStyle";
 import type { Subtitle } from "../../types/subtitle";
 
 /**
@@ -420,18 +424,62 @@ export default function Player() {
   );
 }
 
-// slide/pop/blur map to a one-shot entrance keyframe; fade/typewriter/karaoke
-// are JS-driven off nowMs so they track scrubbing, not just mount.
-const ENTRANCE_KEYFRAME: Record<"slide" | "pop" | "blur", string> = {
-  slide: "captionSlideUp",
-  pop: "captionPop",
-  blur: "captionBlurIn",
+// Whole-line entrance keyframes for blur (by direction) and blurDrop. Per-unit
+// types (scale/slide/staircase) pick their keyframe in AnimatedCaption. All are
+// one-shot mount animations (`both` fill), keyed by cue id so they restart per
+// cue; fade/typewriter/decode/karaoke are JS-driven off nowMs so they track
+// scrubbing.
+const BLUR_KEYFRAME: Record<string, string> = {
+  in: "captionBlurIn",
+  left: "captionBlurLeft",
+  right: "captionBlurRight",
+};
+const BLURDROP_KEYFRAME: Record<string, string> = {
+  up: "captionBlurDropTop", // origin top → drops down into place
+  down: "captionBlurDropBottom", // origin bottom → rises up
+};
+const STAIRCASE_KEYFRAME: Record<string, string> = {
+  up: "captionStairFromTop",
+  down: "captionStairFromBottom",
 };
 
-/** Animation-aware caption span. Honestly previews what fade/karaoke export
- *  and animates the four preview-only types; `sub === null` is the positioning
- *  sample, which renders plain (animation ignored). Mounted with a cue-id key
- *  so entrance keyframes restart per cue. */
+/** Split a cue's text into the units that animate as one step. Word/sentence
+ *  tokens keep trailing whitespace so inter-word spacing survives inline-block
+ *  layout; line splits on the embedded \n the preview already honours. */
+function splitUnits(text: string, granularity: AnimationGranularity): string[] {
+  switch (granularity) {
+    case "char":
+      return [...text];
+    case "line":
+      return text.split("\n");
+    case "sentence":
+      return text.match(/[^.!?]+[.!?]*\s*/g) ?? [text];
+    case "word":
+    default:
+      return text.match(/\S+\s*/g) ?? [text];
+  }
+}
+
+// Stable per-cue reveal order for `decode`: hash (cue id, char index) so the
+// scramble is deterministic across the 60fps re-renders and seeks.
+function hashStr(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+// Glyph pool + flip cadence for the `decode` scramble. hashStr keyed by
+// (cue id, char index, frame) makes the shown glyph a deterministic function of
+// the playhead, so it animates over time yet stays stable across re-renders.
+const DECODE_GLYPHS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#%&@$*<>/\\";
+const DECODE_GLYPH_MS = 45;
+
+/** Animation-aware caption span. Mirrors what the ASS export burns into the MP4
+ *  (the CSS follows the ASS, never the reverse). `sub === null` is the
+ *  positioning sample, which renders plain. Mounted with a cue-id key so
+ *  entrance keyframes restart per cue. */
 function AnimatedCaption({
   style,
   animation,
@@ -468,10 +516,6 @@ function AnimatedCaption({
     const fadingOut = remaining < animation.durationMs;
     const spanStyle: React.CSSProperties = {
       ...base,
-      // fade-in: one-shot mount animation with NO fill, so when it ends opacity
-      // falls back to the inline value. fade-out opacity is computed per frame
-      // from the playhead (not a CSS transition) so it tracks seeks/pauses and
-      // still shows for cues shorter than durationMs.
       animationName: fadingOut ? undefined : "captionFadeIn",
       animationDuration: fadingOut ? undefined : `${animation.durationMs}ms`,
       animationTimingFunction: "linear",
@@ -480,17 +524,56 @@ function AnimatedCaption({
     return <span style={spanStyle}>{sub.text}</span>;
   }
 
-  if (type === "slide" || type === "pop" || type === "blur") {
+  // Whole-line entrance keyframes (no per-unit split): blur, blurDrop, colorShift.
+  if (type === "blur" || type === "blurDrop" || type === "colorShift") {
+    const keyframe =
+      type === "blur"
+        ? BLUR_KEYFRAME[animation.direction] ?? "captionBlurIn"
+        : type === "blurDrop"
+          ? BLURDROP_KEYFRAME[animation.direction] ?? "captionBlurDropTop"
+          : "captionColorShift";
     return (
       <span
         style={{
           ...base,
-          // Fixed ease-out: the export's ASS \t transitions are linear anyway,
-          // so a per-style easing knob was preview-only and has been removed.
-          animation: `${ENTRANCE_KEYFRAME[type]} ${animation.durationMs}ms ease-out both`,
+          animation: `${keyframe} ${animation.durationMs}ms ease-out both`,
+          // colorShift sweeps toward the chosen accent colour (read by the
+          // keyframe as --kf-accent), then settles back to textColor.
+          ...(type === "colorShift"
+            ? ({ "--kf-accent": hexToCssColor(animation.highlightColor) } as React.CSSProperties)
+            : {}),
         }}
       >
         {sub.text}
+      </span>
+    );
+  }
+
+  // Per-unit staggered entrance: scale, slide, staircase.
+  if (type === "scale" || type === "slide" || type === "staircase") {
+    const keyframe =
+      type === "scale"
+        ? "captionScaleIn"
+        : type === "slide"
+          ? "captionSlideUp"
+          : STAIRCASE_KEYFRAME[animation.direction] ?? "captionStairFromTop";
+    const units = splitUnits(sub.text, animation.granularity);
+    const asBlock = animation.granularity === "line";
+    return (
+      <span style={base}>
+        {units.map((u, i) => (
+          <span
+            key={i}
+            style={{
+              display: asBlock ? "block" : "inline-block",
+              whiteSpace: "pre",
+              animation: `${keyframe} ${animation.durationMs}ms ease-out both`,
+              animationDelay: `${i * animation.staggerMs}ms`,
+            }}
+          >
+            {u}
+          </span>
+        ))}
       </span>
     );
   }
@@ -503,16 +586,73 @@ function AnimatedCaption({
     return <span style={base}>{sub.text.slice(0, Math.max(0, chars))}</span>;
   }
 
-  if (type === "karaoke") {
-    // Per-word spans override only color; the wrapper keeps the single
-    // captionTextCss textShadow (don't stack it per span).
+  if (type === "decode") {
+    // Left-to-right "matrix decode": each character cycles random glyphs during
+    // its scramble window, then settles to the real character. staggerMs = how
+    // fast the decode wave moves left→right; durationMs = scramble length per
+    // character. Character i starts scrambling at startMs, settles at settleMs.
+    const chars = [...sub.text];
+    const step = Math.max(animation.staggerMs, 1);
+    const scramble = Math.max(animation.durationMs, 1);
     return (
       <span style={base}>
-        {karaokeSegments(sub, nowMs).map((seg, i) => (
-          <span key={i} style={{ color: hexToCssColor(seg.sung ? animation.highlightColor : style.textColor) }}>
-            {seg.text}
-          </span>
-        ))}
+        {chars.map((c, i) => {
+          if (c === "\n") return <br key={i} />;
+          if (c === " ") return <span key={i}> </span>;
+          const startMs = sub.startTime + i * step;
+          const settleMs = startMs + scramble;
+          let shown = c;
+          if (nowMs < startMs) shown = ""; // not reached yet
+          else if (nowMs < settleMs) {
+            const frame = Math.floor((nowMs - startMs) / DECODE_GLYPH_MS);
+            shown = DECODE_GLYPHS[hashStr(`${sub.id}:${i}:${frame}`) % DECODE_GLYPHS.length];
+          }
+          return (
+            <span key={i} style={{ display: "inline-block" }}>
+              {shown}
+            </span>
+          );
+        })}
+      </span>
+    );
+  }
+
+  if (type === "karaoke") {
+    // Per-word spans override colour and/or draw a highlight box (box-shadow
+    // spread, so toggling it never reflows the line). The wrapper keeps the
+    // single captionTextCss textShadow.
+    const mode = animation.karaokeHighlight;
+    const textColor = hexToCssColor(style.textColor);
+    const hl = hexToCssColor(animation.highlightColor);
+    // 8-digit-normalised highlight → ~40% alpha for the "both" box.
+    const hlDim = hexToCssColor(`${animation.highlightColor.slice(0, 7)}66`);
+    return (
+      <span style={base}>
+        {karaokeSegments(sub, nowMs).map((seg, i) => {
+          let color = textColor;
+          let boxColor: string | undefined;
+          if (seg.sung) {
+            if (mode === "text") color = hl;
+            else if (mode === "background") boxColor = hl;
+            else {
+              color = hl;
+              boxColor = hlDim;
+            }
+          }
+          return (
+            <span
+              key={i}
+              style={{
+                color,
+                backgroundColor: boxColor,
+                boxShadow: boxColor ? `0 0 0 0.1em ${boxColor}` : undefined,
+                borderRadius: boxColor ? "0.15em" : undefined,
+              }}
+            >
+              {seg.text}
+            </span>
+          );
+        })}
       </span>
     );
   }

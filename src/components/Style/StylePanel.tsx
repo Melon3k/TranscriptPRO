@@ -18,9 +18,19 @@ import {
 } from "../../lib/caption-animation";
 import { BUILTIN_PRESETS, uniquePresetName } from "../../lib/caption-presets";
 import { useNotifyStore } from "../../stores/notifyStore";
+import {
+  ANIMATION_DIRECTION_OPTIONS,
+  ANIMATION_GRANULARITY_OPTIONS,
+  KARAOKE_HIGHLIGHT_OPTIONS,
+  STAGGERED_ANIMATIONS,
+} from "../../types/captionStyle";
 import type {
+  AnimationDirection,
+  AnimationGranularity,
   CaptionAlign,
+  CaptionAnimationType,
   CaptionStyle,
+  KaraokeHighlight,
 } from "../../types/captionStyle";
 
 type StyleTab = "inspector" | "anim" | "effects";
@@ -296,6 +306,25 @@ function Animations({ t }: { t: TFn }) {
   const setAnimation = useStyleStore((s) => s.setAnimation);
 
   const type = animation.type;
+  const granularityOpts = ANIMATION_GRANULARITY_OPTIONS[type];
+  const directionOpts = ANIMATION_DIRECTION_OPTIONS[type];
+
+  // Switching type resets any sub-option that the new type doesn't expose (or
+  // whose current value isn't in its menu) to that menu's default, mirroring
+  // the sanitizer so preview/export always read a valid combination.
+  const selectType = (at: CaptionAnimationType) => {
+    const gOpts = ANIMATION_GRANULARITY_OPTIONS[at];
+    const dOpts = ANIMATION_DIRECTION_OPTIONS[at];
+    setAnimation({
+      type: at,
+      ...(gOpts.length && !gOpts.includes(animation.granularity)
+        ? { granularity: gOpts[0] }
+        : {}),
+      ...(dOpts.length && !dOpts.includes(animation.direction)
+        ? { direction: dOpts[0] }
+        : {}),
+    });
+  };
 
   return (
     <>
@@ -309,7 +338,7 @@ function Animations({ t }: { t: TFn }) {
           return (
             <button
               key={at}
-              onClick={() => setAnimation({ type: at })}
+              onClick={() => selectType(at)}
               aria-pressed={active}
               style={{
                 position: "relative",
@@ -349,10 +378,94 @@ function Animations({ t }: { t: TFn }) {
       {type !== "none" && type !== "karaoke" && (
         <AnimSlider label={t("style:anim.duration")} field="durationMs" value={animation.durationMs} onChange={(v) => setAnimation({ durationMs: v })} unit=" ms" />
       )}
+
+      {/* Granularity / direction menus appear only for types that expose them
+          (single source of truth: ANIMATION_*_OPTIONS). */}
+      {granularityOpts.length > 0 && (
+        <AnimChoice<AnimationGranularity>
+          label={t("style:anim.granularity.label")}
+          value={animation.granularity}
+          options={granularityOpts}
+          labelFor={(o) => t(`style:anim.granularity.${o}`)}
+          onChange={(v) => setAnimation({ granularity: v })}
+        />
+      )}
+      {directionOpts.length > 0 && (
+        <AnimChoice<AnimationDirection>
+          label={t("style:anim.direction.label")}
+          value={animation.direction}
+          options={directionOpts}
+          labelFor={(o) => t(`style:anim.direction.${o}`)}
+          onChange={(v) => setAnimation({ direction: v })}
+        />
+      )}
+
+      {/* Per-unit stagger only matters for the staggered entrance types. */}
+      {STAGGERED_ANIMATIONS.has(type) && (
+        <AnimSlider label={t("style:anim.stagger")} field="staggerMs" value={animation.staggerMs} onChange={(v) => setAnimation({ staggerMs: v })} unit=" ms" />
+      )}
+
       {type === "karaoke" && (
+        <AnimChoice<KaraokeHighlight>
+          label={t("style:anim.karaokeHighlight.label")}
+          value={animation.karaokeHighlight}
+          options={KARAOKE_HIGHLIGHT_OPTIONS}
+          labelFor={(o) => t(`style:anim.karaokeHighlight.${o}`)}
+          onChange={(v) => setAnimation({ karaokeHighlight: v })}
+        />
+      )}
+
+      {/* The accent colour feeds karaoke's \k sung colour and colorShift's sweep. */}
+      {(type === "karaoke" || type === "colorShift") && (
         <ColorField label={t("style:anim.highlightColor")} value={animation.highlightColor} onChange={(v) => setAnimation({ highlightColor: v })} badge={t("style:anim.exported")} />
       )}
     </>
+  );
+}
+
+/** Segmented control for an animation sub-option (granularity / direction /
+ *  karaoke highlight). Rendered only when its option list is non-empty. */
+function AnimChoice<T extends string>({
+  label,
+  value,
+  options,
+  labelFor,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: readonly T[];
+  labelFor: (o: T) => string;
+  onChange: (v: T) => void;
+}) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ ...f(400, 10, "body", { color: "var(--c-text2)" }), marginBottom: 6 }}>{label}</div>
+      <div style={{ display: "flex", gap: 6 }}>
+        {options.map((opt) => {
+          const on = opt === value;
+          return (
+            <button
+              key={opt}
+              onClick={() => onChange(opt)}
+              aria-pressed={on}
+              style={{
+                flex: 1,
+                padding: "6px 4px",
+                borderRadius: 6,
+                cursor: "pointer",
+                border: `1px solid ${on ? COLORS.violet : "var(--c-border)"}`,
+                background: on ? `${COLORS.violet}22` : "var(--c-panel)",
+                color: on ? COLORS.violetLight : "var(--c-text)",
+                ...f(600, 10),
+              }}
+            >
+              {labelFor(opt)}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

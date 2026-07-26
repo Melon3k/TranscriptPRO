@@ -797,16 +797,42 @@ mod burn_smoke {
         copy_bundled_fonts(&dir);
 
         let subs = vec![sub(1, 0, 900, "Multi word żółć line")];
-        for anim_type in ["none", "fade", "slide", "pop", "typewriter", "karaoke", "blur"] {
+        // (label, type, granularity, direction, karaokeHighlight) covering the
+        // full new set plus the granularity/direction/highlight variants, so
+        // libass is exercised on every override-tag shape the serializer emits —
+        // including the positioned per-word \move events and karaoke box drawings.
+        let cases: [(&str, &str, &str, &str, &str); 17] = [
+            ("none", "none", "word", "in", "text"),
+            ("fade", "fade", "word", "in", "text"),
+            ("scale_word", "scale", "word", "in", "text"),
+            ("scale_line", "scale", "line", "in", "text"),
+            ("typewriter", "typewriter", "char", "in", "text"),
+            ("decode", "decode", "char", "in", "text"),
+            ("slide_word", "slide", "word", "in", "text"),
+            ("slide_line", "slide", "line", "in", "text"),
+            ("blur_in", "blur", "word", "in", "text"),
+            ("blur_left", "blur", "word", "left", "text"),
+            ("colorshift", "colorShift", "word", "in", "text"),
+            ("blurdrop_up", "blurDrop", "word", "up", "text"),
+            ("staircase_word", "staircase", "word", "down", "text"),
+            ("staircase_sentence", "staircase", "sentence", "up", "text"),
+            ("karaoke_text", "karaoke", "word", "in", "text"),
+            ("karaoke_background", "karaoke", "word", "in", "background"),
+            ("karaoke_both", "karaoke", "word", "in", "both"),
+        ];
+        for (label, anim_type, granularity, direction, highlight) in cases {
             let anim = CaptionAnimation {
                 anim_type: anim_type.to_string(),
+                granularity: granularity.to_string(),
+                direction: direction.to_string(),
+                karaoke_highlight: highlight.to_string(),
                 ..CaptionAnimation::default()
             };
             let ass = crate::subtitle::ass::write_ass(&subs, &CaptionStyle::default(), &anim);
-            let ass_name = format!("anim_{anim_type}.ass");
+            let ass_name = format!("anim_{label}.ass");
             std::fs::write(dir.join(&ass_name), &ass).unwrap();
 
-            let out_name = format!("out_{anim_type}.mp4");
+            let out_name = format!("out_{label}.mp4");
             let out = dir.join(&out_name);
             let out_str = out.to_string_lossy().to_string();
             let vf = format!("ass={ass_name}:fontsdir=.");
@@ -818,9 +844,9 @@ mod burn_smoke {
                     "-preset", "veryfast", "-crf", "18", "-c:a", "aac", "-f", "mp4", &out_str,
                 ],
             );
-            assert!(ok, "animation '{anim_type}' failed to burn (libass rejected its ASS):\n{err}");
+            assert!(ok, "animation '{label}' failed to burn (libass rejected its ASS):\n{err}");
             let size = std::fs::metadata(&out).map(|m| m.len()).unwrap_or(0);
-            assert!(size > 1024, "animation '{anim_type}' produced a too-small MP4 ({size} bytes)");
+            assert!(size > 1024, "animation '{label}' produced a too-small MP4 ({size} bytes)");
         }
     }
 }

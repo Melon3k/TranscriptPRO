@@ -27,10 +27,14 @@ describe("animation constants", () => {
   it("all types except none export to ASS", () => {
     expect([...EXPORTED_ANIMATIONS].sort()).toEqual([
       "blur",
+      "blurDrop",
+      "colorShift",
+      "decode",
       "fade",
       "karaoke",
-      "pop",
+      "scale",
       "slide",
+      "staircase",
       "typewriter",
     ]);
   });
@@ -50,8 +54,52 @@ describe("sanitizeCaptionAnimation", () => {
       type: "karaoke" as const,
       durationMs: 600,
       highlightColor: "#FACC15FF",
+      granularity: "word" as const,
+      direction: "in" as const,
+      staggerMs: 40,
+      karaokeHighlight: "both" as const,
     };
     expect(sanitizeCaptionAnimation(persisted)).toEqual(persisted);
+  });
+
+  it("legacy 'pop' migrates to 'scale'", () => {
+    expect(sanitizeCaptionAnimation({ type: "pop" } as never).type).toBe("scale");
+  });
+
+  it("clamps sub-options into the menu their type exposes", () => {
+    // scale exposes granularity word|line but no direction → direction normalises
+    // to the default, an out-of-menu granularity snaps to the first allowed.
+    const scale = sanitizeCaptionAnimation({
+      type: "scale",
+      granularity: "char",
+      direction: "left",
+    } as never);
+    expect(scale.granularity).toBe("word");
+    expect(scale.direction).toBe("in");
+
+    // blur exposes direction in|left|right but no granularity.
+    const blur = sanitizeCaptionAnimation({ type: "blur", direction: "right" });
+    expect(blur.direction).toBe("right");
+    expect(blur.granularity).toBe("word");
+
+    // karaokeHighlight is only honoured for karaoke.
+    expect(
+      sanitizeCaptionAnimation({ type: "scale", karaokeHighlight: "both" } as never)
+        .karaokeHighlight,
+    ).toBe("text");
+    expect(
+      sanitizeCaptionAnimation({ type: "karaoke", karaokeHighlight: "background" })
+        .karaokeHighlight,
+    ).toBe("background");
+  });
+
+  it("out-of-range staggerMs clamps to the limits", () => {
+    expect(sanitizeCaptionAnimation({ staggerMs: 9000 }).staggerMs).toBe(
+      ANIMATION_LIMITS.staggerMs.max,
+    );
+    expect(sanitizeCaptionAnimation({ staggerMs: -5 }).staggerMs).toBe(
+      ANIMATION_LIMITS.staggerMs.min,
+    );
   });
 
   it("legacy preview-only keys (perWordDelayMs/easing) don't break sanitize", () => {

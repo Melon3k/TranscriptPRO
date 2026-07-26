@@ -112,25 +112,38 @@ impl Default for CaptionStyle {
 /// names (camelCase over IPC) and defaults in sync on both sides.
 ///
 /// Every type except `none` is exported to ASS override tags by
-/// `ass::dialogue_text`: `fade`→`\fad`, `karaoke`→`\k` + Primary/Secondary
-/// colour split, `pop`→`\fscx/\fscy \t`, `blur`→`\blur \t`, `slide`→`\move`,
-/// `typewriter`→ per-char `\alpha \t`. (Per-word stagger and CSS easing were
-/// preview-only — ASS `\t`/`\fad` transitions are linear — and have been
-/// removed so the UI only exposes what exports.)
+/// `ass::dialogue_text`: `fade`→`\fad`, `scale`→`\fscx/\fscy \t`,
+/// `slide`→`\move`, `blur`→`\blur \t`, `blurDrop`→`\move`+`\blur \t`,
+/// `colorShift`→`\t \1c`, `typewriter`/`decode`→ per-char `\alpha \t`,
+/// `staircase`→ per-unit positioned `\move`, `karaoke`→`\k`. The animation
+/// reaches the MP4 ONLY through these tags (MP4 = libass burn-in of this ASS).
 ///
-/// Container-level `#[serde(default)]` gives forward/backward compat, matching
-/// `CaptionStyle`.
+/// `granularity`/`direction`/`staggerMs`/`karaokeHighlight` mirror the gallery
+/// sub-options; the frontend sanitiser clamps them per type before they cross
+/// IPC, so the serializer can read them directly. Container-level
+/// `#[serde(default)]` gives forward/backward compat, matching `CaptionStyle`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct CaptionAnimation {
-    /// "none" | "fade" | "slide" | "pop" | "typewriter" | "karaoke" | "blur".
+    /// "none" | "fade" | "scale" | "typewriter" | "decode" | "slide" | "blur"
+    /// | "colorShift" | "blurDrop" | "staircase" | "karaoke".
     /// `type` is a Rust keyword → field renamed, serde maps it to "type".
     #[serde(rename = "type")]
     pub anim_type: String,
-    /// Fade in+out length / entrance length, in ms.
+    /// Fade in+out length / per-unit entrance length, in ms.
     pub duration_ms: f64,
-    /// "#RRGGBB" — karaoke sung-word colour → ASS PrimaryColour.
+    /// "#RRGGBB[AA]" — karaoke sung-word colour / colorShift accent → ASS colours.
     pub highlight_color: String,
+    /// Unit that animates as one step: "char" | "word" | "line" | "sentence".
+    /// Only read where the type exposes granularity (scale, slide, staircase).
+    pub granularity: String,
+    /// Entrance origin edge: "in" (no translation) | "up" | "down" | "left" | "right".
+    /// Only read where the type exposes direction (blur, blurDrop, staircase).
+    pub direction: String,
+    /// Delay step between units, in ms (gallery delayStep).
+    pub stagger_ms: f64,
+    /// Karaoke highlight target: "text" | "background" | "both".
+    pub karaoke_highlight: String,
 }
 
 impl Default for CaptionAnimation {
@@ -140,6 +153,10 @@ impl Default for CaptionAnimation {
             anim_type: "none".to_string(),
             duration_ms: 400.0,
             highlight_color: "#22D3EE".to_string(),
+            granularity: "word".to_string(),
+            direction: "in".to_string(),
+            stagger_ms: 40.0,
+            karaoke_highlight: "text".to_string(),
         }
     }
 }
@@ -224,6 +241,10 @@ mod tests {
         assert_eq!(a.anim_type, "none");
         assert_eq!(a.duration_ms, 400.0);
         assert_eq!(a.highlight_color, "#22D3EE");
+        assert_eq!(a.granularity, "word");
+        assert_eq!(a.direction, "in");
+        assert_eq!(a.stagger_ms, 40.0);
+        assert_eq!(a.karaoke_highlight, "text");
     }
 
     #[test]
@@ -234,6 +255,11 @@ mod tests {
         assert_eq!(a.anim_type, "karaoke");
         assert_eq!(a.duration_ms, 600.0);
         assert_eq!(a.highlight_color, "#22D3EE");
+        // New sub-option fields omitted by an older frontend fall back to defaults.
+        assert_eq!(a.granularity, "word");
+        assert_eq!(a.direction, "in");
+        assert_eq!(a.stagger_ms, 40.0);
+        assert_eq!(a.karaoke_highlight, "text");
         // A legacy payload with the removed preview-only keys still loads
         // (serde ignores unknown fields under the container `default`).
         let legacy: CaptionAnimation = serde_json::from_str(
@@ -241,6 +267,20 @@ mod tests {
         )
         .unwrap();
         assert_eq!(legacy.anim_type, "fade");
+    }
+
+    #[test]
+    fn test_animation_serde_reads_new_sub_options() {
+        // camelCase over IPC → snake_case fields.
+        let a: CaptionAnimation = serde_json::from_str(
+            r#"{"type":"staircase","granularity":"sentence","direction":"down","staggerMs":80,"karaokeHighlight":"both"}"#,
+        )
+        .unwrap();
+        assert_eq!(a.anim_type, "staircase");
+        assert_eq!(a.granularity, "sentence");
+        assert_eq!(a.direction, "down");
+        assert_eq!(a.stagger_ms, 80.0);
+        assert_eq!(a.karaoke_highlight, "both");
     }
 
     #[test]
