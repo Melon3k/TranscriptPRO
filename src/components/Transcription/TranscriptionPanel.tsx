@@ -39,7 +39,7 @@ export default function TranscriptionPanel({ audioPath, extracting, onCancelExtr
     setSegmentLimitMode, setSegmentMaxWords, setSegmentMaxChars,
     transcriptionLanguage: language, setTranscriptionLanguage: setLanguage,
   } = useSettingsStore();
-  const { setSubtitles, clearOriginalSubtitles, resegment } = useSubtitleStore();
+  const { setSubtitles, clearOriginalSubtitles, resegment, markSaved } = useSubtitleStore();
   const hasSubtitles = useSubtitleStore((s) => s.subtitles.length > 0);
   const { addVersion } = useVersionStore();
   const notify = useNotifyStore((s) => s.notify);
@@ -92,9 +92,16 @@ export default function TranscriptionPanel({ audioPath, extracting, onCancelExtr
       let subs = await transcribeAudio(audioPath, whisperModel, language, detectSpeakers, forceCpu, setProgress);
       clearOriginalSubtitles();
       if (segmentLimit) subs = resegmentByLength(subs, segmentLimit);
-      setSubtitles(subs, { dirty: !autoSaveOnTranscription });
-      if (autoSaveOnTranscription) addVersion(subs, "transcription", { whisperModel, language });
+      // Generated content lives only in memory → dirty until history autosave
+      // actually lands on disk. Clear dirty ONLY on a confirmed write, so a
+      // failed/absent autosave can't drop the transcription silently on quit.
+      setSubtitles(subs, { dirty: true });
       notify("success", t("transcription:doneNotice", { count: subs.length }));
+      if (autoSaveOnTranscription) {
+        const saved = await addVersion(subs, "transcription", { whisperModel, language });
+        if (saved) markSaved();
+        else notify("error", t("common:autosaveFailed"));
+      }
     } catch (e) {
       if (isCancellation(e)) {
         setProgress({ stage: "cancelled", progress: 0, message: t("errors:CANCELLED", { ns: "errors" }) });

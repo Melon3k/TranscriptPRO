@@ -1,5 +1,5 @@
-import { useEffect, useState, type CSSProperties } from "react";
-import { Download, Languages, Columns2, X } from "lucide-react";
+import { useCallback, useEffect, useState, type CSSProperties } from "react";
+import { Download, Languages, Columns2, X, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useSubtitleStore } from "../../stores/subtitleStore";
@@ -25,7 +25,7 @@ export default function TranslationPanel() {
   const { addVersion } = useVersionStore();
   const {
     subtitles, setSubtitles, originalSubtitles, setOriginalSubtitles,
-    clearOriginalSubtitles, comparisonMode, setComparisonMode,
+    clearOriginalSubtitles, comparisonMode, setComparisonMode, markSaved,
   } = useSubtitleStore();
   const notify = useNotifyStore((s) => s.notify);
 
@@ -35,15 +35,28 @@ export default function TranslationPanel() {
   const [progress, setProgress] = useState<TranslationProgress | null>(null);
   const [translated, setTranslated] = useState(false);
   const [localModel, setLocalModel] = useState<LocalModelInfo | null>(null);
+  // A failed status check is distinct from "no model downloaded" — without this
+  // the button was disabled AND no message rendered (dead, unexplained button).
+  const [localModelError, setLocalModelError] = useState(false);
+  const [localModelLoading, setLocalModelLoading] = useState(false);
   const [downloadingModel, setDownloadingModel] = useState(false);
   const [modelProgress, setModelProgress] = useState(0);
 
   const isLocal = translationProvider === "local";
 
+  const checkLocalModel = useCallback(() => {
+    setLocalModelError(false);
+    setLocalModelLoading(true);
+    return localModelStatus()
+      .then((m) => setLocalModel(m))
+      .catch(() => { setLocalModel(null); setLocalModelError(true); })
+      .finally(() => setLocalModelLoading(false));
+  }, []);
+
   useEffect(() => {
     if (!isLocal) return;
-    localModelStatus().then(setLocalModel).catch(() => setLocalModel(null));
-  }, [isLocal]);
+    void checkLocalModel();
+  }, [isLocal, checkLocalModel]);
 
   const hasKey = isLocal ? true : translationProvider === "gemini" ? hasGeminiKey : hasClaudeKey;
   const localNeedsSource = isLocal && !sourceLang;
@@ -79,20 +92,25 @@ export default function TranslationPanel() {
         clearOriginalSubtitles();
         return;
       }
-      setSubtitles(result.subtitles, { dirty: !autoSaveOnTranslation });
+      // Translated content lives only in memory → dirty until history autosave
+      // actually lands on disk (clear it ONLY on a confirmed write, so a
+      // failed/absent autosave can't drop the translation silently on quit).
+      setSubtitles(result.subtitles, { dirty: true });
       setTranslated(true);
       setComparisonMode(true);
       if (result.warning) {
         notify("error", t("translation:partialWarning", { done: result.translatedCount, total: subtitles.length }));
       } else {
+        notify("success", t("translation:doneNotice", { done: result.translatedCount, total: subtitles.length }));
         if (autoSaveOnTranslation) {
-          addVersion(result.subtitles, "translation", {
+          const saved = await addVersion(result.subtitles, "translation", {
             provider: translationProvider, targetLang,
             sourceLang: sourceLang || undefined,
             model: translationProvider === "gemini" ? geminiModel : undefined,
           });
+          if (saved) markSaved();
+          else notify("error", t("common:autosaveFailed"));
         }
-        notify("success", t("translation:doneNotice", { done: result.translatedCount, total: subtitles.length }));
       }
     } catch (e) {
       notify("error", formatError(t, e));
@@ -146,6 +164,19 @@ export default function TranslationPanel() {
           {LANGUAGE_OPTIONS.map((c) => <option key={c} value={c}>{t(`translation:language.${c}`)}</option>)}
         </Select>
       </div>
+
+      {isLocal && localModelError && (
+        <div style={{ marginBottom: 14 }}>
+          <p style={{ ...noteBox, marginBottom: 8 }}>{t("translation:localModel.statusError")}</p>
+          <button onClick={() => void checkLocalModel()} disabled={localModelLoading} style={primaryBtn(COLORS.blue, localModelLoading)}>
+            <RotateCcw size={16} />{t("translation:localModel.retry")}
+          </button>
+        </div>
+      )}
+
+      {isLocal && localModelLoading && !localModel && !localModelError && (
+        <p style={{ ...noteBox, marginBottom: 14 }}>{t("translation:localModel.checking")}</p>
+      )}
 
       {isLocal && localModel && !localModel.downloaded && (
         <div style={{ marginBottom: 14 }}>

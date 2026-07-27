@@ -89,11 +89,14 @@ interface VersionState {
   versions: SubtitleVersion[];
 
   setProjectKey: (filePath: string | null) => Promise<void>;
+  /** Records a version and (if there's a project key) persists the whole
+   *  history. Resolves true only when the write to disk succeeded, so callers
+   *  gating `dirty` on autosave can keep it set on failure / no-project-key. */
   addVersion: (
     subtitles: Subtitle[],
     action: VersionAction,
     metadata: SubtitleVersionMetadata
-  ) => void;
+  ) => Promise<boolean>;
   restoreVersion: (
     id: string,
     setSubtitles: (s: Subtitle[]) => void
@@ -133,7 +136,7 @@ export const useVersionStore = create<VersionState>()((set, get) => ({
     }
   },
 
-  addVersion: (subtitles, action, metadata) => {
+  addVersion: async (subtitles, action, metadata) => {
     const { projectKey, versions } = get();
     const newVersion: SubtitleVersion = {
       id: crypto.randomUUID(),
@@ -145,8 +148,15 @@ export const useVersionStore = create<VersionState>()((set, get) => ({
     };
     const capped = [newVersion, ...versions].slice(0, MAX_VERSIONS);
     set({ versions: capped });
-    if (projectKey) {
-      saveVersionHistory(projectKey, capped).catch(console.error);
+    // No project key → nowhere to persist (e.g. audio-only or key derivation
+    // failed). Don't pretend it saved; the caller must keep `dirty` set.
+    if (!projectKey) return false;
+    try {
+      await saveVersionHistory(projectKey, capped);
+      return true;
+    } catch (e) {
+      console.error(e);
+      return false;
     }
   },
 
