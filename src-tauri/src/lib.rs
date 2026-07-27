@@ -34,6 +34,15 @@ pub struct VideoExport {
     pub cancelled: AtomicBool,
 }
 
+/// Handle to the running ffmpeg child plus a cancellation flag for preview
+/// proxy preparation (probe + transcode of a WKWebView-friendly copy), so it can
+/// be killed on demand and never outlives the app. Mirrors `VideoExport`.
+#[derive(Default)]
+pub struct PreviewState {
+    pub child: Mutex<Option<CommandChild>>,
+    pub cancelled: AtomicBool,
+}
+
 /// Native mirror of the frontend "unsaved changes" flag. Lets the OS-level close/quit
 /// handlers (notably macOS Cmd+Q, which does not emit a per-window close event) guard it.
 pub struct DirtyState(pub AtomicBool);
@@ -88,6 +97,16 @@ fn kill_video_export(app: &tauri::AppHandle) {
     }
 }
 
+fn kill_preview_child(app: &tauri::AppHandle) {
+    if let Some(state) = app.try_state::<PreviewState>() {
+        if let Ok(mut guard) = state.child.lock() {
+            if let Some(child) = guard.take() {
+                let _ = child.kill();
+            }
+        }
+    }
+}
+
 fn kill_local_llm(app: &tauri::AppHandle) {
     if let Some(state) = app.try_state::<LocalLlm>() {
         if let Ok(mut guard) = state.child.lock() {
@@ -102,15 +121,56 @@ fn kill_local_llm(app: &tauri::AppHandle) {
     translation::local::remove_pidfile(app);
 }
 
-/// Remove extraction WAVs left over from previous sessions (each can be hundreds of MB).
-/// Runs once at startup so it never races with an in-flight or pending extraction.
-fn cleanup_stale_audio() {
-    if let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) {
+/// Remove junk left over from previous sessions after a crash / hard-exit:
+///   - extraction WAVs (`transcriptpro_audio_*.wav`, hundreds of MB each),
+///   - per-export burn-in temp dirs (`tpro_burn_*/`, holding copied fonts —
+///     tens to hundreds of MB),
+///   - partial downloads (`*.part`) in the models dir: interrupted Whisper
+///     (`ggml-*.bin.part`, up to 3.1 GB) and Gemma (`*.gguf.part`, up to 2.5 GB).
+///
+/// Runs ONCE in `.setup()`, BEFORE any extraction / export / download is
+/// started, and `single_instance` guarantees no rival process is mid-download,
+/// so no `.part` here is "live" — deleting them is safe. `.part` files sitting
+/// next to a user's chosen output path live in a different, out-of-our-control
+/// directory and are intentionally left untouched. Errors are logged, never
+/// fatal to startup.
+fn cleanup_stale_temp(app: &tauri::AppHandle) {
+    let tmp = std::env::temp_dir();
+    if let Ok(entries) = std::fs::read_dir(&tmp) {
         for entry in entries.flatten() {
             let name = entry.file_name();
             let name = name.to_string_lossy();
             if name.starts_with("transcriptpro_audio_") && name.ends_with(".wav") {
-                let _ = std::fs::remove_file(entry.path());
+                if std::fs::remove_file(entry.path()).is_ok() {
+                    logger::info(app, "cleanup", format!("removed stale audio {name}"));
+                }
+            } else if name.starts_with("tpro_burn_") {
+                // Per-export burn temp dir (copied fonts + .ass). Recursive.
+                if std::fs::remove_dir_all(entry.path()).is_ok() {
+                    logger::info(app, "cleanup", format!("removed stale burn dir {name}"));
+                }
+            } else if name.starts_with("tpro_proxy_") && name.ends_with(".mp4") {
+                // Preview proxy transcode left over from a crash/hard-exit.
+                if std::fs::remove_file(entry.path()).is_ok() {
+                    logger::info(app, "cleanup", format!("removed stale preview proxy {name}"));
+                }
+            }
+        }
+    }
+
+    // Partial model downloads. Both the Whisper models and the local Gemma GGUF
+    // land in app_data_dir()/models (see transcribe.rs and translation::local::
+    // model_path), so one sweep of that dir covers both.
+    if let Ok(models_dir) = app.path().app_data_dir().map(|d| d.join("models")) {
+        if let Ok(entries) = std::fs::read_dir(&models_dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if name.ends_with(".part") {
+                    if std::fs::remove_file(entry.path()).is_ok() {
+                        logger::info(app, "cleanup", format!("removed partial download {name}"));
+                    }
+                }
             }
         }
     }
@@ -146,6 +206,7 @@ pub fn run() {
             child: Mutex::new(None),
             cancelled: AtomicBool::new(false),
         })
+        .manage(PreviewState::default())
         .manage(DirtyState(AtomicBool::new(false)))
         .manage(LocalLlm {
             child: Mutex::new(None),
@@ -156,7 +217,7 @@ pub fn run() {
         })
         .manage(whisper_cache)
         .setup(|app| {
-            cleanup_stale_audio();
+            cleanup_stale_temp(&app.handle().clone());
             // Reap a llama-server orphaned by a previous hard kill / crash.
             translation::local::cleanup_stale_server(&app.handle().clone());
 
@@ -200,6 +261,7 @@ pub fn run() {
                 } else {
                     kill_audio_child(app);
                     kill_video_export(app);
+                    kill_preview_child(app);
                     kill_local_llm(app);
                     app.exit(0);
                 }
@@ -236,6 +298,9 @@ pub fn run() {
             // Video export (MP4 subtitle burn-in)
             commands::video_export::export_video,
             commands::video_export::cancel_video_export,
+            // Preview proxy (WKWebView-friendly transcode)
+            commands::preview::prepare_preview,
+            commands::preview::cancel_preview,
             // Transcription
             commands::transcribe::list_models,
             commands::transcribe::download_model,
@@ -275,6 +340,7 @@ pub fn run() {
                     // outlive the app.
                     kill_audio_child(app_handle);
                     kill_video_export(app_handle);
+                    kill_preview_child(app_handle);
                     kill_local_llm(app_handle);
                 }
             }
