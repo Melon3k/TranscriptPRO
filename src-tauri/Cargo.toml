@@ -1,6 +1,6 @@
 [package]
 name = "transcript-pro"
-version = "0.1.3"
+version = "2.0.0"
 description = "TranscriptPRO - Desktop subtitle editor with Whisper transcription"
 authors = ["TranscriptPRO"]
 edition = "2021"
