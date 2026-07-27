@@ -1,0 +1,199 @@
+{
+  "$schema": "self-describing",
+  "project": "TranscriptPRO",
+  "version": "2.0.0",
+  "description": "Desktop subtitle editor with local Whisper transcription. Tauri 2.0 app: React/TypeScript frontend + Rust backend, communicating via Tauri IPC. All file/subprocess/network work happens in Rust; the webview has no shell/fs permissions.",
+  "layers": [
+    { "id": "ui", "label": "UI — React components", "dir": "src/components/" },
+    { "id": "state", "label": "State & libraries", "dir": "src/stores/, src/lib/" },
+    { "id": "ipc", "label": "Tauri IPC boundary", "dir": "src/lib/tauri-commands.ts" },
+    { "id": "backend", "label": "Rust backend", "dir": "src-tauri/src/" },
+    { "id": "external", "label": "External / system", "dir": "-" }
+  ],
+  "nodes": [
+    { "id": "open-view", "label": "OpenView", "layer": "ui", "file": "src/components/Open/OpenView.tsx", "description": "Landing / file-open screen. Drag & drop, recent files. Routes files via src/lib/file-routing.ts (video vs subtitle). Guarded by confirmDiscardIfDirty (src/lib/unsaved-guard.ts) before any document swap." },
+    { "id": "player", "label": "Player", "layer": "ui", "file": "src/components/Player/Player.tsx", "description": "HTML5 video player in WKWebView. Plays previewPath (proxy) when set, otherwise the original file. Synced with playerStore playhead; renders styled caption overlay." },
+    { "id": "editor", "label": "SubtitleEditor", "layer": "ui", "file": "src/components/Editor/SubtitleEditor.tsx", "description": "Main subtitle list editor (SubtitleRow per cue). Edit text/timing, split, merge. Keyboard shortcuts via src/lib/keyboard-shortcuts.ts." },
+    { "id": "transcription-panel", "label": "TranscriptionPanel", "layer": "ui", "file": "src/components/Transcription/TranscriptionPanel.tsx", "description": "Whisper model picker, model download progress, start/cancel transcription." },
+    { "id": "translation-panel", "label": "TranslationPanel", "layer": "ui", "file": "src/components/Translation/TranslationPanel.tsx", "description": "Translation UI: engine choice (Gemini / Claude / local TranslateGemma), language, progress, cancel. CompareView.tsx shows source-vs-translation diff (src/lib/diff.ts)." },
+    { "id": "style-panel", "label": "StylePanel", "layer": "ui", "file": "src/components/Style/StylePanel.tsx", "description": "Caption styling UI: one global CaptionStyle + CaptionAnimation (src/types/captionStyle.ts). FontPicker uses backend font enumeration; presets in src/lib/caption-presets.ts." },
+    { "id": "video-export-modal", "label": "VideoExportModal", "layer": "ui", "file": "src/components/Layout/VideoExportModal.tsx", "description": "MP4 burn-in export dialog: output path (hard-guarded to never equal the source), progress, cancel." },
+    { "id": "settings", "label": "Settings", "layer": "ui", "file": "src/components/Settings/", "description": "App settings incl. API key entry. Keys are sent over IPC once to be stored; frontend afterwards only sees presence flags (hasGeminiKey / hasClaudeKey)." },
+    { "id": "subtitle-store", "label": "subtitleStore", "layer": "state", "file": "src/stores/subtitleStore.ts", "description": "Zustand store: subtitle cues, 50-item undo/redo stack, dirty flag (drives unsaved-changes guard and native close guard in lib.rs)." },
+    { "id": "player-store", "label": "playerStore", "layer": "state", "file": "src/stores/playerStore.ts", "description": "Zustand store: playhead position, filePath (original, used for transcription + burn-in) and previewPath (display-only proxy)." },
+    { "id": "style-store", "label": "styleStore", "layer": "state", "file": "src/stores/styleStore.ts", "description": "Zustand store for the global CaptionStyle/CaptionAnimation. Persisted to localStorage (separate key from settings)." },
+    { "id": "settings-store", "label": "settingsStore", "layer": "state", "file": "src/stores/settingsStore.ts", "description": "Zustand store persisted to localStorage key 'transcriptpro-settings'. Also: versionStore, recentFilesStore, notifyStore, logStore, updateStore, onboardingStore." },
+    { "id": "version-store", "label": "versionStore", "layer": "state", "file": "src/stores/versionStore.ts", "description": "Version-history snapshots of the subtitle document; persisted via file_io save_version_history/load_version_history." },
+    { "id": "subtitle-ops", "label": "subtitle-ops", "layer": "state", "file": "src/lib/subtitle-ops.ts", "description": "Pure subtitle operations: split, merge, reindex. Time conversion in src/lib/time-format.ts." },
+    { "id": "caption-style-lib", "label": "caption-style libs", "layer": "state", "file": "src/lib/caption-style.ts", "description": "Serialization & measurement helpers for caption styling and animation (caption-style.ts, caption-animation.ts, caption-presets.ts)." },
+    { "id": "tauri-commands", "label": "tauri-commands.ts", "layer": "ipc", "file": "src/lib/tauri-commands.ts", "description": "Single IPC gateway: typed wrappers around every Tauri invoke(). All backend calls in the app go through this module. Backend events (progress, completion) come back as Tauri events." },
+    { "id": "cmd-file-io", "label": "file_io.rs", "layer": "backend", "file": "src-tauri/src/commands/file_io.rs", "description": "import_srt, export_srt/word_srt/txt/vtt/ass, preview_export, save/load_version_history. Only SRT has an importer; VTT/ASS are export-only (don't count as project save)." },
+    { "id": "cmd-audio", "label": "audio.rs", "layer": "backend", "file": "src-tauri/src/commands/audio.rs", "description": "extract_audio / cancel_audio_extraction — ffmpeg wrapper extracting audio (temp transcriptpro_audio_*.wav) for Whisper." },
+    { "id": "cmd-transcribe", "label": "transcribe.rs", "layer": "backend", "file": "src-tauri/src/commands/transcribe.rs", "description": "list_models, download_model, transcribe_audio, cancel_transcription. Whisper.cpp model management (models in Tauri app-data dir) and transcription with progress events." },
+    { "id": "cmd-preview", "label": "preview.rs", "layer": "backend", "file": "src-tauri/src/commands/preview.rs", "description": "prepare_preview / cancel_preview. Probes the source; for heavy (>1920px) or rotation-flagged video, transcodes a 720p rotation-baked proxy (tpro_proxy_*) for display only. Original filePath stays untouched." },
+    { "id": "cmd-video-export", "label": "video_export.rs", "layer": "backend", "file": "src-tauri/src/commands/video_export.rs", "description": "export_video / cancel_video_export. ffmpeg burn-in of styled/animated subtitles (over generated ASS) into MP4. Re-entrancy guard, cancel support, hard guard output != source." },
+    { "id": "cmd-translate", "label": "translate.rs", "layer": "backend", "file": "src-tauri/src/commands/translate.rs", "description": "translate_subtitles / cancel_translation. Orchestrates Gemini / Claude / local engine; network via reqwest from Rust (not gated by webview CSP)." },
+    { "id": "cmd-local-model", "label": "local_model.rs", "layer": "backend", "file": "src-tauri/src/commands/local_model.rs", "description": "local_model_status, download_local_model, cancel_local_model_download. Downloads the TranslateGemma 4B GGUF (SHA-256 pinned) into app-data." },
+    { "id": "cmd-keys", "label": "keys.rs", "layer": "backend", "file": "src-tauri/src/commands/keys.rs", "description": "set/delete/has_api_key, api_key_saved_at. Master key in OS keychain (service com.transcriptpro.app, account master-key); API keys AES-GCM-encrypted in app-data keys.enc.json. Keys never cross IPC to the webview." },
+    { "id": "cmd-fonts", "label": "fonts.rs", "layer": "backend", "file": "src-tauri/src/commands/fonts.rs", "description": "list_system_fonts — system font enumeration via fontdb, on spawn_blocking, for the FontPicker." },
+    { "id": "subtitle-formats", "label": "subtitle formats", "layer": "backend", "file": "src-tauri/src/subtitle/", "description": "Domain types (types.rs) and per-format parsers/serializers: srt.rs (import+export), vtt.rs and ass.rs (export-only), style.rs (ASS styling)." },
+    { "id": "translation-engines", "label": "translation engines", "layer": "backend", "file": "src-tauri/src/translation/", "description": "gemini.rs, claude.rs (cloud, reqwest), local.rs (drives the llama-server sidecar; hand-rolled Gemma prompt turns because the GGUF chat template doesn't parse — hence --no-jinja)." },
+    { "id": "ffmpeg", "label": "ffmpeg", "layer": "external", "file": null, "description": "Used for: audio extraction (WAV for Whisper), 720p preview-proxy transcode, MP4 subtitle burn-in." },
+    { "id": "whisper", "label": "whisper.cpp", "layer": "external", "file": null, "description": "Local Whisper transcription. GGML models downloaded to the Tauri app-data models dir (~/.config/transcriptpro/models on macOS/Linux)." },
+    { "id": "llama-server", "label": "llama-server sidecar", "layer": "external", "file": "scripts/build-llama-server.sh", "description": "Static llama.cpp server build (pinned tag), spawned as a Tauri sidecar with --no-jinja, serving TranslateGemma 4B for local translation." },
+    { "id": "gemini-api", "label": "Gemini API", "layer": "external", "file": null, "description": "Cloud translation provider, called from Rust via reqwest. Domain listed in CSP connect-src (src-tauri/tauri.conf.json)." },
+    { "id": "claude-api", "label": "Anthropic API", "layer": "external", "file": null, "description": "Cloud translation provider (Claude), called from Rust via reqwest." },
+    { "id": "keychain", "label": "OS keychain", "layer": "external", "file": null, "description": "Single master-key entry (service com.transcriptpro.app). Electron-safeStorage pattern: one keychain item, at most one macOS ACL prompt per run." },
+    { "id": "fs", "label": "Filesystem / app-data", "layer": "external", "file": null, "description": "SRT/VTT/ASS/TXT files, version history, Whisper models, TranslateGemma GGUF, keys.enc.json, temp files (transcriptpro_audio_*, tpro_burn_*, tpro_proxy_* — swept by cleanup_stale_temp in lib.rs on startup)." },
+    { "id": "localstorage", "label": "localStorage", "layer": "external", "file": null, "description": "WebView localStorage: 'transcriptpro-settings' (settingsStore) + a separate key for styleStore. Never contains API keys." }
+  ],
+  "edges": [
+    { "id": "e1", "from": "open-view", "to": "tauri-commands", "label": "open file / import_srt", "kind": "call" },
+    { "id": "e2", "from": "editor", "to": "subtitle-ops", "label": "split / merge / reindex", "kind": "call" },
+    { "id": "e3", "from": "subtitle-ops", "to": "subtitle-store", "label": "new cue state", "kind": "data" },
+    { "id": "e4", "from": "editor", "to": "subtitle-store", "label": "edits, undo/redo, dirty", "kind": "call" },
+    { "id": "e5", "from": "player", "to": "player-store", "label": "playhead ⇄ previewPath", "kind": "bidi" },
+    { "id": "e6", "from": "subtitle-store", "to": "version-store", "label": "snapshots", "kind": "data" },
+    { "id": "e7", "from": "style-panel", "to": "style-store", "label": "CaptionStyle updates", "kind": "call" },
+    { "id": "e8", "from": "style-store", "to": "localstorage", "label": "persist", "kind": "data" },
+    { "id": "e9", "from": "settings-store", "to": "localstorage", "label": "persist 'transcriptpro-settings'", "kind": "data" },
+    { "id": "e10", "from": "transcription-panel", "to": "tauri-commands", "label": "download_model / transcribe_audio", "kind": "call" },
+    { "id": "e11", "from": "translation-panel", "to": "tauri-commands", "label": "translate_subtitles", "kind": "call" },
+    { "id": "e12", "from": "video-export-modal", "to": "tauri-commands", "label": "export_video", "kind": "call" },
+    { "id": "e13", "from": "settings", "to": "tauri-commands", "label": "set_api_key / has_api_key", "kind": "call" },
+    { "id": "e14", "from": "version-store", "to": "tauri-commands", "label": "save/load_version_history", "kind": "call" },
+    { "id": "e15", "from": "tauri-commands", "to": "cmd-file-io", "label": "invoke", "kind": "ipc" },
+    { "id": "e16", "from": "tauri-commands", "to": "cmd-audio", "label": "invoke", "kind": "ipc" },
+    { "id": "e17", "from": "tauri-commands", "to": "cmd-transcribe", "label": "invoke", "kind": "ipc" },
+    { "id": "e18", "from": "tauri-commands", "to": "cmd-translate", "label": "invoke", "kind": "ipc" },
+    { "id": "e19", "from": "tauri-commands", "to": "cmd-local-model", "label": "invoke", "kind": "ipc" },
+    { "id": "e20", "from": "tauri-commands", "to": "cmd-video-export", "label": "invoke", "kind": "ipc" },
+    { "id": "e21", "from": "tauri-commands", "to": "cmd-preview", "label": "invoke", "kind": "ipc" },
+    { "id": "e22", "from": "tauri-commands", "to": "cmd-keys", "label": "invoke", "kind": "ipc" },
+    { "id": "e23", "from": "tauri-commands", "to": "cmd-fonts", "label": "invoke", "kind": "ipc" },
+    { "id": "e24", "from": "cmd-audio", "to": "ffmpeg", "label": "extract WAV", "kind": "process" },
+    { "id": "e25", "from": "cmd-transcribe", "to": "whisper", "label": "run model", "kind": "process" },
+    { "id": "e26", "from": "cmd-translate", "to": "translation-engines", "label": "dispatch engine", "kind": "call" },
+    { "id": "e27", "from": "cmd-translate", "to": "cmd-keys", "label": "read decrypted key", "kind": "call" },
+    { "id": "e28", "from": "translation-engines", "to": "gemini-api", "label": "reqwest", "kind": "network" },
+    { "id": "e29", "from": "translation-engines", "to": "claude-api", "label": "reqwest", "kind": "network" },
+    { "id": "e30", "from": "translation-engines", "to": "llama-server", "label": "HTTP to sidecar", "kind": "process" },
+    { "id": "e31", "from": "cmd-video-export", "to": "subtitle-formats", "label": "generate styled ASS", "kind": "call" },
+    { "id": "e32", "from": "cmd-video-export", "to": "ffmpeg", "label": "burn-in to MP4", "kind": "process" },
+    { "id": "e33", "from": "cmd-preview", "to": "ffmpeg", "label": "720p proxy transcode", "kind": "process" },
+    { "id": "e34", "from": "cmd-keys", "to": "keychain", "label": "master key", "kind": "process" },
+    { "id": "e35", "from": "cmd-keys", "to": "fs", "label": "keys.enc.json (AES-GCM)", "kind": "data" },
+    { "id": "e36", "from": "cmd-file-io", "to": "subtitle-formats", "label": "parse / serialize", "kind": "call" },
+    { "id": "e37", "from": "cmd-file-io", "to": "fs", "label": "read / write files", "kind": "data" },
+    { "id": "e38", "from": "cmd-local-model", "to": "fs", "label": "GGUF download (SHA-256 pinned)", "kind": "data" },
+    { "id": "e39", "from": "cmd-fonts", "to": "fs", "label": "fontdb scan", "kind": "data" },
+    { "id": "e40", "from": "cmd-preview", "to": "player-store", "label": "previewPath (event)", "kind": "result" },
+    { "id": "e41", "from": "cmd-transcribe", "to": "subtitle-store", "label": "segments (event)", "kind": "result" },
+    { "id": "e43", "from": "cmd-translate", "to": "subtitle-store", "label": "translated cues (event)", "kind": "result" },
+    { "id": "e44", "from": "style-store", "to": "video-export-modal", "label": "style for export", "kind": "data" },
+    { "id": "e46", "from": "style-panel", "to": "caption-style-lib", "label": "measure / presets", "kind": "call" },
+    { "id": "e47", "from": "video-export-modal", "to": "caption-style-lib", "label": "serialize style+animation", "kind": "call" }
+  ],
+  "flows": [
+    {
+      "id": "flow-transcribe",
+      "name": "Open video → Whisper transcription",
+      "description": "User opens a video; audio is extracted with ffmpeg and transcribed locally with whisper.cpp; segments land in the editor.",
+      "steps": [
+        { "order": 1, "node": "open-view", "text": "User drops/opens a media file. file-routing.ts classifies it as video; unsaved-guard runs if the document is dirty." },
+        { "order": 2, "edge": "e1", "text": "File path is handed to the IPC layer; playerStore.filePath is set to the ORIGINAL file." },
+        { "order": 3, "edge": "e16", "text": "invoke extract_audio(filePath)." },
+        { "order": 4, "edge": "e24", "text": "ffmpeg extracts a temp WAV (transcriptpro_audio_*.wav) suitable for Whisper." },
+        { "order": 5, "edge": "e17", "text": "invoke transcribe_audio with the selected Whisper model (downloaded to app-data if missing via download_model)." },
+        { "order": 6, "edge": "e25", "text": "whisper.cpp runs on the WAV; progress streams back as Tauri events." },
+        { "order": 7, "edge": "e41", "text": "Resulting segments are pushed into subtitleStore; the editor renders the cue list." }
+      ]
+    },
+    {
+      "id": "flow-preview",
+      "name": "Video preview proxy",
+      "description": "Heavy or rotated video is transcoded to a 720p display proxy so WKWebView can play it. Transcription and burn-in always use the original file.",
+      "steps": [
+        { "order": 1, "edge": "e1", "text": "Video is opened; original path stored as playerStore.filePath." },
+        { "order": 2, "edge": "e21", "text": "invoke prepare_preview — preview.rs probes resolution/rotation of the source." },
+        { "order": 3, "edge": "e33", "text": "If >1920px wide or rotation-flagged: ffmpeg transcodes a lightweight 720p rotation-baked proxy (tpro_proxy_*). Otherwise no proxy is made." },
+        { "order": 4, "edge": "e40", "text": "previewPath is set in playerStore (display-only; filePath stays the original)." },
+        { "order": 5, "edge": "e5", "text": "Player plays previewPath ?? filePath; playhead syncs back to playerStore." }
+      ]
+    },
+    {
+      "id": "flow-edit",
+      "name": "Edit subtitles (undo / versions)",
+      "description": "Editing goes through pure ops into subtitleStore (undo/redo + dirty flag); snapshots persist via version history.",
+      "steps": [
+        { "order": 1, "node": "editor", "text": "User edits text/timing or triggers split/merge on a SubtitleRow." },
+        { "order": 2, "edge": "e2", "text": "Structural changes run through pure functions in subtitle-ops.ts (split, merge, reindex)." },
+        { "order": 3, "edge": "e3", "text": "New cue state is committed to subtitleStore: pushed onto the 50-item undo stack, dirty=true." },
+        { "order": 4, "edge": "e6", "text": "versionStore takes document snapshots for version history." },
+        { "order": 5, "edge": "e14", "text": "save_version_history persists snapshots via file_io.rs to app-data." }
+      ]
+    },
+    {
+      "id": "flow-export-srt",
+      "name": "Import / export subtitle files",
+      "description": "SRT import and SRT/VTT/ASS/TXT export via file_io.rs and the per-format serializers. Only SRT save clears the dirty flag.",
+      "steps": [
+        { "order": 1, "edge": "e1", "text": "Import: an .srt file is opened (only SRT has an importer — VTT/ASS are export-only)." },
+        { "order": 2, "edge": "e15", "text": "invoke import_srt / export_srt / export_vtt / export_ass / export_txt." },
+        { "order": 3, "edge": "e36", "text": "file_io.rs parses or serializes via src-tauri/src/subtitle/ (srt.rs, vtt.rs, ass.rs, style.rs)." },
+        { "order": 4, "edge": "e37", "text": "File is read/written on disk. On SRT save, subtitleStore.dirty is cleared; VTT/ASS export does NOT count as a project save." }
+      ]
+    },
+    {
+      "id": "flow-translate-cloud",
+      "name": "Cloud translation (Gemini / Claude)",
+      "description": "translate.rs reads the decrypted API key backend-side and calls the provider via reqwest — the key never crosses IPC to the webview.",
+      "steps": [
+        { "order": 1, "edge": "e11", "text": "User picks engine + target language in TranslationPanel and starts translation." },
+        { "order": 2, "edge": "e18", "text": "invoke translate_subtitles(engine, cues, targetLang)." },
+        { "order": 3, "edge": "e27", "text": "translate.rs obtains the decrypted API key from the keys module (backend-side only)." },
+        { "order": 4, "edge": "e26", "text": "Dispatch to gemini.rs or claude.rs — cues are batched into prompts." },
+        { "order": 5, "edge": "e28", "text": "HTTP calls to the provider via reqwest (Rust-side, so not gated by webview CSP). Progress + cancel supported." },
+        { "order": 6, "edge": "e43", "text": "Translated cues stream back into subtitleStore; CompareView shows a source-vs-translation diff." }
+      ]
+    },
+    {
+      "id": "flow-translate-local",
+      "name": "Local translation (TranslateGemma + llama-server)",
+      "description": "Offline translation: a SHA-256-pinned GGUF served by a static llama-server sidecar; prompts are hand-rolled Gemma turns (--no-jinja).",
+      "steps": [
+        { "order": 1, "edge": "e19", "text": "First use: invoke download_local_model — TranslateGemma 4B GGUF, SHA-256 pinned." },
+        { "order": 2, "edge": "e38", "text": "GGUF is downloaded into app-data (resumable, cancellable)." },
+        { "order": 3, "edge": "e18", "text": "invoke translate_subtitles with engine=local." },
+        { "order": 4, "edge": "e26", "text": "translation/local.rs takes over — the local engine." },
+        { "order": 5, "edge": "e30", "text": "It spawns/talks to the static llama-server sidecar (pinned llama.cpp tag, --no-jinja; Gemma turns are hand-rolled because the GGUF chat template doesn't parse)." },
+        { "order": 6, "edge": "e43", "text": "Translated cues are merged into subtitleStore." }
+      ]
+    },
+    {
+      "id": "flow-burn-in",
+      "name": "MP4 export (subtitle burn-in)",
+      "description": "Styled/animated captions are serialized to ASS and burned into an MP4 with ffmpeg — always from the ORIGINAL source, never the preview proxy.",
+      "steps": [
+        { "order": 1, "edge": "e44", "text": "VideoExportModal reads the global CaptionStyle/CaptionAnimation from styleStore." },
+        { "order": 2, "edge": "e47", "text": "caption-style libs serialize style + animation parameters for the backend." },
+        { "order": 3, "edge": "e12", "text": "User confirms output path; frontend gates export; hard guard: output must differ from the source file." },
+        { "order": 4, "edge": "e20", "text": "invoke export_video — re-entrancy guard ensures only one export at a time." },
+        { "order": 5, "edge": "e31", "text": "video_export.rs generates the styled/animated ASS via the subtitle serializers." },
+        { "order": 6, "edge": "e32", "text": "ffmpeg burns the ASS into the MP4 (temp dir tpro_burn_*), using playerStore.filePath — the original, not the proxy. Progress events + cancel." }
+      ]
+    },
+    {
+      "id": "flow-api-keys",
+      "name": "API key storage",
+      "description": "Electron-safeStorage pattern: one master key in the OS keychain, API keys AES-GCM-encrypted in app-data. The webview only ever sees presence flags.",
+      "steps": [
+        { "order": 1, "edge": "e13", "text": "User pastes a Gemini/Claude key in Settings; invoke set_api_key (the only moment a key crosses IPC, inbound)." },
+        { "order": 2, "edge": "e22", "text": "keys.rs receives the key." },
+        { "order": 3, "edge": "e34", "text": "A single random master key lives in the OS keychain (service com.transcriptpro.app, account master-key) — at most one macOS ACL prompt per run." },
+        { "order": 4, "edge": "e35", "text": "The API key is AES-GCM-encrypted with the master key and written to app-data keys.enc.json." },
+        { "order": 5, "node": "settings", "text": "Frontend only tracks presence flags (hasGeminiKey/hasClaudeKey) via has_api_key — actual keys never return to the webview and are never in localStorage." }
+      ]
+    }
+  ]
+}
