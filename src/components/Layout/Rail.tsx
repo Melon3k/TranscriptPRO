@@ -124,11 +124,29 @@ function ExportMenu({
   // hands the chosen path to the VideoExportModal (which reads style/animation
   // and runs the ffmpeg job); it does NOT go through run() — burning in is not
   // a project-save.
+  // Inverted cues (end <= start) don't render — so any timed export (SRT/ASS and
+  // the MP4 burn, which bakes the same ASS) must warn before it silently drops
+  // them. Shared by run() and the MP4 path so the two never drift.
+  async function confirmInvertedTimings(): Promise<boolean> {
+    const inverted = subtitles.filter(hasInvertedTiming);
+    if (inverted.length === 0) return true;
+    return ask(
+      t("toolbar:invertedTimings", { count: inverted.length, first: inverted[0].index }),
+      { title: t("toolbar:invertedTimingsTitle"), kind: "warning" },
+    );
+  }
+
   async function startVideoExport() {
     setOpen(false);
+    // MP4 is a timed burn of the same ASS — gate on inverted cues just like the
+    // file exports, BEFORE the (slow) save dialog + encode.
+    if (!(await confirmInvertedTimings())) return;
     try {
       const base = (filePath!.split(/[/\\]/).pop() ?? "video").replace(/\.[^.]+$/, "");
-      const out = await saveMp4FileDialog(`${base}.mp4`);
+      // Default to a distinct name so the burn never proposes overwriting the
+      // source video. The Rust side also hard-rejects output == source (C1),
+      // but suggesting a safe name first avoids the user hitting that error.
+      const out = await saveMp4FileDialog(`${base}-subtitled.mp4`);
       if (out) onStartVideoExport(out);
     } catch (e) {
       notify("error", formatError(t, e));
@@ -155,19 +173,7 @@ function ExportMenu({
     warn?: () => string | null,
   ) {
     setOpen(false);
-    if (timed) {
-      const inverted = subtitles.filter(hasInvertedTiming);
-      if (inverted.length > 0) {
-        const proceed = await ask(
-          t("toolbar:invertedTimings", {
-            count: inverted.length,
-            first: inverted[0].index,
-          }),
-          { title: t("toolbar:invertedTimingsTitle"), kind: "warning" },
-        );
-        if (!proceed) return;
-      }
-    }
+    if (timed && !(await confirmInvertedTimings())) return;
     try {
       const savedPath = await handler();
       if (savedPath) {
@@ -202,7 +208,10 @@ function ExportMenu({
       handler: async () => { const p = await saveSrtFileDialog("subtitles-words.srt"); if (p) await exportWordSrt(p, subtitles); return p; },
     },
     {
-      label: "ASS", hint: "SubStation", faithful: true, timed: true,
+      // faithful:false — SRT is the only format we can re-import, so an ASS
+      // export is a working artefact, not a project-save: it must not clear the
+      // unsaved-changes guard (reopening loses word timings / edit state).
+      label: "ASS", hint: "SubStation", faithful: false, timed: true,
       handler: async () => {
         const p = await saveAssFileDialog();
         if (p) {

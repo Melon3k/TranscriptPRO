@@ -77,7 +77,9 @@ export default function ExportPreviewModal({ open, onClose }: Props) {
       if (path) {
         if (tab === "srt") await exportSrt(path, subtitles);
         else await exportVtt(path, subtitles);
-        markSaved();
+        // Only SRT is the canonical project-save; VTT is a working export we
+        // can't re-import, so it must not clear the unsaved-changes guard.
+        if (tab === "srt") markSaved();
         notify("success", t("toolbar:exportSuccess", { name: path.split(/[/\\]/).pop() ?? path }));
         onClose();
       }

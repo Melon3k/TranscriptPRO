@@ -9,6 +9,7 @@ import { usePlayerStore } from "../../stores/playerStore";
 import { useSubtitleStore } from "../../stores/subtitleStore";
 import { useStyleStore } from "../../stores/styleStore";
 import { useNotifyStore } from "../../stores/notifyStore";
+import { APPROXIMATE_ANIMATIONS } from "../../types/captionStyle";
 
 interface Props {
   outputPath: string | null;
@@ -21,6 +22,9 @@ export default function VideoExportModal({ outputPath, onClose }: Props) {
 
   const [progress, setProgress] = useState(0);
   const [cancelling, setCancelling] = useState(false);
+  // Snapshotted when the export starts: whether the chosen animation only burns
+  // in approximately (linear \t, no per-word stagger) so we can note it.
+  const [approxAnim, setApproxAnim] = useState(false);
 
   // Guards a late Channel message (or resolve/reject) after the modal closed
   // from setting state on an unmounted component.
@@ -42,6 +46,7 @@ export default function VideoExportModal({ outputPath, onClose }: Props) {
     }
     const subtitles = useSubtitleStore.getState().subtitles;
     const { style, animation } = useStyleStore.getState();
+    setApproxAnim(APPROXIMATE_ANIMATIONS.has(animation.type));
 
     exportVideo(filePath, subtitles, style, animation, outputPath, (p) => {
       if (alive.current) setProgress(p);
@@ -127,6 +132,11 @@ export default function VideoExportModal({ outputPath, onClose }: Props) {
           <span style={f(400, 10, "body", { color: "var(--c-muted)", lineHeight: 1.5 })}>
             {t("toolbar:videoExportFontNote")}
           </span>
+          {approxAnim && (
+            <span style={f(400, 10, "body", { color: "var(--c-muted)", lineHeight: 1.5 })}>
+              {t("toolbar:animationPreviewOnly")}
+            </span>
+          )}
         </div>
         <div style={{ display: "flex", justifyContent: "flex-end", padding: "14px 18px", borderTop: "1px solid var(--c-border)" }}>
           <button

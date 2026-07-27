@@ -87,6 +87,7 @@ function SubtitleRow({
   useEffect(() => setEditingText(subtitle.text), [subtitle.text]);
 
   const hasWords = subtitle.words && subtitle.words.length > 0;
+  const isEmpty = !hasWords && subtitle.text.trim() === "";
 
   const commit = () => {
     const trimmed = editingText.trim();
@@ -242,7 +243,10 @@ function SubtitleRow({
         <div
           onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}
           data-tip={t("editor:doubleClickToEdit")}
-          style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 3 }}
+          // minHeight keeps the double-click edit target hittable even when the
+          // segment is empty (allowed state) — otherwise a blank <p> collapses
+          // to zero height and editing becomes unreachable.
+          style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 3, minHeight: 20 }}
         >
           {hasWords ? (
             <WordChips
@@ -255,6 +259,10 @@ function SubtitleRow({
               onWordPointerDown={handleWordPointerDown}
               onMoveWordsHere={onMoveWordsHere}
             />
+          ) : isEmpty ? (
+            <p style={f(400, 11, "body", { color: "var(--c-muted)", fontStyle: "italic", lineHeight: 1.4, margin: 0 })}>
+              {t("editor:emptySegment")}
+            </p>
           ) : (
             <p style={f(400, 11, "body", { color: "var(--c-text2)", lineHeight: 1.4, margin: 0 })}>{subtitle.text}</p>
           )}
