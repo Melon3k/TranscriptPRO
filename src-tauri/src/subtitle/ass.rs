@@ -1,6 +1,28 @@
 use super::style::{ass_font_name, CaptionAnimation, CaptionStyle};
 use super::types::Subtitle;
 use std::path::Path;
+use std::sync::OnceLock;
+
+/// Process-wide system font database, enumerated ONCE on first use and shared by
+/// `resolve_font_metrics`, the burn-in's `copy_system_family_faces`, and
+/// `export_ass`. Loading the system fonts is a tens-to-hundreds-of-ms scan of
+/// hundreds of faces; doing it per call (previously twice per export) needlessly
+/// blocked the runtime. Font files don't change within a session — the same
+/// assumption `list_system_fonts` / the FontPicker already make.
+///
+/// This caches which font FILES exist at first use; it deliberately does NOT
+/// assert a file still exists on disk. Callers that must be truthful about
+/// whether a face was actually embedded (the burn's "system" vs "substituted"
+/// tag) re-read the file by path, so a font uninstalled mid-session degrades to
+/// "substituted" there regardless of this cache — the honesty invariant holds.
+pub fn system_fontdb() -> &'static fontdb::Database {
+    static DB: OnceLock<fontdb::Database> = OnceLock::new();
+    DB.get_or_init(|| {
+        let mut db = fontdb::Database::new();
+        db.load_system_fonts();
+        db
+    })
+}
 
 // Reference canvas — matches the Player overlay, which scales fontSize/1080
 // (Player.tsx). All CaptionStyle pixel values are defined at this resolution.
@@ -58,10 +80,9 @@ pub fn resolve_font_metrics(style: &CaptionStyle, bundled_dir: Option<&Path>) ->
         }
     }
 
-    // System family: locate the installed face via fontdb (the same enumeration
-    // the picker used), matched on family + weight.
-    let mut db = fontdb::Database::new();
-    db.load_system_fonts();
+    // System family: locate the installed face via the shared process-wide
+    // fontdb (the same enumeration the picker used), matched on family + weight.
+    let db = system_fontdb();
     let weight = if style.bold {
         fontdb::Weight::BOLD
     } else {
@@ -85,6 +106,12 @@ pub fn resolve_font_metrics(style: &CaptionStyle, bundled_dir: Option<&Path>) ->
     }
 }
 
+/// Metrics-free convenience wrapper (rough background sizing). Since H6 both the
+/// `.ass` export and the MP4 burn resolve real metrics and call
+/// `write_ass_with_metrics` directly, so this now has no non-test caller; it's
+/// retained as the documented rough-fallback entry point and is exercised by the
+/// unit / burn-smoke tests.
+#[allow(dead_code)]
 pub fn write_ass(subtitles: &[Subtitle], style: &CaptionStyle, animation: &CaptionAnimation) -> String {
     write_ass_with_metrics(subtitles, style, animation, None)
 }
@@ -2753,6 +2780,49 @@ mod tests {
         // Descenders push the ink below the baseline.
         let (_, desc_desc) = m.ink_extents("gjy", fs);
         assert!(desc_desc > caps_desc, "descenders extend ink below the baseline");
+    }
+
+    #[test]
+    fn test_export_ass_uses_measured_wrapping_like_burn() {
+        // H6: export_ass now serializes with resolved font metrics — the SAME
+        // path the MP4 burn-in uses — so the exported .ass wraps and sizes its
+        // background pill identically to the burned video. Previously export_ass
+        // called write_ass (Measurer::Rough, ~0.5 em/char) while the burn
+        // measured real advances, so a background cue diverged (different wrap
+        // points / pill coords in the file vs on screen). This asserts the
+        // measured path is what the export now emits AND that it genuinely
+        // differs from the old rough path (else the fix would be a no-op).
+        let style = CaptionStyle {
+            background: true,
+            font_id: "Outfit".to_string(),
+            ..CaptionStyle::default()
+        };
+        let fonts = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fonts");
+        let metrics = resolve_font_metrics(&style, Some(&fonts));
+        assert!(metrics.is_some(), "bundled Outfit metrics must resolve");
+
+        let subs = vec![make_sub(
+            1,
+            0,
+            4000,
+            "The quick brown fox jumps over the lazy dog while narrating a long caption",
+        )];
+        let anim = CaptionAnimation::default();
+
+        // What export_ass (and export_video) now emit — measured wrapping/pill.
+        let measured = write_ass_with_metrics(&subs, &style, &anim, metrics.as_ref());
+        // What export_ass USED to emit — the rough fallback (write_ass = None).
+        let rough = write_ass(&subs, &style, &anim);
+        assert_ne!(
+            measured, rough,
+            "measured serialization must differ from the rough fallback for a background cue \
+             (else H6 would be a no-op)"
+        );
+
+        // Deterministic: identical input ⇒ byte-identical output (the shared
+        // fontdb cache introduces no run-to-run drift).
+        let measured2 = write_ass_with_metrics(&subs, &style, &anim, metrics.as_ref());
+        assert_eq!(measured, measured2, "measured serialization must be deterministic");
     }
 
     #[test]

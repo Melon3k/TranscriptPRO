@@ -7,6 +7,7 @@ import { useSettingsStore } from "../../stores/settingsStore";
 import { SubtitleVersion, VersionAction } from "../../types/version";
 import { Subtitle } from "../../types/subtitle";
 import { diffSubtitles } from "../../lib/diff";
+import { confirmDiscardIfDirty } from "../../lib/unsaved-guard";
 import { COLORS, f, FONTS } from "../../lib/ui";
 
 function actionIcon(action: VersionAction) {
@@ -31,7 +32,11 @@ export default function HistoryPanel() {
   const { subtitles, setSubtitles, clearOriginalSubtitles } = useSubtitleStore();
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const handleRestore = (id: string) => {
+  const handleRestore = async (id: string) => {
+    // Restoring replaces the working copy — same data-loss guard as opening a
+    // file. If confirmed, keep the existing behaviour (the undo stack still
+    // holds the pre-restore state for this session).
+    if (!(await confirmDiscardIfDirty())) return;
     clearOriginalSubtitles();
     restoreVersion(id, setSubtitles);
   };

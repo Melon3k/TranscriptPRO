@@ -13,5 +13,7 @@
   "unsupportedFileFormat": "Unsupported format: {{exts}}. Drop a video/audio file or .srt.",
   "unsavedTitle": "Unsaved changes",
   "unsavedQuit": "You have unsaved changes that will be lost. Close anyway?",
-  "unsavedUpdate": "You have unsaved changes that will be lost when the app restarts. Install the update anyway?"
+  "unsavedUpdate": "You have unsaved changes that will be lost when the app restarts. Install the update anyway?",
+  "unsavedDiscard": "You have unsaved changes that will be lost. Open the new document anyway?",
+  "autosaveFailed": "Couldn't save to version history — your changes are kept in memory but weren't written to disk."
 }

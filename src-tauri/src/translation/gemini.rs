@@ -176,7 +176,10 @@ async fn translate_chunk(
                 return Err(AppError::TranslationApiError(format!(
                     "Gemini rate limit exceeded after {} attempts. \
                      Check your billing at https://ai.google.dev/gemini-api/docs/rate-limits\n{}",
-                    MAX_RETRIES, body_text
+                    MAX_RETRIES,
+                    crate::translation::redact_secrets(crate::translation::truncate_chars(
+                        &body_text, 200
+                    ))
                 )));
             }
 
@@ -202,7 +205,10 @@ async fn translate_chunk(
             let body_text = response.text().await.unwrap_or_default();
             return Err(AppError::TranslationApiError(format!(
                 "Gemini API error {}: {}",
-                status, body_text
+                status,
+                crate::translation::redact_secrets(crate::translation::truncate_chars(
+                    &body_text, 200
+                ))
             )));
         }
 

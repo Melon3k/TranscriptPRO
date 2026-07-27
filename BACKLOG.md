@@ -2,6 +2,54 @@
 
 Deferred items and ideas, ordered by priority (impact × effort).
 
+## 2026-07-27 — AI review delta pass (PR #30, shipped in v2.0.0)
+
+4-reviewer AI review of the delta since PR #18 (video export, styling/animations,
+local model, ASS/VTT, new Player): 2 CRITICAL, 21 HIGH, 30 MEDIUM, 18 LOW.
+The release gate + a proxy feature found during runtime testing were fixed and
+verified (tsc clean · vitest 121/121 · cargo test 107/107 · manual runtime pass).
+
+**Done (in v2.0.0):** C1 burn-in can't overwrite the source video; C2 unsaved-changes
+guard on open/recent/drop/restore; H1 ASS/VTT no longer mark saved; H2 reliable
+history autosave (dirty only cleared after a confirmed write); H4 startup cleanup of
+`tpro_burn_*`/`tpro_proxy_*`; H5 video-export re-entrancy guard (no zombie ffmpeg);
+H6/REL-12 `export_ass` uses real font metrics like the burn (shared `OnceLock` fontdb,
+`spawn_blocking`); H7 `<video>` error handling; H8 empty-segment placeholder; H9
+`colorShift` uses real text colour; H10 overlay auto-on in Style; H11 MP4 export runs
+the inverted-timing/animation warnings; H12 API-key redaction + non-auto-dismiss error
+banners; H13 local-model status retry; H14 removed unused shell/fs webview permissions.
+**New feature:** media-preview proxy (WKWebView can't render 4K H.264 + 90° rotation —
+`preview.rs` transcodes a 720p rotation-baked proxy). Plus: opening a new file clears the
+old transcription immediately.
+
+**Still open — deferred from this review (not blocking v2.0.0):**
+
+- **Security (MEDIUM/LOW):** `extract_audio` input not validated + no `-protocol_whitelist`
+  (SSRF surface, LOW on desktop); CSP `connect-src` still lists dead DeepL/Google domains;
+  llama-server port-identity check before sending the bearer token; ASS brace-escape edge
+  (`\{`) and speaker-prefix `\n` sanitization; model-download hard size cap before SHA;
+  `keys.enc.json` mode 0600 on Unix. *(Web-app variant cancelled → the "web-app only" SEC
+  risks are now theoretical.)*
+- **Performance (measure first):** virtualize the subtitle list (still P3 below — reconfirmed
+  for 2h+ transcripts; blocked on drag & drop + auto-scroll rework); incremental version
+  history (currently 50 full snapshots re-serialized per autosave → up to ~65 MB); `diff.ts`
+  `Int32Array` + trim; stream WAV into `Vec<f32>` (avoid ~230 MB peak); cap `decode`-animation
+  ASS events (513k lines on 1500 cue); per-field zustand selectors (4Hz tick re-renders the
+  tree); split Player overlay from transport (60Hz); translation resume (don't re-pay for
+  already-translated chunks); local-model batching (`-np`, trade-off — see below).
+- **Reliability/UX (MEDIUM):** retry/backoff for Claude (429/529); confirm/auto-snapshot before
+  version restore; don't overwrite an in-progress edit when a background op finishes; cleanup
+  children on updater `relaunch()`; cancelled-translation shows a "cancelled X/Y" label not a
+  green success; quarantine a corrupt history file; code-signing/notarization (release infra).
+- **Product (MEDIUM):** surface translation cost/"paid API" in the UI (TERMS already discloses
+  it); MP4 export ETA + optional background mode; preserve word-timings on a typo edit (don't
+  re-tokenize when the word count is unchanged); CompareView should pair by `id`, not index.
+- **Architectural decisions (pick before building further):** (1) a canonical project format —
+  today `words[]`/`speaker`/style survive only in version history; (2) single owner/definition
+  of `dirty`; (3) preview==export parity — there are 3 measurement paths (Player CSS, `export_ass`
+  Rough was fixed to real metrics, burn); (4) `PlayResX/Y` is hard-coded 1920×1080 — revisit for
+  vertical/other aspect ratios (the proxy fixed *playback*, not any subtitle-scaling mismatch).
+
 Done in the 2026-07-12 pass (branch `claude/project-backlog-review-b93e6c`):
 `[Speaker N]` round-trip fix, API keys → OS keychain, LibreTranslate provider
 removed entirely (public server went fully paid), **local translation provider

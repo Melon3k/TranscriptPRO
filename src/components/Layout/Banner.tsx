@@ -4,15 +4,18 @@ import { useNotifyStore } from "../../stores/notifyStore";
 import { COLORS, f } from "../../lib/ui";
 
 /**
- * Transient top banner (success / error / info), driven by notifyStore. Auto-dismisses
- * after 4s; the ✕ dismisses immediately. Mirrors the design's banner strip.
+ * Transient top banner (success / error / info), driven by notifyStore. Success
+ * and info auto-dismiss after 4s; errors STAY until the ✕ is clicked so a
+ * failure after a long-running job can't scroll past unseen. Mirrors the
+ * design's banner strip.
  */
 export default function Banner() {
   const banner = useNotifyStore((s) => s.banner);
   const dismiss = useNotifyStore((s) => s.dismiss);
 
   useEffect(() => {
-    if (!banner) return;
+    // Errors are sticky (manual dismiss only) — don't schedule auto-dismiss.
+    if (!banner || banner.kind === "error") return;
     const id = window.setTimeout(dismiss, 4000);
     return () => window.clearTimeout(id);
   }, [banner, dismiss]);

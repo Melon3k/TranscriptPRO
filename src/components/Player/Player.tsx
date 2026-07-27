@@ -1,14 +1,16 @@
 import { useRef, useEffect, useCallback, useState } from "react";
-import { Play, Pause, SkipBack, SkipForward, Film, Captions, CaptionsOff, Move } from "lucide-react";
+import { Play, Pause, SkipBack, SkipForward, Film, Captions, CaptionsOff, Move, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { preparePreview, cancelPreview } from "../../lib/tauri-commands";
 import { usePlayerStore } from "../../stores/playerStore";
 import { useSubtitleStore } from "../../stores/subtitleStore";
 import { useStyleStore } from "../../stores/styleStore";
+import { useNotifyStore } from "../../stores/notifyStore";
 import { formatDuration } from "../../lib/time-format";
-import { captionBoxCss, captionTextCss, hexToCssColor, pointerToBoxPlacement, pointerToWidthPct } from "../../lib/caption-style";
+import { captionBoxCss, captionTextCss, colorShiftVars, hexToCssColor, pointerToBoxPlacement, pointerToWidthPct } from "../../lib/caption-style";
 import { karaokeSegments } from "../../lib/caption-animation";
-import { COLORS, FONTS } from "../../lib/ui";
+import { COLORS, FONTS, f } from "../../lib/ui";
 import type {
   AnimationGranularity,
   CaptionAnimation,
@@ -21,14 +23,17 @@ import type { Subtitle } from "../../types/subtitle";
  * (toggled from the corner button, only when subtitles exist), and the
  * transport controls.
  */
-export default function Player() {
+export default function Player({ autoShowSubs = false }: { autoShowSubs?: boolean } = {}) {
   const { t } = useTranslation(["player"]);
-  const { filePath, currentTimeMs, duration, isPlaying, setCurrentTimeMs, setDuration, setIsPlaying } =
-    usePlayerStore();
+  const {
+    filePath, currentTimeMs, duration, isPlaying, setCurrentTimeMs, setDuration, setIsPlaying,
+    previewPath, previewLoading, previewPct, setPreviewPath, setPreviewLoading, setPreviewPct,
+  } = usePlayerStore();
   const subtitles = useSubtitleStore((s) => s.subtitles);
   const style = useStyleStore((s) => s.style);
   const animation = useStyleStore((s) => s.animation);
   const setStyle = useStyleStore((s) => s.setStyle);
+  const notify = useNotifyStore((s) => s.notify);
   const [showSubs, setShowSubs] = useState(false);
   // Smoothed playhead for the caption overlay ONLY. The media element's
   // `timeupdate` fires ~4Hz on WKWebView, which makes the playhead-driven
@@ -86,6 +91,34 @@ export default function Player() {
     }
   }, [currentTimeMs]);
 
+  // Prepare a lightweight display proxy whenever the source changes: WKWebView
+  // freezes on heavy 4K / rotated video. filePath stays the original (used by
+  // transcription + burn-in); we only swap what the <video> plays. A backend
+  // failure falls back to the original rather than blocking playback.
+  useEffect(() => {
+    if (!filePath) return;
+    let cancelled = false;
+    void cancelPreview().catch(() => {}); // drop any in-flight transcode first
+    setPreviewLoading(true);
+    setPreviewPath(null);
+    setPreviewPct(0);
+    preparePreview(filePath, (pct) => { if (!cancelled) setPreviewPct(pct); })
+      .then((info) => {
+        if (cancelled) return;
+        setPreviewPath(info.previewPath);
+        setPreviewLoading(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setPreviewLoading(false);
+        setPreviewPath(null);
+      });
+    return () => {
+      cancelled = true;
+      void cancelPreview().catch(() => {});
+    };
+  }, [filePath, setPreviewLoading, setPreviewPath, setPreviewPct]);
+
   // When subtitles disappear the corner toggles unmount, so exit positioning
   // (and hide the overlay) — otherwise the sample box stays on screen with no
   // control to dismiss it.
@@ -95,6 +128,14 @@ export default function Player() {
       setShowSubs(false);
     }
   }, [hasSubtitles]);
+
+  // The Style workspace's whole point is the overlay, so reveal it on entry
+  // (once there are cues to show). Only forces it ON — the CC toggle can still
+  // hide it afterwards, and other modes keep the overlay off so it never covers
+  // the video. Fires on mode/subtitle changes only, so no render-loop.
+  useEffect(() => {
+    if (autoShowSubs && hasSubtitles) setShowSubs(true);
+  }, [autoShowSubs, hasSubtitles]);
 
   const handleTimeUpdate = useCallback(() => {
     const el = mediaRef.current;
@@ -110,12 +151,15 @@ export default function Player() {
     let raf = 0;
     const tick = () => {
       const el = mediaRef.current;
-      if (el) setSmoothMs(el.currentTime * 1000);
+      // Bail if the element is gone or not actually playing (e.g. play() was
+      // rejected for an undecodable format) so the loop can't spin forever.
+      if (!el || el.paused || el.ended) { setIsPlaying(false); return; }
+      setSmoothMs(el.currentTime * 1000);
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [isPlaying]);
+  }, [isPlaying, setIsPlaying]);
 
   const handleLoadedMetadata = useCallback(() => {
     const el = mediaRef.current;
@@ -126,8 +170,13 @@ export default function Player() {
   const togglePlay = () => {
     const el = mediaRef.current;
     if (!el || !filePath) return;
-    if (el.paused) { el.play(); setIsPlaying(true); }
-    else { el.pause(); setIsPlaying(false); }
+    if (el.paused) {
+      // play() rejects when WKWebView can't decode the container (e.g. mkv/avi,
+      // which we keep for transcription only) — don't leave isPlaying stuck on.
+      el.play()
+        .then(() => setIsPlaying(true))
+        .catch(() => { setIsPlaying(false); notify("error", t("player:previewUnavailable")); });
+    } else { el.pause(); setIsPlaying(false); }
   };
 
   const skip = (deltaMs: number) => {
@@ -146,7 +195,14 @@ export default function Player() {
   };
 
   const progressPercent = duration > 0 ? (currentTimeMs / 1000 / duration) * 100 : 0;
-  const mediaSrc = filePath ? convertFileSrc(filePath) : undefined;
+  // While the proxy transcodes, load nothing (avoids a flash of the raw 4K/
+  // rotated frame WKWebView renders wrong); after, play the proxy or, if none
+  // was needed / it failed, the original.
+  const mediaSrc = previewLoading
+    ? undefined
+    : filePath
+      ? convertFileSrc(previewPath ?? filePath)
+      : undefined;
 
   // Overlay uses the smooth clock while playing; the store value (4Hz, fresh on
   // seek/pause) is authoritative otherwise. Both agree to within one frame.
@@ -251,6 +307,9 @@ export default function Player() {
             onTimeUpdate={handleTimeUpdate}
             onLoadedMetadata={handleLoadedMetadata}
             onEnded={() => setIsPlaying(false)}
+            // Undecodable container (mkv/avi/webm on WKWebView) → black stage.
+            // Surface it instead of failing silently; transcription is unaffected.
+            onError={() => { setIsPlaying(false); notify("error", t("player:previewUnavailable")); }}
             preload="metadata"
             style={{ maxWidth: "100%", maxHeight: "100%", background: "#000" }}
           />
@@ -266,6 +325,29 @@ export default function Player() {
             />
             <Film size={60} color="#1c2431" style={{ position: "relative" }} />
           </>
+        )}
+
+        {/* Proxy transcode overlay — covers the stage so the raw 4K frame never
+            flashes through while ffmpeg builds the display proxy. */}
+        {previewLoading && (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              zIndex: 5,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 10,
+              background: "rgba(8,12,18,.72)",
+            }}
+          >
+            <Loader2 size={26} color={COLORS.blue} style={{ animation: "spin 1s linear infinite" }} />
+            <span style={f(600, 12, "body", { color: "#fff" })}>
+              {t("player:generatingPreview", { pct: previewPct })}
+            </span>
+          </div>
         )}
 
         {/* Subtitle overlay — only rendered while enabled and a cue is active.
@@ -537,11 +619,9 @@ function AnimatedCaption({
         style={{
           ...base,
           animation: `${keyframe} ${animation.durationMs}ms ease-out both`,
-          // colorShift sweeps toward the chosen accent colour (read by the
-          // keyframe as --kf-accent), then settles back to textColor.
-          ...(type === "colorShift"
-            ? ({ "--kf-accent": hexToCssColor(animation.highlightColor) } as React.CSSProperties)
-            : {}),
+          // colorShift sweeps toward --kf-accent then settles back to --kf-base
+          // (textColor); both vars must be set here (see colorShiftVars).
+          ...colorShiftVars(style, animation),
         }}
       >
         {sub.text}

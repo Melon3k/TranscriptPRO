@@ -17,6 +17,7 @@ import { useRecentFilesStore, type RecentFile } from "../../stores/recentFilesSt
 import { useOnboardingStore } from "../../stores/onboardingStore";
 import { useNotifyStore } from "../../stores/notifyStore";
 import { routeFile, classifyFile, type FileRoutingCallbacks } from "../../lib/file-routing";
+import { confirmDiscardIfDirty } from "../../lib/unsaved-guard";
 import { useFileDrop } from "../../hooks/useFileDrop";
 import type { AppMode } from "./modes";
 import TitleBar from "./TitleBar";
@@ -92,6 +93,11 @@ export default function MainLayout() {
 
   const openPath = useCallback(
     async (path: string) => {
+      // Replacing the current document — one confirm covers every entry point
+      // (open buttons, recent, drop) since they all funnel through here. Must
+      // resolve BEFORE routeFile touches the media-extraction guard, and multi-
+      // drop already picks a single path upstream, so it's exactly one dialog.
+      if (!(await confirmDiscardIfDirty())) return;
       const kind = classifyFile(path);
       await routeFile(path, routeCallbacks);
       // Media routes into transcribe via callbacks; SRT lands us on the segment
@@ -228,7 +234,7 @@ export default function MainLayout() {
             <SubtitleEditor />
 
             <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
-              {showCompare ? <CompareView /> : <Player />}
+              {showCompare ? <CompareView /> : <Player autoShowSubs={mode === "style"} />}
             </div>
 
             <div

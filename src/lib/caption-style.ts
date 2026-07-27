@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import type { CaptionBoxPosition, CaptionStyle } from "../types/captionStyle";
+import type { CaptionAnimation, CaptionBoxPosition, CaptionStyle } from "../types/captionStyle";
 
 // The three bundled quick-picks (guaranteed-faithful defaults + offline
 // fallback); the picker lists these under a "Bundled" heading, the full
@@ -233,6 +233,22 @@ export function sanitizeCaptionStyle(persisted: unknown): CaptionStyle {
   }
 
   return style;
+}
+
+/** CSS custom properties the `captionColorShift` keyframe reads: the accent it
+ *  sweeps toward (--kf-accent) and the base colour it settles back to
+ *  (--kf-base). --kf-base MUST carry textColor explicitly — the keyframe can't
+ *  use `inherit`, which resolves to the UI theme colour with fill:both. Returns
+ *  {} for other animations so callers can spread unconditionally. */
+export function colorShiftVars(
+  style: CaptionStyle,
+  animation: CaptionAnimation,
+): CSSProperties {
+  if (animation.type !== "colorShift") return {};
+  return {
+    "--kf-accent": hexToCssColor(animation.highlightColor),
+    "--kf-base": hexToCssColor(style.textColor),
+  } as CSSProperties;
 }
 
 /** Round to 4 decimals so derived style strings stay stable across renders. */

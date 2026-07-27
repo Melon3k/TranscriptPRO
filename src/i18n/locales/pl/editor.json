@@ -21,6 +21,7 @@
   },
   "timestampHint": "Kliknij aby przewinąć, dwuklik aby edytować",
   "invertedTime": "Czas końca nie jest późniejszy niż czas początku",
+  "emptySegment": "(pusty segment)",
   "insertHere": "Wstaw tutaj (pozycja {{index}})",
   "comparison": {
     "original": "Oryginał",

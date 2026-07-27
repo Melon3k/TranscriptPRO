@@ -50,6 +50,9 @@
     "downloading": "Pobieranie modelu… {{percent}}%",
     "needsSource": "Model lokalny wymaga wybrania języka źródłowego (brak auto-wykrywania)",
     "gemmaConsent": "Model offline to TranslateGemma od Google. Pobierając go, akceptujesz warunki Gemma Terms of Use (ai.google.dev/gemma/terms).",
-    "gemmaNotice": "Gemma jest udostępniana na warunkach Gemma Terms of Use: ai.google.dev/gemma/terms"
+    "gemmaNotice": "Gemma jest udostępniana na warunkach Gemma Terms of Use: ai.google.dev/gemma/terms",
+    "checking": "Sprawdzanie modelu lokalnego…",
+    "statusError": "Nie udało się sprawdzić stanu modelu lokalnego.",
+    "retry": "Spróbuj ponownie"
   }
 }

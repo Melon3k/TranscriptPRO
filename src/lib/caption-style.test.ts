@@ -1,11 +1,17 @@
 import { describe, it, expect } from "vitest";
-import type { CaptionStyle, CaptionBoxPosition } from "../types/captionStyle";
+import type {
+  CaptionAnimation,
+  CaptionAnimationType,
+  CaptionStyle,
+  CaptionBoxPosition,
+} from "../types/captionStyle";
 import {
   BOX_GRID,
   DEFAULT_CAPTION_STYLE,
   STYLE_LIMITS,
   captionBoxCss,
   captionTextCss,
+  colorShiftVars,
   hexToCssColor,
   normalizeHexColor,
   parseHexColor,
@@ -272,6 +278,33 @@ describe("hexToCssColor", () => {
   it("falls back to opaque black on invalid input", () => {
     expect(hexToCssColor("garbage")).toBe("rgba(0,0,0,1)");
     expect(hexToCssColor("")).toBe("rgba(0,0,0,1)");
+  });
+});
+
+// ── colorShiftVars ───────────────────────────────────────────────────────────
+
+describe("colorShiftVars", () => {
+  const anim = (type: CaptionAnimationType): CaptionAnimation => ({
+    type,
+    durationMs: 400,
+    highlightColor: "#22D3EEFF",
+    granularity: "word",
+    direction: "in",
+    staggerMs: 40,
+    karaokeHighlight: "text",
+  });
+
+  it("emits both the accent and the base (textColor) vars for colorShift", () => {
+    const vars = colorShiftVars(style({ textColor: "#FACC15FF" }), anim("colorShift")) as Record<string, string>;
+    // --kf-base carries textColor so the keyframe never falls back to `inherit`
+    // (which resolves to the UI theme colour with fill:both).
+    expect(vars["--kf-base"]).toBe("rgba(250,204,21,1)");
+    expect(vars["--kf-accent"]).toBe("rgba(34,211,238,1)");
+  });
+
+  it("returns nothing for other animation types", () => {
+    expect(colorShiftVars(DEFAULT_CAPTION_STYLE, anim("fade"))).toEqual({});
+    expect(colorShiftVars(DEFAULT_CAPTION_STYLE, anim("karaoke"))).toEqual({});
   });
 });
 
