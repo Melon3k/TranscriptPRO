@@ -121,7 +121,8 @@ async fn translate_chunk(
         let body = response.text().await.unwrap_or_default();
         return Err(AppError::TranslationApiError(format!(
             "Claude API error {}: {}",
-            status, body
+            status,
+            crate::translation::redact_secrets(crate::translation::truncate_chars(&body, 200))
         )));
     }
 
