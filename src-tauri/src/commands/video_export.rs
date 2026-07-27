@@ -2,12 +2,17 @@ use crate::logger;
 use crate::subtitle::style::{CaptionAnimation, CaptionStyle};
 use crate::subtitle::types::{AppError, Subtitle};
 use crate::VideoExport;
-use std::sync::atomic::Ordering;
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
 use uuid::Uuid;
+
+/// Basename of the temp .ass inside the per-export burn dir. Written by the prep
+/// phase and referenced bare (no path chars) in the `ass=` filtergraph.
+const ASS_NAME: &str = "subs.ass";
 
 /// RAII guard that recursively removes the per-export temp directory on EVERY
 /// exit path (success, error, cancel, panic). One shot covers the .ass AND the
@@ -17,6 +22,63 @@ impl Drop for TempBurnDir {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
     }
+}
+
+/// Serializes `export_video`. Two overlapping exports would race on the shared
+/// `VideoExport` slot: the 2nd resets `cancelled=false` (breaking the 1st's
+/// cancellation) and overwrites `state.child` (leaking the 1st ffmpeg child, so
+/// it can never be killed → a zombie that outlives the app). Mirrors the
+/// `TRANSCRIPTION_RUNNING` pattern in transcribe.rs — `compare_exchange` admits
+/// exactly one; the RAII guard clears the flag on every exit path (early return,
+/// error, panic, normal completion), so a retry after the first finishes works.
+static VIDEO_EXPORT_RUNNING: AtomicBool = AtomicBool::new(false);
+
+/// Monotonic id stamped on each export. The end-of-run `state.child.take()` only
+/// fires when the stored child still belongs to THIS generation, so a straggler
+/// can never reap a newer export's child handle.
+static VIDEO_EXPORT_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+struct VideoExportRunningGuard;
+
+impl VideoExportRunningGuard {
+    fn acquire() -> Result<Self, AppError> {
+        VIDEO_EXPORT_RUNNING
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .map(|_| VideoExportRunningGuard)
+            .map_err(|_| AppError::VideoExportFailed("export already in progress".into()))
+    }
+}
+
+impl Drop for VideoExportRunningGuard {
+    fn drop(&mut self) {
+        VIDEO_EXPORT_RUNNING.store(false, Ordering::SeqCst);
+    }
+}
+
+/// True iff `output` resolves to the same filesystem path as `video`.
+///
+/// `output` is the burn destination and typically does NOT exist yet, so we
+/// cannot `canonicalize` it directly; and on macOS `canonicalize` rewrites
+/// `/var` → `/private/var`, so a raw string compare is unsafe too. Instead we
+/// canonicalize `output`'s PARENT (which must already exist) and rejoin the file
+/// name, then compare against the fully-canonicalized `video`. A missing parent
+/// (or missing file name) is a validation error, never a panic.
+fn same_file(video: &Path, output: &Path) -> Result<bool, AppError> {
+    let video_canon = std::fs::canonicalize(video)
+        .map_err(|e| AppError::VideoExportFailed(format!("Cannot resolve video path: {e}")))?;
+    let parent = output
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .ok_or_else(|| {
+            AppError::VideoExportFailed("Output path has no parent directory".to_string())
+        })?;
+    let parent_canon = std::fs::canonicalize(parent).map_err(|e| {
+        AppError::VideoExportFailed(format!("Output directory does not exist: {e}"))
+    })?;
+    let file_name = output
+        .file_name()
+        .ok_or_else(|| AppError::VideoExportFailed("Output path has no file name".to_string()))?;
+    Ok(parent_canon.join(file_name) == video_canon)
 }
 
 /// Best-effort: copy EVERY installed face belonging to `family` into `dest` so
@@ -36,8 +98,9 @@ fn copy_system_family_faces(family: &str, dest: &std::path::Path) -> bool {
     if target.is_empty() {
         return false;
     }
-    let mut db = fontdb::Database::new();
-    db.load_system_fonts();
+    // Shared process-wide fontdb (loaded once) instead of a per-call
+    // load_system_fonts — the same enumeration resolve_font_metrics uses.
+    let db = crate::subtitle::ass::system_fontdb();
     let mut copied = false;
     let mut seen: std::collections::HashSet<std::path::PathBuf> = std::collections::HashSet::new();
     for face in db.faces() {
@@ -134,6 +197,14 @@ pub async fn export_video(
     output_path: String,
     on_progress: Channel<f32>,
 ) -> Result<String, AppError> {
+    // 0. Re-entrancy guard: admit exactly one export. A concurrent 2nd call
+    //    would reset `cancelled` and clobber `state.child`, orphaning the 1st
+    //    ffmpeg child. The RAII guard frees the flag on EVERY exit path below.
+    let _run_guard = VideoExportRunningGuard::acquire()?;
+    // Stamp this run so the end-of-run `state.child.take()` can't reap a newer
+    // export's child (belt-and-suspenders alongside the running guard).
+    let generation = VIDEO_EXPORT_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+
     // 1. Validate inputs up front.
     if subtitles.is_empty() {
         return Err(AppError::VideoExportFailed("no subtitles".to_string()));
@@ -143,6 +214,14 @@ pub async fn export_video(
             "Video file not found: {}",
             video_path
         )));
+    }
+    // Refuse to overwrite the source video with the burned output. The final
+    // step is `fs::rename(tmp_out, output_path)`; without this guard,
+    // output_path == video_path would clobber the user's original irreversibly.
+    if same_file(Path::new(&video_path), Path::new(&output_path))? {
+        return Err(AppError::VideoExportFailed(
+            "Output file cannot be the source video file".to_string(),
+        ));
     }
     state.cancelled.store(false, Ordering::Relaxed);
 
@@ -161,84 +240,6 @@ pub async fn export_video(
     // other family is a system font libass must resolve via fontconfig by name.
     let bundled_family = matches!(style.font_id.trim(), "Outfit" | "Inter" | "JetBrains Mono");
 
-    // 2. Serialize ASS via the EXISTING serializer (no duplicated ASS logic).
-    //    Resolve the caption font so the text-hugging background pill is sized
-    //    to the real glyph metrics; degrade to None (rough estimate) if it can't
-    //    be resolved. Only actually measured when style.background is on.
-    let bundled_fonts_dir = app.path().resource_dir().ok().map(|d| d.join("fonts"));
-    let font_metrics = crate::subtitle::ass::resolve_font_metrics(&style, bundled_fonts_dir.as_deref());
-    let ass = crate::subtitle::ass::write_ass_with_metrics(
-        &subtitles,
-        &style,
-        &animation,
-        font_metrics.as_ref(),
-    );
-
-    // 3. Per-export temp subdir holding both the .ass and the copied font
-    //    TTFs; the RAII guard removes the whole dir on every exit path.
-    let burn_dir = std::env::temp_dir().join(format!("tpro_burn_{}", Uuid::new_v4().simple()));
-    std::fs::create_dir_all(&burn_dir).map_err(|e| {
-        AppError::VideoExportFailed(format!("Failed to create temp export dir: {e}"))
-    })?;
-    let _burn_guard = TempBurnDir(burn_dir.clone());
-
-    let ass_name = "subs.ass";
-    let ass_path = burn_dir.join(ass_name);
-    std::fs::write(&ass_path, ass)
-        .map_err(|e| AppError::VideoExportFailed(format!("Failed to write temp subtitles: {e}")))?;
-
-    // 3b. For a BUNDLED family, copy the bundled Regular+Bold TTFs next to the
-    //     .ass so libass can match them by internal family name via
-    //     `fontsdir=.`. Best-effort: any failure degrades to libass system
-    //     substitution, never fatal. Filenames are irrelevant to libass (it
-    //     matches by name-table family), so originals are preserved as-is.
-    //     For a SYSTEM family the installed face(s) are located via fontdb and
-    //     copied instead, so libass matches by name from a dir we control.
-    let mut have_fonts = false;
-    if bundled_family {
-        if let Ok(res_dir) = app.path().resource_dir() {
-            if let Ok(entries) = std::fs::read_dir(res_dir.join("fonts")) {
-                for entry in entries.flatten() {
-                    let src = entry.path();
-                    let is_ttf = src
-                        .extension()
-                        .and_then(|e| e.to_str())
-                        .is_some_and(|e| e.eq_ignore_ascii_case("ttf"));
-                    if is_ttf {
-                        if let Some(name) = src.file_name() {
-                            if std::fs::copy(&src, burn_dir.join(name)).is_ok() {
-                                have_fonts = true;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        if !have_fonts {
-            logger::info(
-                &app,
-                "video",
-                "bundled caption fonts unavailable; libass will substitute",
-            );
-        }
-    } else {
-        // SYSTEM family: locate + embed the installed face(s) so libass matches
-        // the requested family by name (no fontconfig dependency). If nothing
-        // matches on disk, `have_fonts` stays false and the export is reported
-        // as "substituted" — never a false "system" match.
-        have_fonts = copy_system_family_faces(style.font_id.trim(), &burn_dir);
-        if !have_fonts {
-            logger::info(
-                &app,
-                "video",
-                format!(
-                    "requested system font '{}' not found on disk; libass will substitute",
-                    style.font_id.trim()
-                ),
-            );
-        }
-    }
-
     // 4. Encode to a sibling temp `.part` so an existing destination is
     //    untouched until success.
     let tmp_out = {
@@ -256,6 +257,110 @@ pub async fn export_video(
         .unwrap_or(0)
         .saturating_mul(1000);
 
+    // 2+3. Font resolution (fontdb scan), ASS serialization, temp-dir setup and
+    //    font copying are all SYNCHRONOUS fontdb / CPU / IO work — a scan of
+    //    hundreds of faces plus (for CJK families) copying hundreds of MB. Run
+    //    the whole phase on a blocking thread so the tokio executor is never
+    //    stalled (mirrors list_system_fonts in fonts.rs). resolve_font_metrics
+    //    and copy_system_family_faces now share ONE process-wide fontdb
+    //    (subtitle::ass::system_fontdb), so the system fonts are enumerated at
+    //    most once per process rather than twice per export.
+    let (_burn_guard, have_fonts) = {
+        let app_bg = app.clone();
+        tauri::async_runtime::spawn_blocking(move || -> Result<(TempBurnDir, bool), AppError> {
+            // Resolve the caption font so the text-hugging background pill is
+            // sized to real glyph metrics (degrades to a rough estimate if it
+            // can't resolve; only actually measured when style.background is on).
+            let bundled_fonts_dir = app_bg.path().resource_dir().ok().map(|d| d.join("fonts"));
+            let font_metrics =
+                crate::subtitle::ass::resolve_font_metrics(&style, bundled_fonts_dir.as_deref());
+            let ass = crate::subtitle::ass::write_ass_with_metrics(
+                &subtitles,
+                &style,
+                &animation,
+                font_metrics.as_ref(),
+            );
+
+            // Per-export temp subdir holding both the .ass and the copied font
+            // TTFs; the RAII guard removes the whole dir on every exit path.
+            let burn_dir =
+                std::env::temp_dir().join(format!("tpro_burn_{}", Uuid::new_v4().simple()));
+            std::fs::create_dir_all(&burn_dir).map_err(|e| {
+                AppError::VideoExportFailed(format!("Failed to create temp export dir: {e}"))
+            })?;
+            let burn_guard = TempBurnDir(burn_dir.clone());
+
+            let ass_path = burn_dir.join(ASS_NAME);
+            std::fs::write(&ass_path, ass).map_err(|e| {
+                AppError::VideoExportFailed(format!("Failed to write temp subtitles: {e}"))
+            })?;
+
+            // For a BUNDLED family, copy the bundled Regular+Bold TTFs next to
+            // the .ass so libass matches them by internal family name via
+            // `fontsdir=.`. For a SYSTEM family the installed face(s) are located
+            // via the shared fontdb and copied instead. Best-effort: any failure
+            // degrades to libass substitution ("substituted"), never fatal.
+            // Filenames are irrelevant to libass (it matches by name-table
+            // family), so originals are preserved as-is.
+            let mut have_fonts = false;
+            if bundled_family {
+                if let Ok(res_dir) = app_bg.path().resource_dir() {
+                    if let Ok(entries) = std::fs::read_dir(res_dir.join("fonts")) {
+                        for entry in entries.flatten() {
+                            let src = entry.path();
+                            let is_ttf = src
+                                .extension()
+                                .and_then(|e| e.to_str())
+                                .is_some_and(|e| e.eq_ignore_ascii_case("ttf"));
+                            if is_ttf {
+                                if let Some(name) = src.file_name() {
+                                    if std::fs::copy(&src, burn_dir.join(name)).is_ok() {
+                                        have_fonts = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if !have_fonts {
+                    logger::info(
+                        &app_bg,
+                        "video",
+                        "bundled caption fonts unavailable; libass will substitute",
+                    );
+                }
+            } else {
+                // SYSTEM family: locate + embed installed face(s) so libass
+                // matches by name. copy_system_family_faces re-reads each file
+                // from disk, so a font uninstalled mid-session yields false here
+                // ("substituted") even though the shared fontdb still lists it —
+                // the "system" vs "substituted" honesty invariant is preserved.
+                have_fonts = copy_system_family_faces(style.font_id.trim(), &burn_dir);
+                if !have_fonts {
+                    logger::info(
+                        &app_bg,
+                        "video",
+                        format!(
+                            "requested system font '{}' not found on disk; libass will substitute",
+                            style.font_id.trim()
+                        ),
+                    );
+                }
+            }
+            Ok((burn_guard, have_fonts))
+        })
+        .await
+        .map_err(|e| AppError::VideoExportFailed(format!("export prep task failed: {e}")))??
+    };
+    let burn_dir = _burn_guard.0.clone();
+
+    // H3(a): the prep phase (font scan + copy) can take a while; if the user hit
+    // Cancel during it, don't even start ffmpeg.
+    if state.cancelled.load(Ordering::Relaxed) {
+        logger::info(&app, "video", "Video export cancelled before encode start");
+        return Err(AppError::Cancelled);
+    }
+
     // 6. Spawn the bundled ffmpeg sidecar.
     let sidecar = app
         .shell()
@@ -270,9 +375,9 @@ pub async fn export_video(
     // path where nothing could be copied ("substituted"), letting libass
     // substitute a default face.
     let vf = if have_fonts {
-        format!("ass={}:fontsdir=.", ass_name)
+        format!("ass={}:fontsdir=.", ASS_NAME)
     } else {
-        format!("ass={}", ass_name)
+        format!("ass={}", ASS_NAME)
     };
     let tmp_out_str = tmp_out.to_string_lossy().to_string();
     let args: Vec<&str> = vec![
@@ -318,6 +423,18 @@ pub async fn export_video(
     // 7. Publish the child so cancel_video_export (or app shutdown) can kill it.
     if let Ok(mut guard) = state.child.lock() {
         *guard = Some(child);
+    }
+
+    // H3(b): close the cancel race — if Cancel fired between the pre-spawn check
+    // and publishing the child, kill it now instead of running the full encode.
+    if state.cancelled.load(Ordering::Relaxed) {
+        if let Ok(mut guard) = state.child.lock() {
+            if let Some(child) = guard.take() {
+                let _ = child.kill();
+            }
+        }
+        logger::info(&app, "video", "Video export cancelled");
+        return Err(AppError::Cancelled);
     }
 
     // Progress throttle — copied from download_to_temp in transcribe.rs.
@@ -381,9 +498,13 @@ pub async fn export_video(
         }
     }
 
-    // Release the stored child (cancel may already have taken it).
-    if let Ok(mut guard) = state.child.lock() {
-        let _ = guard.take();
+    // Release the stored child (cancel may already have taken it). Only reclaim
+    // it if no newer export has since superseded this generation, so a slow
+    // cleanup here never reaps another export's child handle.
+    if VIDEO_EXPORT_GENERATION.load(Ordering::SeqCst) == generation {
+        if let Ok(mut guard) = state.child.lock() {
+            let _ = guard.take();
+        }
     }
 
     // 8. Cancelled → discard the partial output, do NOT rename.
@@ -393,16 +514,18 @@ pub async fn export_video(
         return Err(AppError::Cancelled);
     }
 
-    // Non-zero exit → discard partial output, return stderr tail.
+    // Non-zero exit → discard partial output. The FULL stderr goes to the log;
+    // the UI banner gets only a short, secret-redacted summary (not 32 KB of
+    // raw stderr with full paths / metadata).
     if exit_code != Some(0) {
         let _ = std::fs::remove_file(&tmp_out);
-        let detail = if stderr.trim().is_empty() {
+        let full = if stderr.trim().is_empty() {
             format!("ffmpeg exited with code {exit_code:?}")
         } else {
             stderr.trim().to_string()
         };
-        logger::error(&app, "video", format!("ffmpeg failed: {detail}"));
-        return Err(AppError::VideoExportFailed(detail));
+        logger::error(&app, "video", format!("ffmpeg failed: {full}"));
+        return Err(AppError::VideoExportFailed(summarize_ffmpeg_stderr(&full)));
     }
 
     // Success: emit a final 1.0 (throttle may have swallowed it).
@@ -461,6 +584,29 @@ pub async fn cancel_video_export(
         logger::info(&app, "video", "Video export cancellation requested");
     }
     Ok(())
+}
+
+/// Condense ffmpeg's verbose stderr into a short, UI-safe message: prefer the
+/// last line mentioning an error, else the last ~300 chars. The FULL stderr is
+/// still written to the log (see the caller) — this only trims what crosses to
+/// the banner. Also redacts anything resembling a provider API key
+/// (defense-in-depth: ffmpeg stderr shouldn't carry one, but URLs/paths might).
+fn summarize_ffmpeg_stderr(stderr: &str) -> String {
+    let trimmed = stderr.trim();
+    let picked = trimmed
+        .lines()
+        .rev()
+        .find(|l| {
+            let ll = l.to_lowercase();
+            ll.contains("error") || ll.contains("invalid") || ll.contains("failed")
+        })
+        .map(|l| l.trim().to_string())
+        .unwrap_or_else(|| {
+            let n = trimmed.chars().count();
+            let start = n.saturating_sub(300);
+            trimmed.chars().skip(start).collect::<String>().trim().to_string()
+        });
+    crate::translation::redact_secrets(&picked)
 }
 
 /// Parse ffmpeg's `-progress pipe:1` key=value lines for the current output
@@ -568,6 +714,65 @@ mod tests {
     #[test]
     fn progress_end_detected_via_trim() {
         assert_eq!("progress=end".trim(), "progress=end");
+    }
+
+    #[test]
+    fn same_file_rejects_identical_path() {
+        let dir = std::env::temp_dir().join(format!("tpro_same_{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let video = dir.join("clip.mp4");
+        std::fs::write(&video, b"x").unwrap();
+
+        // video_path == output_path must be caught even though output "exists"
+        // here; the guard is about the destination equaling the source.
+        assert!(same_file(&video, &video).unwrap());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn same_file_accepts_distinct_paths_in_same_dir() {
+        let dir = std::env::temp_dir().join(format!("tpro_same_{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let video = dir.join("clip.mp4");
+        std::fs::write(&video, b"x").unwrap();
+        // The output need NOT exist yet — its parent dir does, which is all
+        // same_file requires.
+        let output = dir.join("out.mp4");
+
+        assert!(!same_file(&video, &output).unwrap());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn summarize_ffmpeg_prefers_error_line_and_redacts() {
+        let stderr = "frame= 10 fps=5 q=28.0 size=1kB time=00:00:00.40\n\
+[libx264 @ 0x7f] using cpu capabilities: ARMv8\n\
+leaked key AIzaSyA1234567890abcdefghijklmnopqrstuvwx in a path\n\
+Error: Invalid data found when processing input";
+        let s = summarize_ffmpeg_stderr(stderr);
+        assert_eq!(s, "Error: Invalid data found when processing input");
+        assert!(!s.contains("AIzaSy"));
+    }
+
+    #[test]
+    fn summarize_ffmpeg_redacts_key_in_fallback_tail() {
+        // No error/invalid/failed keyword → fall back to the tail, still redacted.
+        let stderr = "loading font AIzaSyA1234567890abcdefghijklmnopqrstuvwx done";
+        let s = summarize_ffmpeg_stderr(stderr);
+        assert!(!s.contains("AIzaSy"), "key must be redacted: {s}");
+    }
+
+    #[test]
+    fn same_file_errors_when_output_parent_missing() {
+        let dir = std::env::temp_dir().join(format!("tpro_same_{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let video = dir.join("clip.mp4");
+        std::fs::write(&video, b"x").unwrap();
+        // Parent directory does not exist → a clean validation error, not panic.
+        let output = dir.join("nope").join("out.mp4");
+
+        assert!(same_file(&video, &output).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

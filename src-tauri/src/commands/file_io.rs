@@ -1,6 +1,6 @@
 use crate::logger;
 use crate::subtitle::{
-    ass::write_ass,
+    ass::{resolve_font_metrics, write_ass_with_metrics},
     srt::{parse_srt, write_srt, write_word_srt, write_txt},
     style::{CaptionAnimation, CaptionStyle},
     types::{AppError, Subtitle},
@@ -139,12 +139,27 @@ pub async fn export_ass(
     style: CaptionStyle,
     animation: CaptionAnimation,
 ) -> Result<(), AppError> {
-    let content = write_ass(&subtitles, &style, &animation);
+    // Serialize with the SAME resolved font metrics the MP4 burn-in uses (H6):
+    // with style.background on, line wrapping depends on measured glyph advances,
+    // so a Rough estimate here would break lines at different points than the
+    // burned video (wide/CJK glyphs then overflow the frame). Font resolution is
+    // a blocking fontdb scan → run it off the async runtime (REL-12).
+    let seg_count = subtitles.len();
+    let content = {
+        let app_bg = app.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            let bundled_fonts_dir = app_bg.path().resource_dir().ok().map(|d| d.join("fonts"));
+            let metrics = resolve_font_metrics(&style, bundled_fonts_dir.as_deref());
+            write_ass_with_metrics(&subtitles, &style, &animation, metrics.as_ref())
+        })
+        .await
+        .map_err(|e| AppError::Other(format!("ASS serialization task failed: {e}")))?
+    };
     write_atomic(&path, &content)?;
     logger::info(
         &app,
         "file",
-        format!("Exported {} segments as ASS → {}", subtitles.len(), path),
+        format!("Exported {} segments as ASS → {}", seg_count, path),
     );
     Ok(())
 }
