@@ -9,5 +9,7 @@
   "exitEditPosition": "Zakończ pozycjonowanie",
   "positionSample": "Przykładowy napis",
   "resizeWidth": "Przeciągnij, aby zmienić szerokość",
-  "moveCaption": "Przeciągnij, aby przesunąć napis"
+  "moveCaption": "Przeciągnij, aby przesunąć napis",
+  "previewUnavailable": "Podgląd niedostępny dla tego formatu — transkrypcja nadal działa.",
+  "generatingPreview": "Generowanie podglądu… {{pct}}%"
 }

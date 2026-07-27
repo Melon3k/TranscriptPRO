@@ -61,7 +61,9 @@ export async function routeFile(
     // Ignore overlapping media opens while an extraction is already running.
     if (mediaExtractionInFlight) return true;
     mediaExtractionInFlight = true;
-    // A new project starts — the previous file's translation snapshot is stale.
+    // A new project starts — clear the previous file's segments and translation
+    // snapshot so the old transcription doesn't linger until the new one lands.
+    cb.setSubtitles([]);
     cb.clearTranslationState();
     cb.setFilePath(path);
     // Deriving/loading the version-history key must never block or abort the

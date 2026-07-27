@@ -9,5 +9,7 @@
   "exitEditPosition": "Done positioning",
   "positionSample": "Sample subtitle",
   "resizeWidth": "Drag to resize width",
-  "moveCaption": "Drag to move caption"
+  "moveCaption": "Drag to move caption",
+  "previewUnavailable": "Preview unavailable for this format — transcription still works.",
+  "generatingPreview": "Generating preview… {{pct}}%"
 }

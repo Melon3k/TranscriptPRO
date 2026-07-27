@@ -199,6 +199,39 @@ export async function cancelVideoExport(): Promise<void> {
   return invoke("cancel_video_export");
 }
 
+// ── Preview proxy (lightweight playback transcode) ───────────────────────────
+
+/** Result of probing/transcoding a media file for playback.
+ *  `previewPath` is the lightweight proxy to play instead of the original
+ *  (null when none is needed / on audio-only, in which case the caller plays
+ *  the original). `needsProxy` reflects the probe decision; width/height are
+ *  the source video dimensions. The ORIGINAL filePath is still used for
+ *  transcription and burn-in — the proxy is display-only. */
+export interface PreviewInfo {
+  previewPath: string | null;
+  needsProxy: boolean;
+  width: number;
+  height: number;
+}
+
+/**
+ * Ask the backend to prepare a display proxy for a media file (WKWebView can't
+ * render heavy 4K / rotated video). Progress is reported 0..100 over a Channel,
+ * mirroring exportVideo's pattern.
+ */
+export async function preparePreview(
+  inputPath: string,
+  onProgress?: (pct: number) => void,
+): Promise<PreviewInfo> {
+  const channel = new Channel<{ pct: number }>();
+  if (onProgress) channel.onmessage = (p) => onProgress(p.pct);
+  return invoke<PreviewInfo>("prepare_preview", { inputPath, onProgress: channel });
+}
+
+export async function cancelPreview(): Promise<void> {
+  return invoke("cancel_preview");
+}
+
 // ── Whisper model management ─────────────────────────────────────────────────
 
 export async function listModels(): Promise<WhisperModelInfo[]> {

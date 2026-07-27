@@ -19,6 +19,7 @@
   },
   "timestampHint": "Click to seek, double-click to edit",
   "invertedTime": "End time is not after start time",
+  "emptySegment": "(empty segment)",
   "insertHere": "Insert here (position {{index}})",
   "comparison": {
     "original": "Original",
